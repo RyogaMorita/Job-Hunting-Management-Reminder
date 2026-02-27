@@ -15,8 +15,13 @@ const TDU_BLUE = '#003366';
 const ACCENT = '#1a6bcc';
 
 const STATUS_OPTIONS = ['検討中', 'ES作成', 'ES提出済', '1次面接', '2次面接', '最終面接', '内定', '内定辞退', '不合格'];
+const STATUS_PRIORITY: Record<string, number> = {
+  '内定': 6, '最終面接': 5, '2次面接': 4, '1次面接': 3,
+  'ES提出済': 2, 'ES作成': 1, '検討中': 0, '内定辞退': -1, '不合格': -2,
+};
+const STATUS_SORT_ORDER = ['内定', '最終面接', '2次面接', '1次面接', 'ES提出済', 'ES作成', '検討中', '内定辞退', '不合格'];
 const RANK_OPTIONS = ['S', 'A', 'B', 'C'];
-const SORT_OPTIONS = ['登録順', '五十音', '志望度', 'ステータス', 'ジャンル'];
+const SORT_OPTIONS = ['登録順', '直近順', '五十音', '志望度', 'ステータス', 'ジャンル'];
 const HOURS = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0'));
 const MINUTES = ['00', '15', '30', '45'];
 
@@ -61,7 +66,7 @@ interface Schedule {
 }
 
 type TabType = 'calendar' | 'list' | 'settings';
-type SortType = '登録順' | '五十音' | '志望度' | 'ステータス' | 'ジャンル';
+type SortType = '登録順' | '直近順' | '五十音' | '志望度' | 'ステータス' | 'ジャンル';
 
 // ─── デフォルトジャンル ──────────────────────────────
 const DEFAULT_GENRES: Genre[] = [
@@ -69,6 +74,16 @@ const DEFAULT_GENRES: Genre[] = [
   { id: 'finance', name: '金融・保険', color: '#27AE60' },
   { id: 'mfg', name: '製造・メーカー', color: '#E67E22' },
   { id: 'trade', name: '商社・流通', color: '#8E44AD' },
+  { id: 'consult', name: 'コンサル', color: '#E74C3C' },
+  { id: 'infra', name: 'インフラ・建設', color: '#795548' },
+  { id: 'real', name: '不動産', color: '#009688' },
+  { id: 'retail', name: '小売・流通', color: '#FF5722' },
+  { id: 'food', name: '食品・飲料', color: '#FFC107' },
+  { id: 'media', name: 'マスコミ・広告', color: '#9C27B0' },
+  { id: 'gov', name: '公務員・団体', color: '#607D8B' },
+  { id: 'edu', name: '教育・学術', color: '#00BCD4' },
+  { id: 'medical', name: '医療・福祉', color: '#4CAF50' },
+  { id: 'transport', name: '物流・運輸', color: '#FF9800' },
   { id: 'other', name: 'その他', color: '#7F8C8D' },
 ];
 
@@ -92,6 +107,8 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [sortType, setSortType] = useState<SortType>('登録順');
   const [filterGenreId, setFilterGenreId] = useState<string>('all');
+  const [filterStatus, setFilterStatus] = useState<string>('all');
+  const [sortAsc, setSortAsc] = useState<boolean>(true);
 
   // 登録/編集モーダル
   const [isModalVisible, setModalVisible] = useState(false);
@@ -154,7 +171,7 @@ export default function App() {
   };
 
   // ─── 統計 ────────────────────────────────────────
-  const activeCount = useMemo(() => schedules.filter(s => !['内定辞退', '不合格'].includes(s.status)).length, [schedules]);
+  const activeCount = useMemo(() => schedules.filter(s => !['内定', '内定辞退', '不合格'].includes(s.status)).length, [schedules]);
   const internalCount = useMemo(() => schedules.filter(s => s.status === '内定').length, [schedules]);
 
   const upcomingSchedules = useMemo(() => {
@@ -179,12 +196,15 @@ export default function App() {
     return marks;
   }, [schedules, selectedDate, genres]);
 
-  // 日付→企業マップ
+  // 日付→企業マップ（同日はステータス優先度が高い順に並べる）
   const dateCompanyMap = useMemo(() => {
     const map: Record<string, Schedule[]> = {};
     schedules.forEach(s => {
       if (!map[s.date]) map[s.date] = [];
       map[s.date].push(s);
+    });
+    Object.keys(map).forEach(d => {
+      map[d].sort((a, b) => (STATUS_PRIORITY[b.status] ?? 0) - (STATUS_PRIORITY[a.status] ?? 0));
     });
     return map;
   }, [schedules]);
@@ -192,28 +212,29 @@ export default function App() {
   // ─── 持ち駒フィルタ・ソート ────────────────────
   const filteredSorted = useMemo(() => {
     let list = [...schedules];
-    // 検索
     if (searchQuery.trim()) {
       const q = searchQuery.trim().toLowerCase();
       list = list.filter(s => s.company.toLowerCase().includes(q));
     }
-    // ジャンルフィルタ
-    if (filterGenreId !== 'all') {
-      list = list.filter(s => s.genreId === filterGenreId);
-    }
-    // ソート
+    if (filterGenreId !== 'all') list = list.filter(s => s.genreId === filterGenreId);
+    if (filterStatus !== 'all') list = list.filter(s => s.status === filterStatus);
+
     switch (sortType) {
+      case '直近順': list.sort((a, b) => a.date.localeCompare(b.date)); break;
       case '五十音': list.sort((a, b) => a.company.localeCompare(b.company, 'ja')); break;
       case '志望度': {
         const o = { S: 0, A: 1, B: 2, C: 3 };
         list.sort((a, b) => (o[a.rank as keyof typeof o] ?? 3) - (o[b.rank as keyof typeof o] ?? 3));
         break;
       }
-      case 'ステータス': list.sort((a, b) => STATUS_OPTIONS.indexOf(a.status) - STATUS_OPTIONS.indexOf(b.status)); break;
+      case 'ステータス':
+        list.sort((a, b) => STATUS_SORT_ORDER.indexOf(a.status) - STATUS_SORT_ORDER.indexOf(b.status));
+        break;
       case 'ジャンル': list.sort((a, b) => a.genreId.localeCompare(b.genreId)); break;
     }
+    if (!sortAsc) list.reverse();
     return list;
-  }, [schedules, searchQuery, filterGenreId, sortType]);
+  }, [schedules, searchQuery, filterGenreId, filterStatus, sortType, sortAsc]);
 
   const filteredByDate = useMemo(() => schedules.filter(s => s.date === selectedDate), [schedules, selectedDate]);
 
@@ -511,36 +532,64 @@ export default function App() {
               />
             </View>
 
-            {/* ジャンルフィルタ */}
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.genreFilter}>
-              <TouchableOpacity
-                style={[styles.genreChip, filterGenreId === 'all' && styles.genreChipActive]}
-                onPress={() => setFilterGenreId('all')}>
-                <Text style={[styles.genreChipText, filterGenreId === 'all' && { color: '#fff' }]}>すべて</Text>
-              </TouchableOpacity>
-              {genres.map(g => (
-                <TouchableOpacity key={g.id}
-                  style={[styles.genreChip, { borderColor: g.color }, filterGenreId === g.id && { backgroundColor: g.color }]}
-                  onPress={() => setFilterGenreId(g.id)}>
-                  <Text style={[styles.genreChipText, { color: filterGenreId === g.id ? '#fff' : g.color }]}>{g.name}</Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-
-            {/* ソート */}
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ paddingLeft: 16, marginBottom: 8 }}>
-              <View style={{ flexDirection: 'row', gap: 6 }}>
-                {SORT_OPTIONS.map(opt => (
-                  <TouchableOpacity key={opt}
-                    style={[styles.sortChip, sortType === opt && styles.sortChipActive]}
-                    onPress={async () => { setSortType(opt as SortType); await AsyncStorage.setItem('@sort_type', opt); }}>
-                    <Text style={[styles.sortChipText, sortType === opt && { color: '#fff' }]}>{opt}</Text>
+            {/* ── 絞り込み：業種 ── */}
+            <View style={styles.filterSection}>
+              <Text style={styles.filterLabel}>業種</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                <View style={{ flexDirection: 'row', gap: 4 }}>
+                  <TouchableOpacity style={[styles.miniChip, filterGenreId === 'all' && styles.miniChipActive]} onPress={() => setFilterGenreId('all')}>
+                    <Text style={[styles.miniChipText, filterGenreId === 'all' && { color: '#fff' }]}>全て</Text>
                   </TouchableOpacity>
-                ))}
-              </View>
-            </ScrollView>
+                  {genres.map(g => (
+                    <TouchableOpacity key={g.id}
+                      style={[styles.miniChip, { borderColor: g.color }, filterGenreId === g.id && { backgroundColor: g.color }]}
+                      onPress={() => setFilterGenreId(filterGenreId === g.id ? 'all' : g.id)}>
+                      <Text style={[styles.miniChipText, { color: filterGenreId === g.id ? '#fff' : g.color }]}>{g.name}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </ScrollView>
+            </View>
 
-            <Text style={{ paddingHorizontal: 16, fontSize: 12, color: '#999', marginBottom: 6 }}>{filteredSorted.length}件</Text>
+            {/* ── 絞り込み：ステータス ── */}
+            <View style={styles.filterSection}>
+              <Text style={styles.filterLabel}>状況</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                <View style={{ flexDirection: 'row', gap: 4 }}>
+                  <TouchableOpacity style={[styles.miniChip, filterStatus === 'all' && styles.miniChipActive]} onPress={() => setFilterStatus('all')}>
+                    <Text style={[styles.miniChipText, filterStatus === 'all' && { color: '#fff' }]}>全て</Text>
+                  </TouchableOpacity>
+                  {STATUS_SORT_ORDER.map(st => (
+                    <TouchableOpacity key={st}
+                      style={[styles.miniChip, filterStatus === st && styles.miniChipActive]}
+                      onPress={() => setFilterStatus(filterStatus === st ? 'all' : st)}>
+                      <Text style={[styles.miniChipText, filterStatus === st && { color: '#fff' }]}>{st}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </ScrollView>
+            </View>
+
+            {/* ── 並び替え＋昇降順 ── */}
+            <View style={[styles.filterSection, { marginBottom: 6 }]}>
+              <Text style={styles.filterLabel}>並替</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flex: 1 }}>
+                <View style={{ flexDirection: 'row', gap: 4 }}>
+                  {SORT_OPTIONS.map(opt => (
+                    <TouchableOpacity key={opt}
+                      style={[styles.miniChip, sortType === opt && styles.miniChipActive]}
+                      onPress={async () => { setSortType(opt as SortType); await AsyncStorage.setItem('@sort_type', opt); }}>
+                      <Text style={[styles.miniChipText, sortType === opt && { color: '#fff' }]}>{opt}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </ScrollView>
+              <TouchableOpacity style={styles.ascBtn} onPress={() => setSortAsc(v => !v)}>
+                <Text style={styles.ascBtnText}>{sortAsc ? '↑昇順' : '↓降順'}</Text>
+              </TouchableOpacity>
+            </View>
+
+            <Text style={{ paddingHorizontal: 16, fontSize: 11, color: '#999', marginBottom: 4 }}>{filteredSorted.length}件</Text>
 
             <ScrollView style={{ flex: 1, paddingHorizontal: 16 }}>
               {filteredSorted.length === 0
@@ -764,26 +813,29 @@ export default function App() {
 
         {/* ── 時プルダウン ── */}
         <Modal visible={hourPickerVisible} transparent animationType="fade" onRequestClose={() => setHourPickerVisible(false)}>
-          <TouchableOpacity style={styles.pickerOverlay} activeOpacity={1} onPress={() => setHourPickerVisible(false)}>
-            <View style={styles.pickerBox}>
+          <View style={styles.pickerOverlay}>
+            <TouchableOpacity style={StyleSheet.absoluteFillObject} onPress={() => setHourPickerVisible(false)} />
+            <View style={styles.pickerBox} onStartShouldSetResponder={() => true}>
               <Text style={styles.pickerTitle}>時を選択</Text>
-              <FlatList data={HOURS} keyExtractor={h => h} numColumns={6}
-                renderItem={({ item: h }) => (
-                  <TouchableOpacity style={[styles.pickerItem, selHour === h && styles.pickerItemActive]}
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, justifyContent: 'center' }}>
+                {HOURS.map(h => (
+                  <TouchableOpacity key={h} style={[styles.pickerItem, selHour === h && styles.pickerItemActive]}
                     onPress={() => { setSelHour(h); setHourPickerVisible(false); }}>
                     <Text style={[styles.pickerItemText, selHour === h && { color: '#fff' }]}>{h}</Text>
                   </TouchableOpacity>
-                )} />
+                ))}
+              </View>
             </View>
-          </TouchableOpacity>
+          </View>
         </Modal>
 
         {/* ── 分プルダウン ── */}
         <Modal visible={minutePickerVisible} transparent animationType="fade" onRequestClose={() => setMinutePickerVisible(false)}>
-          <TouchableOpacity style={styles.pickerOverlay} activeOpacity={1} onPress={() => setMinutePickerVisible(false)}>
-            <View style={styles.pickerBox}>
+          <View style={styles.pickerOverlay}>
+            <TouchableOpacity style={StyleSheet.absoluteFillObject} onPress={() => setMinutePickerVisible(false)} />
+            <View style={styles.pickerBox} onStartShouldSetResponder={() => true}>
               <Text style={styles.pickerTitle}>分を選択</Text>
-              <View style={{ flexDirection: 'row', gap: 10, justifyContent: 'center', marginTop: 10 }}>
+              <View style={{ flexDirection: 'row', gap: 12, justifyContent: 'center', marginTop: 10 }}>
                 {MINUTES.map(m => (
                   <TouchableOpacity key={m} style={[styles.pickerItem, selMinute === m && styles.pickerItemActive]}
                     onPress={() => { setSelMinute(m); setMinutePickerVisible(false); }}>
@@ -792,7 +844,7 @@ export default function App() {
                 ))}
               </View>
             </View>
-          </TouchableOpacity>
+          </View>
         </Modal>
 
         {/* ── チェックリストモーダル ── */}
@@ -1025,6 +1077,15 @@ const styles = StyleSheet.create({
   pickerItem: { width: 44, height: 44, margin: 4, borderRadius: 10, backgroundColor: '#f0f2f5', alignItems: 'center', justifyContent: 'center' },
   pickerItemActive: { backgroundColor: TDU_BLUE },
   pickerItemText: { fontSize: 14, color: '#333' },
+
+  // フィルタ・並替エリア
+  filterSection: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, marginBottom: 4 },
+  filterLabel: { fontSize: 10, color: '#999', width: 26, marginRight: 4, fontWeight: 'bold' },
+  miniChip: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12, borderWidth: 1, borderColor: '#ddd', backgroundColor: '#f8f8f8' },
+  miniChipActive: { backgroundColor: TDU_BLUE, borderColor: TDU_BLUE },
+  miniChipText: { fontSize: 10, color: '#666' },
+  ascBtn: { marginLeft: 8, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, backgroundColor: '#e8f0fe', borderWidth: 1, borderColor: TDU_BLUE },
+  ascBtnText: { fontSize: 10, color: TDU_BLUE, fontWeight: 'bold' },
 
   // チェックリスト
   checkRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderColor: '#f5f5f5', paddingHorizontal: 8 },
