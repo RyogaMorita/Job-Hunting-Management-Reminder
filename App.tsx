@@ -2,125 +2,229 @@ import React, { useState, useEffect, useMemo } from 'react';
 import {
   StyleSheet, Text, View, TouchableOpacity, ScrollView,
   SafeAreaView, Modal, TextInput, Alert, KeyboardAvoidingView,
-  Platform, Switch
+  Platform, Switch, FlatList
 } from 'react-native';
 import { Calendar } from 'react-native-calendars';
 import { StatusBar } from 'expo-status-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const STORAGE_KEY = '@schedules_data_v7';
+// ─── 定数 ─────────────────────────────────────────────
+const STORAGE_KEY = '@schedules_v8';
+const GENRES_KEY = '@genres_v8';
 const TDU_BLUE = '#003366';
 const ACCENT = '#1a6bcc';
 
-const STATUS_OPTIONS = ['検討中', 'ES作成', 'ES提出済', '1次面接', '2次面接', '最終面接', '内定', '終了'];
+const STATUS_OPTIONS = ['検討中', 'ES作成', 'ES提出済', '1次面接', '2次面接', '最終面接', '内定', '内定辞退', '不合格'];
 const RANK_OPTIONS = ['S', 'A', 'B', 'C'];
-const SORT_OPTIONS = ['登録順', '五十音', '志望度', 'ステータス'];
-const INACTIVE_STATUSES = ['終了'];
+const SORT_OPTIONS = ['登録順', '五十音', '志望度', 'ステータス', 'ジャンル'];
+const HOURS = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0'));
+const MINUTES = ['00', '15', '30', '45'];
+
+// 選考チェックリスト（固定）
+const CHECKLIST_STEPS = ['ES提出', '1次面接', '2次面接', '最終面接', '内定'];
+const CUSTOM_ITEMS_KEY = '@custom_checklist_items';
+
+// ステータスごとのカード背景色
+const statusCardColor = (status: string): string => {
+  if (status === '内定') return '#fff0f0'; // 赤系
+  if (status === '内定辞退') return '#f0f0f0'; // 灰色
+  if (status === '不合格') return '#f0f0f0'; // 灰色
+  return '#ffffff';
+};
+const statusCardBorder = (status: string): string => {
+  if (status === '内定') return '#f5a0a0';
+  if (['内定辞退', '不合格'].includes(status)) return '#cccccc';
+  return '#eeeeee';
+};
+
+// ─── 型定義 ───────────────────────────────────────────
+interface Genre {
+  id: string;
+  name: string;
+  color: string; // hex
+}
 
 interface Schedule {
   id: string;
   company: string;
   date: string;
-  time: string;
+  hour: string;
+  minute: string;
   status: string;
   note: string;
   url: string;
   password: string;
   rank: string;
+  genreId: string;
+  checklist: Record<string, boolean>;
+  customChecklist: { id: string; label: string; checked: boolean }[];
 }
 
 type TabType = 'calendar' | 'list' | 'settings';
-type SortType = '登録順' | '五十音' | '志望度' | 'ステータス';
+type SortType = '登録順' | '五十音' | '志望度' | 'ステータス' | 'ジャンル';
+
+// ─── デフォルトジャンル ──────────────────────────────
+const DEFAULT_GENRES: Genre[] = [
+  { id: 'it', name: 'IT・通信', color: '#4A90D9' },
+  { id: 'finance', name: '金融・保険', color: '#27AE60' },
+  { id: 'mfg', name: '製造・メーカー', color: '#E67E22' },
+  { id: 'trade', name: '商社・流通', color: '#8E44AD' },
+  { id: 'other', name: 'その他', color: '#7F8C8D' },
+];
+
+// ─── カラーパレット（ジャンル色選択用） ──────────────
+const COLOR_PALETTE = [
+  '#E74C3C', '#E67E22', '#F1C40F', '#2ECC71', '#1ABC9C',
+  '#3498DB', '#4A90D9', '#9B59B6', '#8E44AD', '#2C3E50',
+  '#27AE60', '#16A085', '#2980B9', '#7F8C8D', '#BDC3C7',
+];
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<TabType>('calendar');
+  const [schedules, setSchedules] = useState<Schedule[]>([]);
+  const [genres, setGenres] = useState<Genre[]>(DEFAULT_GENRES);
+
+  // カレンダー
+  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+  const [calDaySelected, setCalDaySelected] = useState(false);
+
+  // 持ち駒一覧
+  const [searchQuery, setSearchQuery] = useState('');
+  const [sortType, setSortType] = useState<SortType>('登録順');
+  const [filterGenreId, setFilterGenreId] = useState<string>('all');
+
+  // 登録/編集モーダル
   const [isModalVisible, setModalVisible] = useState(false);
   const [isDetailVisible, setDetailVisible] = useState(false);
   const [selectedItem, setSelectedItem] = useState<Schedule | null>(null);
   const [companyName, setCompanyName] = useState('');
-  const [selectedStatus, setSelectedStatus] = useState('検討中');
-  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
-  const [selectedTime, setSelectedTime] = useState('');
+  const [selStatus, setSelStatus] = useState('検討中');
+  const [selDate, setSelDate] = useState(new Date().toISOString().split('T')[0]);
+  const [selHour, setSelHour] = useState('');
+  const [selMinute, setSelMinute] = useState('');
   const [note, setNote] = useState('');
   const [url, setUrl] = useState('');
   const [password, setPassword] = useState('');
   const [rank, setRank] = useState('B');
-  const [schedules, setSchedules] = useState<Schedule[]>([]);
-  const [sortType, setSortType] = useState<SortType>('登録順');
+  const [selGenreId, setSelGenreId] = useState('other');
+  const [checklist, setChecklist] = useState<Record<string, boolean>>({});
+
+  // チェックリストモーダル
+  const [checkModalItem, setCheckModalItem] = useState<Schedule | null>(null);
+  const [newCheckLabel, setNewCheckLabel] = useState('');
+
+  // ジャンル管理モーダル
+  const [genreModalVisible, setGenreModalVisible] = useState(false);
+  const [editGenre, setEditGenre] = useState<Genre | null>(null);
+  const [genreName, setGenreName] = useState('');
+  const [genreColor, setGenreColor] = useState('#4A90D9');
+
+  // 時間プルダウン
+  const [hourPickerVisible, setHourPickerVisible] = useState(false);
+  const [minutePickerVisible, setMinutePickerVisible] = useState(false);
+
+  // 通知設定
   const [notifyEnabled, setNotifyEnabled] = useState(true);
-  const [notifyDaysBefore, setNotifyDaysBefore] = useState('1');
-  const [calendarDaySelected, setCalendarDaySelected] = useState(false);
+  const [notifyDays, setNotifyDays] = useState('1');
 
-  useEffect(() => { loadData(); }, []);
+  useEffect(() => { loadAll(); }, []);
 
-  const loadData = async () => {
+  const loadAll = async () => {
     try {
       const s = await AsyncStorage.getItem(STORAGE_KEY);
       if (s) setSchedules(JSON.parse(s));
+      const g = await AsyncStorage.getItem(GENRES_KEY);
+      if (g) setGenres(JSON.parse(g));
       const sort = await AsyncStorage.getItem('@sort_type');
       if (sort) setSortType(sort as SortType);
-      const notify = await AsyncStorage.getItem('@notify_enabled');
-      if (notify !== null) setNotifyEnabled(JSON.parse(notify));
-      const days = await AsyncStorage.getItem('@notify_days');
-      if (days) setNotifyDaysBefore(days);
+      const ne = await AsyncStorage.getItem('@notify_enabled');
+      if (ne !== null) setNotifyEnabled(JSON.parse(ne));
+      const nd = await AsyncStorage.getItem('@notify_days');
+      if (nd) setNotifyDays(nd);
     } catch (e) { Alert.alert('エラー', '読み込み失敗'); }
   };
 
   const saveSchedules = async (data: Schedule[]) => {
+    setSchedules(data);
     await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(data));
   };
+  const saveGenres = async (data: Genre[]) => {
+    setGenres(data);
+    await AsyncStorage.setItem(GENRES_KEY, JSON.stringify(data));
+  };
 
-  const activeSchedules = useMemo(() => schedules.filter(s => !INACTIVE_STATUSES.includes(s.status)), [schedules]);
+  // ─── 統計 ────────────────────────────────────────
+  const activeCount = useMemo(() => schedules.filter(s => !['内定辞退', '不合格'].includes(s.status)).length, [schedules]);
   const internalCount = useMemo(() => schedules.filter(s => s.status === '内定').length, [schedules]);
 
   const upcomingSchedules = useMemo(() => {
     const today = new Date().toISOString().split('T')[0];
     return schedules
-      .filter(s => s.date >= today && !INACTIVE_STATUSES.includes(s.status))
+      .filter(s => s.date >= today && !['内定辞退', '不合格'].includes(s.status))
       .sort((a, b) => a.date.localeCompare(b.date))
-      .slice(0, 3);
+      .slice(0, 5);
   }, [schedules]);
 
+  // ─── カレンダーマーキング ──────────────────────
   const markedDates = useMemo(() => {
     const marks: Record<string, any> = {};
     schedules.forEach(s => {
-      marks[s.date] = { ...(marks[s.date] || {}), marked: true, dotColor: TDU_BLUE };
+      const genre = genres.find(g => g.id === s.genreId);
+      const dot = genre ? genre.color : TDU_BLUE;
+      if (!marks[s.date]) marks[s.date] = { dots: [] };
+      if (!marks[s.date].dots) marks[s.date].dots = [];
+      marks[s.date].dots.push({ color: dot });
     });
     marks[selectedDate] = { ...(marks[selectedDate] || {}), selected: true, selectedColor: TDU_BLUE };
     return marks;
-  }, [schedules, selectedDate]);
+  }, [schedules, selectedDate, genres]);
 
+  // 日付→企業マップ
   const dateCompanyMap = useMemo(() => {
-    const map: Record<string, string[]> = {};
+    const map: Record<string, Schedule[]> = {};
     schedules.forEach(s => {
       if (!map[s.date]) map[s.date] = [];
-      map[s.date].push(s.company);
+      map[s.date].push(s);
     });
     return map;
   }, [schedules]);
 
-  const sortedSchedules = useMemo(() => {
-    const list = [...schedules];
-    switch (sortType) {
-      case '五十音': return list.sort((a, b) => a.company.localeCompare(b.company, 'ja'));
-      case '志望度': {
-        const order = { S: 0, A: 1, B: 2, C: 3 };
-        return list.sort((a, b) => (order[a.rank as keyof typeof order] ?? 3) - (order[b.rank as keyof typeof order] ?? 3));
-      }
-      case 'ステータス': return list.sort((a, b) => STATUS_OPTIONS.indexOf(a.status) - STATUS_OPTIONS.indexOf(b.status));
-      default: return list;
+  // ─── 持ち駒フィルタ・ソート ────────────────────
+  const filteredSorted = useMemo(() => {
+    let list = [...schedules];
+    // 検索
+    if (searchQuery.trim()) {
+      const q = searchQuery.trim().toLowerCase();
+      list = list.filter(s => s.company.toLowerCase().includes(q));
     }
-  }, [schedules, sortType]);
+    // ジャンルフィルタ
+    if (filterGenreId !== 'all') {
+      list = list.filter(s => s.genreId === filterGenreId);
+    }
+    // ソート
+    switch (sortType) {
+      case '五十音': list.sort((a, b) => a.company.localeCompare(b.company, 'ja')); break;
+      case '志望度': {
+        const o = { S: 0, A: 1, B: 2, C: 3 };
+        list.sort((a, b) => (o[a.rank as keyof typeof o] ?? 3) - (o[b.rank as keyof typeof o] ?? 3));
+        break;
+      }
+      case 'ステータス': list.sort((a, b) => STATUS_OPTIONS.indexOf(a.status) - STATUS_OPTIONS.indexOf(b.status)); break;
+      case 'ジャンル': list.sort((a, b) => a.genreId.localeCompare(b.genreId)); break;
+    }
+    return list;
+  }, [schedules, searchQuery, filterGenreId, sortType]);
 
   const filteredByDate = useMemo(() => schedules.filter(s => s.date === selectedDate), [schedules, selectedDate]);
 
+  // ─── 保存 ────────────────────────────────────────
   const handleSave = async () => {
     if (companyName.trim() === '') return;
-    const duplicate = schedules.find(s => s.company.trim() === companyName.trim() && s.id !== (selectedItem?.id ?? ''));
-    if (duplicate) {
+    const dup = schedules.find(s => s.company.trim() === companyName.trim() && s.id !== (selectedItem?.id ?? ''));
+    if (dup) {
       Alert.alert('重複確認', `「${companyName.trim()}」はすでに登録されています。\n別エントリーとして追加しますか？`, [
         { text: 'キャンセル', style: 'cancel' },
-        { text: '追加する', onPress: () => doSave() },
+        { text: '追加する', onPress: doSave },
       ]);
       return;
     }
@@ -128,32 +232,43 @@ export default function App() {
   };
 
   const doSave = async () => {
-    const newSchedule: Schedule = {
+    const ns: Schedule = {
       id: selectedItem ? selectedItem.id : Date.now().toString(),
-      company: companyName.trim(), date: selectedDate, time: selectedTime,
-      status: selectedStatus, note: note.trim(), url: url.trim(),
-      password: password.trim(), rank,
+      company: companyName.trim(), date: selDate,
+      hour: selHour, minute: selMinute,
+      status: selStatus, note: note.trim(),
+      url: url.trim(), password: password.trim(),
+      rank, genreId: selGenreId, checklist,
+      customChecklist: selectedItem?.customChecklist ?? [],
     };
     const updated = selectedItem
-      ? schedules.map(s => s.id === selectedItem.id ? newSchedule : s)
-      : [...schedules, newSchedule];
-    setSchedules(updated);
+      ? schedules.map(s => s.id === selectedItem.id ? ns : s)
+      : [...schedules, ns];
     await saveSchedules(updated);
     closeModal();
   };
 
   const closeModal = () => {
     setModalVisible(false); setDetailVisible(false); setSelectedItem(null);
-    setCompanyName(''); setNote(''); setSelectedStatus('検討中');
-    setSelectedTime(''); setUrl(''); setPassword(''); setRank('B');
+    setCompanyName(''); setNote(''); setSelStatus('検討中');
+    setSelHour(''); setSelMinute(''); setUrl(''); setPassword('');
+    setRank('B'); setSelGenreId('other'); setChecklist({});
+  };
+
+  const openAdd = () => {
+    setSelDate(selectedDate);
+    setModalVisible(true);
   };
 
   const openDetail = (item: Schedule) => {
     setSelectedItem(item); setCompanyName(item.company);
-    setNote(item.note ?? ''); setSelectedStatus(item.status);
-    setSelectedDate(item.date); setSelectedTime(item.time ?? '');
-    setUrl(item.url ?? ''); setPassword(item.password ?? '');
-    setRank(item.rank ?? 'B'); setDetailVisible(true);
+    setNote(item.note ?? ''); setSelStatus(item.status);
+    setSelDate(item.date); setSelHour(item.hour ?? '');
+    setSelMinute(item.minute ?? ''); setUrl(item.url ?? '');
+    setPassword(item.password ?? ''); setRank(item.rank ?? 'B');
+    setSelGenreId(item.genreId ?? 'other');
+    setChecklist(item.checklist ?? {});
+    setDetailVisible(true);
   };
 
   const deleteSchedule = (id: string) => {
@@ -162,38 +277,120 @@ export default function App() {
       {
         text: '削除', style: 'destructive', onPress: async () => {
           const filtered = schedules.filter(s => s.id !== id);
-          setSchedules(filtered); await saveSchedules(filtered); closeModal();
+          await saveSchedules(filtered); closeModal();
         }
       }
     ]);
   };
 
+  // チェックリスト更新
+  const toggleCheck = async (item: Schedule, step: string) => {
+    const updated = schedules.map(s => {
+      if (s.id !== item.id) return s;
+      const newCL = { ...(s.checklist ?? {}), [step]: !(s.checklist ?? {})[step] };
+      // 内定チェック→ステータスを自動更新
+      const newStatus = newCL['内定'] ? '内定' : s.status === '内定' ? '最終面接' : s.status;
+      return { ...s, checklist: newCL, status: newStatus };
+    });
+    await saveSchedules(updated);
+    // checkModalItemも更新
+    const refreshed = updated.find(s => s.id === item.id) ?? null;
+    setCheckModalItem(refreshed);
+  };
+
+  // カスタム項目をトグル
+  const toggleCustomCheck = async (item: Schedule, id: string) => {
+    const updated = schedules.map(s => {
+      if (s.id !== item.id) return s;
+      const newCL = (s.customChecklist ?? []).map(c => c.id === id ? { ...c, checked: !c.checked } : c);
+      return { ...s, customChecklist: newCL };
+    });
+    await saveSchedules(updated);
+    setCheckModalItem(updated.find(s => s.id === item.id) ?? null);
+  };
+
+  // カスタム項目を追加
+  const addCustomCheck = async (item: Schedule) => {
+    if (!newCheckLabel.trim()) return;
+    const newItem = { id: Date.now().toString(), label: newCheckLabel.trim(), checked: false };
+    const updated = schedules.map(s => {
+      if (s.id !== item.id) return s;
+      return { ...s, customChecklist: [...(s.customChecklist ?? []), newItem] };
+    });
+    await saveSchedules(updated);
+    setCheckModalItem(updated.find(s => s.id === item.id) ?? null);
+    setNewCheckLabel('');
+  };
+
+  // カスタム項目を削除
+  const deleteCustomCheck = async (item: Schedule, id: string) => {
+    const updated = schedules.map(s => {
+      if (s.id !== item.id) return s;
+      return { ...s, customChecklist: (s.customChecklist ?? []).filter(c => c.id !== id) };
+    });
+    await saveSchedules(updated);
+    setCheckModalItem(updated.find(s => s.id === item.id) ?? null);
+  };
+
+  // ─── ジャンル管理 ──────────────────────────────
+  const openAddGenre = () => { setEditGenre(null); setGenreName(''); setGenreColor('#4A90D9'); setGenreModalVisible(true); };
+  const openEditGenre = (g: Genre) => { setEditGenre(g); setGenreName(g.name); setGenreColor(g.color); setGenreModalVisible(true); };
+  const saveGenre = async () => {
+    if (!genreName.trim()) return;
+    let updated: Genre[];
+    if (editGenre) {
+      updated = genres.map(g => g.id === editGenre.id ? { ...g, name: genreName.trim(), color: genreColor } : g);
+    } else {
+      updated = [...genres, { id: Date.now().toString(), name: genreName.trim(), color: genreColor }];
+    }
+    await saveGenres(updated);
+    setGenreModalVisible(false);
+  };
+  const deleteGenre = (id: string) => {
+    Alert.alert('削除', 'このジャンルを削除しますか？', [
+      { text: 'キャンセル', style: 'cancel' },
+      {
+        text: '削除', style: 'destructive', onPress: async () => {
+          await saveGenres(genres.filter(g => g.id !== id));
+          setGenreModalVisible(false);
+        }
+      }
+    ]);
+  };
+
+  // ─── ヘルパー ─────────────────────────────────
   const rankColor = (r: string) => ({ S: '#e74c3c', A: '#e67e22', B: '#2980b9', C: '#7f8c8d' }[r] ?? '#999');
+  const genreOf = (id: string) => genres.find(g => g.id === id);
+  const timeStr = (h: string, m: string) => h && m ? `${h}:${m}` : h ? `${h}:00` : '';
   const today = new Date().toISOString().split('T')[0];
 
+  // ─── UI ───────────────────────────────────────
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar style="dark" />
       <View style={styles.container}>
 
+        {/* ヘッダー */}
         <View style={styles.topNav}>
           <View style={styles.headerStats}>
             <View style={styles.statChip}>
-              <Text style={styles.statNum}>{activeSchedules.length}</Text>
+              <Text style={styles.statNum}>{activeCount}</Text>
               <Text style={styles.statLabel}>持ち駒</Text>
             </View>
             <Text style={styles.headerTitle}>就活管理</Text>
             <View style={[styles.statChip, { backgroundColor: '#fff3cd' }]}>
               <Text style={[styles.statNum, { color: '#856404' }]}>{internalCount}</Text>
-              <Text style={[styles.statLabel, { color: '#856404' }]}>内定</Text>
+              <Text style={[styles.statLabel, { color: '#856404' }]}>内定 🌸</Text>
             </View>
           </View>
         </View>
 
+        {/* ── カレンダータブ ── */}
         {activeTab === 'calendar' && (
           <View style={{ flex: 1 }}>
             <Calendar
-              onDayPress={(day: any) => { setSelectedDate(day.dateString); setCalendarDaySelected(true); }}
+              markingType="multi-dot"
+              onDayPress={(day: any) => { setSelectedDate(day.dateString); setCalDaySelected(true); }}
               markedDates={markedDates}
               theme={{
                 todayTextColor: ACCENT, arrowColor: TDU_BLUE,
@@ -204,40 +401,41 @@ export default function App() {
                 textMonthFontWeight: 'bold', textDayFontSize: 13,
               }}
               dayComponent={({ date, state }: any) => {
-                const dateStr = date.dateString;
-                const companies = dateCompanyMap[dateStr] || [];
-                const isSelected = dateStr === selectedDate;
-                const isToday = dateStr === today;
+                const ds = date.dateString;
+                const items = dateCompanyMap[ds] || [];
+                const isSel = ds === selectedDate;
+                const isToday = ds === today;
                 return (
-                  <TouchableOpacity
-                    onPress={() => { setSelectedDate(dateStr); setCalendarDaySelected(true); }}
-                    style={{ alignItems: 'center', width: 46, minHeight: 52 }}
-                  >
+                  <TouchableOpacity onPress={() => { setSelectedDate(ds); setCalDaySelected(true); }}
+                    style={{ alignItems: 'center', width: 46, minHeight: 54 }}>
                     <View style={[
                       { width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
-                      isSelected && { backgroundColor: TDU_BLUE },
-                      isToday && !isSelected && { borderWidth: 1.5, borderColor: ACCENT },
+                      isSel && { backgroundColor: TDU_BLUE },
+                      isToday && !isSel && { borderWidth: 1.5, borderColor: ACCENT },
                     ]}>
                       <Text style={[
                         { fontSize: 12 },
                         state === 'disabled' && { color: '#ccc' },
-                        isSelected ? { color: '#fff', fontWeight: 'bold' }
+                        isSel ? { color: '#fff', fontWeight: 'bold' }
                           : isToday ? { color: ACCENT, fontWeight: 'bold' }
                             : { color: '#333' },
                       ]}>{date.day}</Text>
                     </View>
-                    {companies.slice(0, 2).map((c: string, i: number) => (
-                      <Text key={i} style={styles.calDayCompany} numberOfLines={1}>{c}</Text>
-                    ))}
-                    {companies.length > 2 && (
-                      <Text style={[styles.calDayCompany, { color: '#999' }]}>+{companies.length - 2}</Text>
-                    )}
+                    {items.slice(0, 2).map((item: Schedule, i: number) => {
+                      const gc = genreOf(item.genreId)?.color ?? TDU_BLUE;
+                      return (
+                        <View key={i} style={[styles.calLabel, { backgroundColor: gc + '33', borderLeftColor: gc }]}>
+                          <Text style={[styles.calLabelText, { color: gc }]} numberOfLines={1}>{item.company}</Text>
+                        </View>
+                      );
+                    })}
+                    {items.length > 2 && <Text style={styles.calMore}>+{items.length - 2}</Text>}
                   </TouchableOpacity>
                 );
               }}
             />
             <View style={styles.todoArea}>
-              {!calendarDaySelected ? (
+              {!calDaySelected ? (
                 <>
                   <Text style={styles.subTitle}>📌 直近の予定</Text>
                   {upcomingSchedules.length === 0
@@ -247,7 +445,7 @@ export default function App() {
                         <View style={{ flex: 1 }}>
                           <Text style={styles.itemTitle}>{item.company}</Text>
                           <Text style={styles.itemStatus}>
-                            {item.date.replace(/-/g, '/')} {item.time ? `${item.time}〜 · ` : ''}{item.status}
+                            {item.date.replace(/-/g, '/')} {timeStr(item.hour, item.minute) ? timeStr(item.hour, item.minute) + '〜 · ' : ''}{item.status}
                           </Text>
                         </View>
                         <View style={[styles.rankBadge, { backgroundColor: rankColor(item.rank) }]}>
@@ -262,10 +460,10 @@ export default function App() {
                   <View style={styles.sectionHeader}>
                     <Text style={styles.subTitle}>{selectedDate.replace(/-/g, '/')} の予定</Text>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                      <TouchableOpacity onPress={() => setCalendarDaySelected(false)}>
+                      <TouchableOpacity onPress={() => setCalDaySelected(false)}>
                         <Text style={{ color: '#999', fontSize: 11 }}>直近に戻る</Text>
                       </TouchableOpacity>
-                      <TouchableOpacity style={styles.addButton} onPress={() => setModalVisible(true)}>
+                      <TouchableOpacity style={styles.addButton} onPress={openAdd}>
                         <Text style={styles.addButtonText}>+ 追加</Text>
                       </TouchableOpacity>
                     </View>
@@ -273,18 +471,23 @@ export default function App() {
                   <ScrollView showsVerticalScrollIndicator={false}>
                     {filteredByDate.length === 0
                       ? <Text style={styles.emptyText}>この日の予定はありません</Text>
-                      : filteredByDate.map(item => (
-                        <TouchableOpacity key={item.id} style={styles.itemCard} onPress={() => openDetail(item)}>
-                          <View style={{ flex: 1 }}>
-                            <Text style={styles.itemTitle}>{item.company}</Text>
-                            <Text style={styles.itemStatus}>{item.time ? `${item.time}〜 · ` : ''}{item.status}</Text>
-                          </View>
-                          <View style={[styles.rankBadge, { backgroundColor: rankColor(item.rank) }]}>
-                            <Text style={styles.rankText}>{item.rank}</Text>
-                          </View>
-                          <Text style={styles.itemArrow}>〉</Text>
-                        </TouchableOpacity>
-                      ))
+                      : filteredByDate.map(item => {
+                        const gc = genreOf(item.genreId)?.color ?? TDU_BLUE;
+                        return (
+                          <TouchableOpacity key={item.id}
+                            style={[styles.itemCard, { borderLeftColor: gc, borderLeftWidth: 3 }]}
+                            onPress={() => openDetail(item)}>
+                            <View style={{ flex: 1 }}>
+                              <Text style={styles.itemTitle}>{item.company}</Text>
+                              <Text style={styles.itemStatus}>{timeStr(item.hour, item.minute) ? timeStr(item.hour, item.minute) + '〜 · ' : ''}{item.status}</Text>
+                            </View>
+                            <View style={[styles.rankBadge, { backgroundColor: rankColor(item.rank) }]}>
+                              <Text style={styles.rankText}>{item.rank}</Text>
+                            </View>
+                            <Text style={styles.itemArrow}>〉</Text>
+                          </TouchableOpacity>
+                        );
+                      })
                     }
                   </ScrollView>
                 </>
@@ -293,94 +496,163 @@ export default function App() {
           </View>
         )}
 
+        {/* ── 持ち駒タブ ── */}
         {activeTab === 'list' && (
           <View style={{ flex: 1 }}>
-            <View style={styles.listHeader}>
-              <Text style={[styles.subTitle, { marginBottom: 8 }]}>持ち駒一覧 ({schedules.length})</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                <View style={{ flexDirection: 'row', gap: 6 }}>
-                  {SORT_OPTIONS.map(opt => (
-                    <TouchableOpacity key={opt}
-                      style={[styles.sortChip, sortType === opt && styles.sortChipActive]}
-                      onPress={async () => { setSortType(opt as SortType); await AsyncStorage.setItem('@sort_type', opt); }}>
-                      <Text style={[styles.sortChipText, sortType === opt && { color: '#fff' }]}>{opt}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </ScrollView>
+            {/* 検索バー */}
+            <View style={styles.searchBar}>
+              <Text style={styles.searchIcon}>🔍</Text>
+              <TextInput
+                style={styles.searchInput}
+                placeholder="企業名で検索..."
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+                clearButtonMode="while-editing"
+              />
             </View>
-            <ScrollView style={{ flex: 1, paddingHorizontal: 16 }}>
-              {sortedSchedules.length === 0
-                ? <Text style={styles.emptyText}>登録されている企業はありません</Text>
-                : sortedSchedules.map(item => (
-                  <TouchableOpacity key={item.id} style={styles.listCard} onPress={() => openDetail(item)}>
-                    <View style={{ flex: 1 }}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                        <View style={[styles.rankBadge, { backgroundColor: rankColor(item.rank) }]}>
-                          <Text style={styles.rankText}>{item.rank}</Text>
-                        </View>
-                        <Text style={styles.itemTitle}>{item.company}</Text>
-                      </View>
-                      <Text style={styles.dateText}>{item.date.replace(/-/g, '/')}{item.time ? ` ${item.time}〜` : ''}</Text>
-                      {item.url ? <Text style={styles.notePreview} numberOfLines={1}>🔗 {item.url}</Text> : null}
-                      {item.note ? <Text style={styles.notePreview} numberOfLines={1}>📝 {item.note}</Text> : null}
-                    </View>
-                    <View style={[styles.statusBadge, INACTIVE_STATUSES.includes(item.status) && { backgroundColor: '#ccc' }]}>
-                      <Text style={styles.statusBadgeText}>{item.status}</Text>
-                    </View>
+
+            {/* ジャンルフィルタ */}
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.genreFilter}>
+              <TouchableOpacity
+                style={[styles.genreChip, filterGenreId === 'all' && styles.genreChipActive]}
+                onPress={() => setFilterGenreId('all')}>
+                <Text style={[styles.genreChipText, filterGenreId === 'all' && { color: '#fff' }]}>すべて</Text>
+              </TouchableOpacity>
+              {genres.map(g => (
+                <TouchableOpacity key={g.id}
+                  style={[styles.genreChip, { borderColor: g.color }, filterGenreId === g.id && { backgroundColor: g.color }]}
+                  onPress={() => setFilterGenreId(g.id)}>
+                  <Text style={[styles.genreChipText, { color: filterGenreId === g.id ? '#fff' : g.color }]}>{g.name}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+
+            {/* ソート */}
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ paddingLeft: 16, marginBottom: 8 }}>
+              <View style={{ flexDirection: 'row', gap: 6 }}>
+                {SORT_OPTIONS.map(opt => (
+                  <TouchableOpacity key={opt}
+                    style={[styles.sortChip, sortType === opt && styles.sortChipActive]}
+                    onPress={async () => { setSortType(opt as SortType); await AsyncStorage.setItem('@sort_type', opt); }}>
+                    <Text style={[styles.sortChipText, sortType === opt && { color: '#fff' }]}>{opt}</Text>
                   </TouchableOpacity>
-                ))
+                ))}
+              </View>
+            </ScrollView>
+
+            <Text style={{ paddingHorizontal: 16, fontSize: 12, color: '#999', marginBottom: 6 }}>{filteredSorted.length}件</Text>
+
+            <ScrollView style={{ flex: 1, paddingHorizontal: 16 }}>
+              {filteredSorted.length === 0
+                ? <Text style={styles.emptyText}>該当する企業がありません</Text>
+                : filteredSorted.map(item => {
+                  const gc = genreOf(item.genreId)?.color ?? TDU_BLUE;
+                  const isInternal = item.status === '内定';
+                  const isInactive = ['内定辞退', '不合格'].includes(item.status);
+                  return (
+                    <TouchableOpacity key={item.id}
+                      style={[styles.listCard,
+                      { backgroundColor: statusCardColor(item.status), borderColor: statusCardBorder(item.status) },
+                      isInactive && { opacity: 0.6 }
+                      ]}
+                      onPress={() => openDetail(item)}>
+                      {/* ジャンル色帯 */}
+                      <View style={[styles.genreBand, { backgroundColor: gc }]} />
+                      <View style={{ flex: 1, paddingLeft: 10 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                          <View style={[styles.rankBadge, { backgroundColor: rankColor(item.rank) }]}>
+                            <Text style={styles.rankText}>{item.rank}</Text>
+                          </View>
+                          <Text style={[styles.itemTitle, isInactive && { color: '#999' }]}>
+                            {item.company}{isInternal ? ' 🌸' : ''}
+                          </Text>
+                        </View>
+                        <Text style={styles.dateText}>{item.date.replace(/-/g, '/')}{timeStr(item.hour, item.minute) ? ' ' + timeStr(item.hour, item.minute) + '〜' : ''}</Text>
+                        {item.url ? <Text style={styles.notePreview} numberOfLines={1}>🔗 {item.url}</Text> : null}
+                        {item.note ? <Text style={styles.notePreview} numberOfLines={1}>📝 {item.note}</Text> : null}
+                      </View>
+                      <View style={{ alignItems: 'flex-end', gap: 6 }}>
+                        <View style={[styles.statusBadge,
+                        isInternal && { backgroundColor: '#e74c3c' },
+                        isInactive && { backgroundColor: '#aaa' }]}>
+                          <Text style={styles.statusBadgeText}>{item.status}</Text>
+                        </View>
+                        {/* チェックリストボタン */}
+                        <TouchableOpacity style={styles.checkBtn}
+                          onPress={() => setCheckModalItem(item)}>
+                          <Text style={styles.checkBtnText}>✓ 進捗</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })
               }
               <View style={{ height: 80 }} />
             </ScrollView>
-            <TouchableOpacity style={styles.fab} onPress={() => setModalVisible(true)}>
+
+            <TouchableOpacity style={styles.fab} onPress={openAdd}>
               <Text style={styles.fabText}>＋</Text>
             </TouchableOpacity>
           </View>
         )}
 
+        {/* ── 設定タブ ── */}
         {activeTab === 'settings' && (
           <ScrollView style={{ flex: 1, padding: 20 }}>
-            <Text style={styles.settingSection}>通知設定</Text>
+            {/* ジャンル管理 */}
+            <Text style={styles.settingSection}>ジャンル管理</Text>
+            {genres.map(g => (
+              <TouchableOpacity key={g.id} style={styles.genreRow} onPress={() => openEditGenre(g)}>
+                <View style={[styles.genreColorDot, { backgroundColor: g.color }]} />
+                <Text style={styles.settingLabel}>{g.name}</Text>
+                <Text style={{ color: '#ccc' }}>›</Text>
+              </TouchableOpacity>
+            ))}
+            <TouchableOpacity style={styles.outlineButton} onPress={openAddGenre}>
+              <Text style={styles.outlineButtonText}>+ ジャンルを追加</Text>
+            </TouchableOpacity>
+
+            {/* 通知設定 */}
+            <Text style={[styles.settingSection, { marginTop: 28 }]}>通知設定</Text>
             <View style={styles.settingRow}>
               <Text style={styles.settingLabel}>リマインダー通知</Text>
-              <Switch
-                value={notifyEnabled}
+              <Switch value={notifyEnabled}
                 onValueChange={async v => { setNotifyEnabled(v); await AsyncStorage.setItem('@notify_enabled', JSON.stringify(v)); }}
-                trackColor={{ true: TDU_BLUE }}
-              />
+                trackColor={{ true: TDU_BLUE }} />
             </View>
             {notifyEnabled && (
               <View style={[styles.settingRow, { flexDirection: 'column', alignItems: 'flex-start', gap: 10 }]}>
-                <Text style={styles.settingLabel}>通知タイミング（何日前）</Text>
+                <Text style={styles.settingLabel}>通知タイミング</Text>
                 <View style={{ flexDirection: 'row', gap: 8 }}>
                   {['0', '1', '2', '3'].map(d => (
                     <TouchableOpacity key={d}
-                      style={[styles.sortChip, notifyDaysBefore === d && styles.sortChipActive]}
-                      onPress={async () => { setNotifyDaysBefore(d); await AsyncStorage.setItem('@notify_days', d); }}>
-                      <Text style={[styles.sortChipText, notifyDaysBefore === d && { color: '#fff' }]}>{d}日前</Text>
+                      style={[styles.sortChip, notifyDays === d && styles.sortChipActive]}
+                      onPress={async () => { setNotifyDays(d); await AsyncStorage.setItem('@notify_days', d); }}>
+                      <Text style={[styles.sortChipText, notifyDays === d && { color: '#fff' }]}>{d}日前</Text>
                     </TouchableOpacity>
                   ))}
                 </View>
               </View>
             )}
+
+            {/* データ管理 */}
             <Text style={[styles.settingSection, { marginTop: 28 }]}>データ管理</Text>
             <TouchableOpacity style={styles.dangerButton} onPress={() => {
               Alert.alert('全データ削除', '全ての企業データを削除しますか？', [
                 { text: 'キャンセル', style: 'cancel' },
-                { text: '削除', style: 'destructive', onPress: async () => { setSchedules([]); await AsyncStorage.removeItem(STORAGE_KEY); } }
+                { text: '削除', style: 'destructive', onPress: async () => { await saveSchedules([]); } }
               ]);
             }}>
               <Text style={styles.dangerButtonText}>全データを削除する</Text>
             </TouchableOpacity>
-            <Text style={[styles.settingSection, { marginTop: 28 }]}>このアプリについて</Text>
+
             <View style={styles.aboutBox}>
-              <Text style={styles.aboutText}>就活管理リマインダー v2.0</Text>
-              <Text style={styles.aboutText}>企業ごとの選考状況・面接予定・メモ・URL・パスワードを一元管理できます。</Text>
+              <Text style={styles.aboutText}>就活管理リマインダー v3.0</Text>
             </View>
           </ScrollView>
         )}
 
+        {/* タブバー */}
         <View style={styles.tabBar}>
           {(['calendar', 'list', 'settings'] as TabType[]).map((tab, i) => {
             const icons = ['📅', '📋', '⚙️'];
@@ -394,6 +666,7 @@ export default function App() {
           })}
         </View>
 
+        {/* ── 企業登録/編集モーダル ── */}
         <Modal visible={isModalVisible || isDetailVisible} animationType="slide" transparent onRequestClose={closeModal}>
           <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
             <TouchableOpacity style={StyleSheet.absoluteFillObject} onPress={closeModal} activeOpacity={1} />
@@ -411,8 +684,21 @@ export default function App() {
                 <Text style={styles.label}>企業名 *</Text>
                 <TextInput style={styles.input} placeholder="例：株式会社〇〇" value={companyName} onChangeText={setCompanyName} returnKeyType="done" />
 
+                <Text style={styles.label}>ジャンル</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                  <View style={{ flexDirection: 'row', gap: 6 }}>
+                    {genres.map(g => (
+                      <TouchableOpacity key={g.id}
+                        style={[styles.genreChip, { borderColor: g.color }, selGenreId === g.id && { backgroundColor: g.color }]}
+                        onPress={() => setSelGenreId(g.id)}>
+                        <Text style={[styles.genreChipText, { color: selGenreId === g.id ? '#fff' : g.color }]}>{g.name}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </ScrollView>
+
                 <Text style={styles.label}>志望度</Text>
-                <View style={{ flexDirection: 'row', gap: 8, marginBottom: 4 }}>
+                <View style={{ flexDirection: 'row', gap: 8 }}>
                   {RANK_OPTIONS.map(r => (
                     <TouchableOpacity key={r}
                       style={[styles.rankOption, { backgroundColor: rank === r ? rankColor(r) : '#f0f2f5' }]}
@@ -426,43 +712,202 @@ export default function App() {
                 <View style={styles.statusContainer}>
                   {STATUS_OPTIONS.map(opt => (
                     <TouchableOpacity key={opt}
-                      style={[styles.statusOption, selectedStatus === opt && styles.statusSelected]}
-                      onPress={() => setSelectedStatus(opt)}>
-                      <Text style={[styles.statusOptionText, selectedStatus === opt && { color: '#fff' }]}>{opt}</Text>
+                      style={[styles.statusOption, selStatus === opt && styles.statusSelected]}
+                      onPress={() => setSelStatus(opt)}>
+                      <Text style={[styles.statusOptionText, selStatus === opt && { color: '#fff' }]}>{opt}</Text>
                     </TouchableOpacity>
                   ))}
                 </View>
 
+                {/* 日付・時間 */}
                 <View style={{ flexDirection: 'row', gap: 10 }}>
                   <View style={{ flex: 2 }}>
-                    <Text style={styles.label}>日付（締切/面接）</Text>
-                    <TextInput style={styles.input} placeholder="YYYY-MM-DD" value={selectedDate} onChangeText={setSelectedDate} keyboardType="numbers-and-punctuation" />
+                    <Text style={styles.label}>日付</Text>
+                    <TextInput style={styles.input} placeholder="YYYY-MM-DD" value={selDate} onChangeText={setSelDate} keyboardType="numbers-and-punctuation" />
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.label}>時間</Text>
-                    <TextInput style={styles.input} placeholder="14:00" value={selectedTime} onChangeText={setSelectedTime} keyboardType="numbers-and-punctuation" />
+                    <View style={{ flexDirection: 'row', gap: 4 }}>
+                      {/* 時プルダウン */}
+                      <TouchableOpacity style={[styles.input, { flex: 1, justifyContent: 'center' }]} onPress={() => setHourPickerVisible(true)}>
+                        <Text style={{ fontSize: 15, color: selHour ? '#333' : '#aaa' }}>{selHour || '時'}</Text>
+                      </TouchableOpacity>
+                      <Text style={{ alignSelf: 'center', color: '#333' }}>:</Text>
+                      {/* 分プルダウン */}
+                      <TouchableOpacity style={[styles.input, { flex: 1, justifyContent: 'center' }]} onPress={() => setMinutePickerVisible(true)}>
+                        <Text style={{ fontSize: 15, color: selMinute ? '#333' : '#aaa' }}>{selMinute || '分'}</Text>
+                      </TouchableOpacity>
+                    </View>
                   </View>
                 </View>
 
-                <Text style={styles.label}>URL（マイページ等）</Text>
+                <Text style={styles.label}>URL</Text>
                 <TextInput style={styles.input} placeholder="https://..." value={url} onChangeText={setUrl} autoCapitalize="none" keyboardType="url" />
 
                 <Text style={styles.label}>パスワード</Text>
                 <TextInput style={styles.input} placeholder="パスワード" value={password} onChangeText={setPassword} autoCapitalize="none" />
 
-                <Text style={styles.label}>メモ（面接内容・対策など）</Text>
-                <TextInput style={[styles.input, styles.textArea]} multiline placeholder="メモを入力..." value={note} onChangeText={setNote} />
+                <Text style={styles.label}>メモ</Text>
+                <TextInput style={[styles.input, styles.textArea]} multiline placeholder="面接内容・対策など..." value={note} onChangeText={setNote} />
 
                 <View style={styles.modalButtons}>
                   <TouchableOpacity onPress={closeModal}><Text style={styles.cancelText}>戻る</Text></TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.saveButton, !companyName.trim() && styles.saveButtonDisabled]}
-                    onPress={handleSave}>
+                  <TouchableOpacity style={[styles.saveButton, !companyName.trim() && styles.saveButtonDisabled]} onPress={handleSave}>
                     <Text style={styles.saveButtonText}>保存</Text>
                   </TouchableOpacity>
                 </View>
                 <View style={{ height: 20 }} />
               </ScrollView>
+            </View>
+          </KeyboardAvoidingView>
+        </Modal>
+
+        {/* ── 時プルダウン ── */}
+        <Modal visible={hourPickerVisible} transparent animationType="fade" onRequestClose={() => setHourPickerVisible(false)}>
+          <TouchableOpacity style={styles.pickerOverlay} activeOpacity={1} onPress={() => setHourPickerVisible(false)}>
+            <View style={styles.pickerBox}>
+              <Text style={styles.pickerTitle}>時を選択</Text>
+              <FlatList data={HOURS} keyExtractor={h => h} numColumns={6}
+                renderItem={({ item: h }) => (
+                  <TouchableOpacity style={[styles.pickerItem, selHour === h && styles.pickerItemActive]}
+                    onPress={() => { setSelHour(h); setHourPickerVisible(false); }}>
+                    <Text style={[styles.pickerItemText, selHour === h && { color: '#fff' }]}>{h}</Text>
+                  </TouchableOpacity>
+                )} />
+            </View>
+          </TouchableOpacity>
+        </Modal>
+
+        {/* ── 分プルダウン ── */}
+        <Modal visible={minutePickerVisible} transparent animationType="fade" onRequestClose={() => setMinutePickerVisible(false)}>
+          <TouchableOpacity style={styles.pickerOverlay} activeOpacity={1} onPress={() => setMinutePickerVisible(false)}>
+            <View style={styles.pickerBox}>
+              <Text style={styles.pickerTitle}>分を選択</Text>
+              <View style={{ flexDirection: 'row', gap: 10, justifyContent: 'center', marginTop: 10 }}>
+                {MINUTES.map(m => (
+                  <TouchableOpacity key={m} style={[styles.pickerItem, selMinute === m && styles.pickerItemActive]}
+                    onPress={() => { setSelMinute(m); setMinutePickerVisible(false); }}>
+                    <Text style={[styles.pickerItemText, selMinute === m && { color: '#fff' }]}>{m}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+          </TouchableOpacity>
+        </Modal>
+
+        {/* ── チェックリストモーダル ── */}
+        <Modal visible={!!checkModalItem} transparent animationType="slide" onRequestClose={() => { setCheckModalItem(null); setNewCheckLabel(''); }}>
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.pickerOverlay}>
+            <TouchableOpacity style={StyleSheet.absoluteFillObject} activeOpacity={1} onPress={() => { setCheckModalItem(null); setNewCheckLabel(''); }} />
+            <View style={[styles.modalContent, { maxHeight: '85%' }]} onStartShouldSetResponder={() => true}>
+              <Text style={styles.modalTitle}>{checkModalItem?.company}</Text>
+
+              <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+                {/* 固定ステップ */}
+                <Text style={[styles.label, { marginTop: 8 }]}>選考ステップ</Text>
+                {CHECKLIST_STEPS.map(step => {
+                  const checked = (checkModalItem?.checklist ?? {})[step] ?? false;
+                  const isInternal = step === '内定';
+                  return (
+                    <TouchableOpacity key={step}
+                      style={[styles.checkRow, checked && isInternal && { backgroundColor: '#fff0f0', borderRadius: 8 }]}
+                      onPress={() => checkModalItem && toggleCheck(checkModalItem, step)}>
+                      <View style={[styles.checkbox, checked && { backgroundColor: isInternal ? '#e74c3c' : TDU_BLUE, borderColor: isInternal ? '#e74c3c' : TDU_BLUE }]}>
+                        {checked && <Text style={{ color: '#fff', fontSize: 12, fontWeight: 'bold' }}>✓</Text>}
+                      </View>
+                      <Text style={[styles.checkLabel, checked && { color: isInternal ? '#e74c3c' : TDU_BLUE, fontWeight: 'bold' }]}>
+                        {step}{isInternal && checked ? ' 🌸' : ''}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+
+                {/* 区切り */}
+                <View style={{ borderTopWidth: 1, borderColor: '#f0f0f0', marginTop: 16, marginBottom: 4 }} />
+                <Text style={styles.label}>カスタム項目</Text>
+
+                {/* カスタム項目一覧 */}
+                {(checkModalItem?.customChecklist ?? []).length === 0 && (
+                  <Text style={{ fontSize: 12, color: '#bbb', marginBottom: 8, paddingLeft: 8 }}>追加した項目がここに表示されます</Text>
+                )}
+                {(checkModalItem?.customChecklist ?? []).map(c => (
+                  <View key={c.id} style={styles.checkRow}>
+                    <TouchableOpacity
+                      style={[styles.checkbox, c.checked && { backgroundColor: '#27AE60', borderColor: '#27AE60' }]}
+                      onPress={() => checkModalItem && toggleCustomCheck(checkModalItem, c.id)}>
+                      {c.checked && <Text style={{ color: '#fff', fontSize: 12, fontWeight: 'bold' }}>✓</Text>}
+                    </TouchableOpacity>
+                    <Text style={[styles.checkLabel, { flex: 1 }, c.checked && { color: '#27AE60', fontWeight: 'bold' }]}>{c.label}</Text>
+                    {/* 削除ボタン */}
+                    <TouchableOpacity onPress={() => checkModalItem && deleteCustomCheck(checkModalItem, c.id)}
+                      style={{ paddingHorizontal: 8, paddingVertical: 4 }}>
+                      <Text style={{ color: '#ccc', fontSize: 16 }}>✕</Text>
+                    </TouchableOpacity>
+                  </View>
+                ))}
+
+                {/* カスタム項目追加入力 */}
+                <View style={styles.customAddRow}>
+                  <TextInput
+                    style={styles.customAddInput}
+                    placeholder="項目を入力（例: 適性検査）"
+                    value={newCheckLabel}
+                    onChangeText={setNewCheckLabel}
+                    returnKeyType="done"
+                    onSubmitEditing={() => checkModalItem && addCustomCheck(checkModalItem)}
+                  />
+                  <TouchableOpacity
+                    style={[styles.customAddBtn, !newCheckLabel.trim() && { backgroundColor: '#ccc' }]}
+                    onPress={() => checkModalItem && addCustomCheck(checkModalItem)}
+                    disabled={!newCheckLabel.trim()}>
+                    <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 14 }}>追加</Text>
+                  </TouchableOpacity>
+                </View>
+
+                <TouchableOpacity style={[styles.saveButton, { marginTop: 20, alignSelf: 'center', paddingHorizontal: 40 }]}
+                  onPress={() => { setCheckModalItem(null); setNewCheckLabel(''); }}>
+                  <Text style={styles.saveButtonText}>閉じる</Text>
+                </TouchableOpacity>
+                <View style={{ height: 20 }} />
+              </ScrollView>
+            </View>
+          </KeyboardAvoidingView>
+        </Modal>
+
+        {/* ── ジャンル追加/編集モーダル ── */}
+        <Modal visible={genreModalVisible} transparent animationType="slide" onRequestClose={() => setGenreModalVisible(false)}>
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
+            <TouchableOpacity style={StyleSheet.absoluteFillObject} onPress={() => setGenreModalVisible(false)} activeOpacity={1} />
+            <View style={[styles.modalContent, { maxHeight: '70%' }]}>
+              <Text style={styles.modalTitle}>{editGenre ? 'ジャンルを編集' : 'ジャンルを追加'}</Text>
+              <Text style={styles.label}>ジャンル名</Text>
+              <TextInput style={styles.input} placeholder="例: IT・通信" value={genreName} onChangeText={setGenreName} />
+              <Text style={styles.label}>カラー</Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 20 }}>
+                {COLOR_PALETTE.map(c => (
+                  <TouchableOpacity key={c}
+                    style={[styles.colorDot, { backgroundColor: c }, genreColor === c && styles.colorDotActive]}
+                    onPress={() => setGenreColor(c)} />
+                ))}
+              </View>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+                <View style={[styles.genreColorDot, { backgroundColor: genreColor, width: 28, height: 28 }]} />
+                <Text style={{ color: '#333' }}>選択中: {genreColor}</Text>
+              </View>
+              <View style={styles.modalButtons}>
+                {editGenre && (
+                  <TouchableOpacity onPress={() => deleteGenre(editGenre.id)}>
+                    <Text style={styles.deleteText}>削除</Text>
+                  </TouchableOpacity>
+                )}
+                <View style={{ flex: 1 }} />
+                <TouchableOpacity onPress={() => setGenreModalVisible(false)}>
+                  <Text style={styles.cancelText}>戻る</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.saveButton, !genreName.trim() && styles.saveButtonDisabled]} onPress={saveGenre}>
+                  <Text style={styles.saveButtonText}>保存</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           </KeyboardAvoidingView>
         </Modal>
@@ -481,48 +926,83 @@ const styles = StyleSheet.create({
   statChip: { backgroundColor: '#e8f0fe', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 6, alignItems: 'center' },
   statNum: { fontSize: 18, fontWeight: 'bold', color: TDU_BLUE },
   statLabel: { fontSize: 9, color: TDU_BLUE },
-  calDayCompany: { fontSize: 7, color: TDU_BLUE, fontWeight: 'bold', textAlign: 'center', width: 46 },
+
+  // カレンダー企業ラベル
+  calLabel: { borderLeftWidth: 2, borderRadius: 3, paddingHorizontal: 2, marginTop: 1, width: 44 },
+  calLabelText: { fontSize: 7, fontWeight: 'bold' },
+  calMore: { fontSize: 7, color: '#999', marginTop: 1 },
+
+  // 検索バー
+  searchBar: { flexDirection: 'row', alignItems: 'center', margin: 12, backgroundColor: '#f5f5f5', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8 },
+  searchIcon: { fontSize: 14, marginRight: 6 },
+  searchInput: { flex: 1, fontSize: 14, color: '#333' },
+
+  // ジャンルフィルタ
+  genreFilter: { paddingLeft: 12, marginBottom: 8 },
+  genreChip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, borderWidth: 1, borderColor: '#ddd', marginRight: 6 },
+  genreChipActive: { backgroundColor: TDU_BLUE, borderColor: TDU_BLUE },
+  genreChipText: { fontSize: 11, color: '#666' },
+
+  // ジャンル色帯
+  genreBand: { width: 4, borderRadius: 4, alignSelf: 'stretch' },
+
+  // 持ち駒カード
   upcomingCard: { flexDirection: 'row', alignItems: 'center', padding: 12, backgroundColor: '#f0f4ff', borderRadius: 10, marginBottom: 8 },
   todoArea: { flex: 1, paddingHorizontal: 16, paddingTop: 14 },
   sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
   subTitle: { fontSize: 15, fontWeight: 'bold', color: '#333', marginBottom: 10 },
   addButton: { backgroundColor: TDU_BLUE, paddingVertical: 6, paddingHorizontal: 12, borderRadius: 20 },
   addButtonText: { color: '#fff', fontSize: 11, fontWeight: 'bold' },
-  itemCard: { paddingVertical: 13, borderBottomWidth: 1, borderColor: '#f0f0f0', flexDirection: 'row', alignItems: 'center', gap: 8 },
+  itemCard: { paddingVertical: 13, paddingHorizontal: 6, borderBottomWidth: 1, borderColor: '#f0f0f0', flexDirection: 'row', alignItems: 'center', gap: 8 },
   itemTitle: { fontSize: 15, fontWeight: 'bold', color: '#222' },
   itemStatus: { fontSize: 11, color: '#888', marginTop: 3 },
   itemArrow: { color: '#ccc', fontSize: 16 },
   emptyText: { textAlign: 'center', color: '#bbb', marginTop: 24, fontSize: 13 },
-  listHeader: { padding: 16, paddingBottom: 10, borderBottomWidth: 1, borderColor: '#f0f0f0' },
-  listCard: { padding: 15, backgroundColor: '#fff', borderRadius: 12, marginBottom: 10, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#eee', elevation: 1 },
+  listCard: { padding: 14, borderRadius: 12, marginBottom: 10, flexDirection: 'row', alignItems: 'center', borderWidth: 1, elevation: 1, overflow: 'hidden' },
   dateText: { fontSize: 11, color: '#999', marginTop: 4 },
   notePreview: { fontSize: 10, color: '#aaa', marginTop: 2 },
-  statusBadge: { backgroundColor: TDU_BLUE, paddingHorizontal: 8, paddingVertical: 5, borderRadius: 8, marginLeft: 8 },
+  statusBadge: { backgroundColor: TDU_BLUE, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
   statusBadgeText: { color: '#fff', fontSize: 9, fontWeight: 'bold' },
   rankBadge: { width: 22, height: 22, borderRadius: 6, alignItems: 'center', justifyContent: 'center' },
   rankText: { color: '#fff', fontSize: 10, fontWeight: 'bold' },
+  checkBtn: { backgroundColor: '#f0f4ff', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
+  checkBtnText: { fontSize: 10, color: TDU_BLUE, fontWeight: 'bold' },
+
+  // ソート
   sortChip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, backgroundColor: '#f0f2f5' },
   sortChipActive: { backgroundColor: TDU_BLUE },
   sortChipText: { fontSize: 12, color: '#666' },
+
+  // FAB
   fab: { position: 'absolute', bottom: 16, right: 20, width: 52, height: 52, borderRadius: 26, backgroundColor: TDU_BLUE, alignItems: 'center', justifyContent: 'center', elevation: 5 },
   fabText: { color: '#fff', fontSize: 26, lineHeight: 30 },
+
+  // 設定
   settingSection: { fontSize: 12, fontWeight: 'bold', color: '#888', marginBottom: 12, letterSpacing: 1 },
   settingRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 14, borderBottomWidth: 1, borderColor: '#f0f0f0' },
-  settingLabel: { fontSize: 14, color: '#333', flex: 1, marginRight: 10 },
+  settingLabel: { fontSize: 14, color: '#333', flex: 1 },
+  genreRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderColor: '#f0f0f0' },
+  genreColorDot: { width: 16, height: 16, borderRadius: 8, marginRight: 12 },
+  outlineButton: { borderWidth: 1, borderColor: TDU_BLUE, padding: 12, borderRadius: 10, alignItems: 'center', marginTop: 12 },
+  outlineButtonText: { color: TDU_BLUE, fontWeight: 'bold' },
   dangerButton: { borderWidth: 1, borderColor: '#e74c3c', padding: 14, borderRadius: 10, alignItems: 'center' },
   dangerButtonText: { color: '#e74c3c', fontWeight: 'bold' },
-  aboutBox: { backgroundColor: '#f8f9fa', padding: 16, borderRadius: 10 },
+  aboutBox: { backgroundColor: '#f8f9fa', padding: 16, borderRadius: 10, marginTop: 20 },
   aboutText: { fontSize: 13, color: '#666', lineHeight: 20 },
+
+  // タブバー
   tabBar: { flexDirection: 'row', height: 70, borderTopWidth: 1, borderColor: '#f0f0f0', backgroundColor: '#fff', paddingBottom: 10 },
   tabButton: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   tabIcon: { fontSize: 20, opacity: 0.3 },
   tabIconActive: { opacity: 1 },
   tabLabel: { fontSize: 9, color: '#ccc', marginTop: 3 },
   tabLabelActive: { color: TDU_BLUE, fontWeight: 'bold' },
+
+  // モーダル共通
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
   modalContent: { backgroundColor: '#fff', borderTopLeftRadius: 25, borderTopRightRadius: 25, padding: 24, maxHeight: '92%' },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
-  modalTitle: { fontSize: 17, fontWeight: 'bold', color: '#333' },
+  modalTitle: { fontSize: 17, fontWeight: 'bold', color: '#333', marginBottom: 4 },
   deleteText: { color: '#e74c3c', fontSize: 13 },
   label: { fontSize: 11, color: '#888', marginBottom: 6, marginTop: 12 },
   input: { backgroundColor: '#f8f9fa', padding: 13, borderRadius: 10, fontSize: 15, marginBottom: 2 },
@@ -537,4 +1017,24 @@ const styles = StyleSheet.create({
   saveButton: { backgroundColor: TDU_BLUE, paddingVertical: 13, paddingHorizontal: 44, borderRadius: 14 },
   saveButtonDisabled: { backgroundColor: '#aaa' },
   saveButtonText: { color: '#fff', fontWeight: 'bold', fontSize: 15 },
+
+  // 時間ピッカー
+  pickerOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center' },
+  pickerBox: { backgroundColor: '#fff', borderRadius: 20, padding: 20, width: '85%' },
+  pickerTitle: { fontSize: 16, fontWeight: 'bold', color: '#333', marginBottom: 12, textAlign: 'center' },
+  pickerItem: { width: 44, height: 44, margin: 4, borderRadius: 10, backgroundColor: '#f0f2f5', alignItems: 'center', justifyContent: 'center' },
+  pickerItemActive: { backgroundColor: TDU_BLUE },
+  pickerItemText: { fontSize: 14, color: '#333' },
+
+  // チェックリスト
+  checkRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderColor: '#f5f5f5', paddingHorizontal: 8 },
+  checkbox: { width: 24, height: 24, borderRadius: 6, borderWidth: 2, borderColor: '#ddd', alignItems: 'center', justifyContent: 'center', marginRight: 12 },
+  checkLabel: { fontSize: 15, color: '#333' },
+  customAddRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12, paddingHorizontal: 4 },
+  customAddInput: { flex: 1, backgroundColor: '#f8f9fa', padding: 11, borderRadius: 10, fontSize: 14 },
+  customAddBtn: { backgroundColor: TDU_BLUE, paddingVertical: 11, paddingHorizontal: 16, borderRadius: 10 },
+
+  // カラーパレット
+  colorDot: { width: 32, height: 32, borderRadius: 16 },
+  colorDotActive: { borderWidth: 3, borderColor: '#333' },
 });
