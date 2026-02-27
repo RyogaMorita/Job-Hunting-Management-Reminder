@@ -1,76 +1,62 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   StyleSheet, Text, View, TouchableOpacity, ScrollView,
   SafeAreaView, Modal, TextInput, Alert, KeyboardAvoidingView,
-  Platform, Switch, FlatList
+  Platform, Switch, Animated, PanResponder, Linking,
 } from 'react-native';
 import { Calendar } from 'react-native-calendars';
 import { StatusBar } from 'expo-status-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
 
-// 通知ハンドラ設定
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
+    shouldShowAlert: true, shouldPlaySound: true, shouldSetBadge: false,
   }),
 });
 
-// ─── 定数 ─────────────────────────────────────────────
-const STORAGE_KEY = '@schedules_v8';
-const GENRES_KEY = '@genres_v8';
+// ─── 定数 ─────────────────────────────────────────────────────────
+const STORAGE_KEY = '@schedules_v9';
+const GENRES_KEY = '@genres_v9';
 const TDU_BLUE = '#003366';
 const ACCENT = '#1a6bcc';
 
 const STATUS_OPTIONS = ['検討中', 'ES作成', 'ES提出済', '1次面接', '2次面接', '最終面接', '内定', '内定辞退', '不合格'];
 const STATUS_PRIORITY: Record<string, number> = {
-  '内定': 6, '最終面接': 5, '2次面接': 4, '1次面接': 3,
-  'ES提出済': 2, 'ES作成': 1, '検討中': 0, '内定辞退': -1, '不合格': -2,
+  '内定': 6, '最終面接': 5, '2次面接': 4, '1次面接': 3, 'ES提出済': 2, 'ES作成': 1, '検討中': 0, '内定辞退': -1, '不合格': -2,
 };
 const STATUS_SORT_ORDER = ['内定', '最終面接', '2次面接', '1次面接', 'ES提出済', 'ES作成', '検討中', '内定辞退', '不合格'];
+// ステータスに対応するチェックリスト自動チェック
+const STATUS_TO_CHECKS: Record<string, string[]> = {
+  'ES作成': [],
+  'ES提出済': ['ES提出'],
+  '1次面接': ['ES提出', '1次面接'],
+  '2次面接': ['ES提出', '1次面接', '2次面接'],
+  '最終面接': ['ES提出', '1次面接', '2次面接', '最終面接'],
+  '内定': ['ES提出', '1次面接', '2次面接', '最終面接', '内定'],
+  '内定辞退': ['ES提出', '1次面接', '2次面接', '最終面接', '内定'],
+  '不合格': [],
+  '検討中': [],
+};
+const CHECKLIST_STEPS = ['ES提出', '1次面接', '2次面接', '最終面接', '内定'];
 const RANK_OPTIONS = ['S', 'A', 'B', 'C'];
 const SORT_OPTIONS = ['登録順', '直近順', '五十音', '志望度', 'ステータス', 'ジャンル'];
 const HOURS = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0'));
 const MINUTES = ['00', '15', '30', '45'];
+const INACTIVE = ['内定辞退', '不合格'];
 
-// 選考チェックリスト（固定）
-const CHECKLIST_STEPS = ['ES提出', '1次面接', '2次面接', '最終面接', '内定'];
-const CUSTOM_ITEMS_KEY = '@custom_checklist_items';
+const statusCardColor = (s: string) =>
+  s === '内定' ? '#fff0f0' : INACTIVE.includes(s) ? '#f0f0f0' : '#ffffff';
+const statusCardBorder = (s: string) =>
+  s === '内定' ? '#f5a0a0' : INACTIVE.includes(s) ? '#cccccc' : '#eeeeee';
 
-// ステータスごとのカード背景色
-const statusCardColor = (status: string): string => {
-  if (status === '内定') return '#fff0f0'; // 赤系
-  if (status === '内定辞退') return '#f0f0f0'; // 灰色
-  if (status === '不合格') return '#f0f0f0'; // 灰色
-  return '#ffffff';
-};
-const statusCardBorder = (status: string): string => {
-  if (status === '内定') return '#f5a0a0';
-  if (['内定辞退', '不合格'].includes(status)) return '#cccccc';
-  return '#eeeeee';
-};
-
-// ─── 型定義 ───────────────────────────────────────────
-interface Genre {
-  id: string;
-  name: string;
-  color: string; // hex
-}
+// ─── 型定義 ───────────────────────────────────────────────────────
+interface Genre { id: string; name: string; color: string; }
 
 interface Schedule {
-  id: string;
-  company: string;
-  date: string;
-  hour: string;
-  minute: string;
-  status: string;
-  note: string;
-  url: string;
-  password: string;
-  rank: string;
-  genreId: string;
+  id: string; company: string; date: string; hour: string; minute: string;
+  status: string; note: string; url: string; userId: string; password: string;
+  rank: string; genreId: string;
   checklist: Record<string, boolean>;
   customChecklist: { id: string; label: string; checked: boolean }[];
 }
@@ -78,7 +64,7 @@ interface Schedule {
 type TabType = 'calendar' | 'list' | 'settings';
 type SortType = '登録順' | '直近順' | '五十音' | '志望度' | 'ステータス' | 'ジャンル';
 
-// ─── デフォルトジャンル ──────────────────────────────
+// ─── デフォルトジャンル ───────────────────────────────────────────
 const DEFAULT_GENRES: Genre[] = [
   { id: 'it', name: 'IT・通信', color: '#4A90D9' },
   { id: 'finance', name: '金融・保険', color: '#27AE60' },
@@ -97,13 +83,49 @@ const DEFAULT_GENRES: Genre[] = [
   { id: 'other', name: 'その他', color: '#7F8C8D' },
 ];
 
-// ─── カラーパレット（ジャンル色選択用） ──────────────
 const COLOR_PALETTE = [
   '#E74C3C', '#E67E22', '#F1C40F', '#2ECC71', '#1ABC9C',
   '#3498DB', '#4A90D9', '#9B59B6', '#8E44AD', '#2C3E50',
   '#27AE60', '#16A085', '#2980B9', '#7F8C8D', '#BDC3C7',
 ];
 
+// ─── スワイプ削除コンポーネント ────────────────────────────────────
+function SwipeableRow({ children, onDelete }: { children: React.ReactNode; onDelete: () => void }) {
+  const translateX = useRef(new Animated.Value(0)).current;
+  const THRESHOLD = -80;
+
+  const panResponder = useRef(PanResponder.create({
+    onMoveShouldSetPanResponder: (_, g) => Math.abs(g.dx) > 5 && Math.abs(g.dx) > Math.abs(g.dy),
+    onPanResponderMove: (_, g) => {
+      if (g.dx < 0) translateX.setValue(Math.max(g.dx, THRESHOLD * 1.5));
+    },
+    onPanResponderRelease: (_, g) => {
+      if (g.dx < THRESHOLD) {
+        Animated.spring(translateX, { toValue: THRESHOLD, useNativeDriver: true }).start();
+      } else {
+        Animated.spring(translateX, { toValue: 0, useNativeDriver: true }).start();
+      }
+    },
+  })).current;
+
+  const reset = () => Animated.spring(translateX, { toValue: 0, useNativeDriver: true }).start();
+
+  return (
+    <View style={{ overflow: 'hidden', marginBottom: 10 }}>
+      {/* 削除背景 */}
+      <View style={styles.swipeDeleteBg}>
+        <TouchableOpacity onPress={() => { reset(); onDelete(); }} style={styles.swipeDeleteBtn}>
+          <Text style={styles.swipeDeleteText}>🗑️{'\n'}削除</Text>
+        </TouchableOpacity>
+      </View>
+      <Animated.View style={{ transform: [{ translateX }] }} {...panResponder.panHandlers}>
+        {children}
+      </Animated.View>
+    </View>
+  );
+}
+
+// ─── メインコンポーネント ─────────────────────────────────────────
 export default function App() {
   const [activeTab, setActiveTab] = useState<TabType>('calendar');
   const [schedules, setSchedules] = useState<Schedule[]>([]);
@@ -113,13 +135,13 @@ export default function App() {
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [calDaySelected, setCalDaySelected] = useState(false);
 
-  // 持ち駒一覧
+  // 持ち駒フィルタ
   const [searchQuery, setSearchQuery] = useState('');
   const [sortType, setSortType] = useState<SortType>('登録順');
-  const [filterGenreId, setFilterGenreId] = useState<string>('all');
-  const [filterStatus, setFilterStatus] = useState<string>('all');
-  const [sortAsc, setSortAsc] = useState<boolean>(true);
-  const [filterPanelVisible, setFilterPanelVisible] = useState<boolean>(false);
+  const [filterGenreIds, setFilterGenreIds] = useState<string[]>([]);   // 複数選択
+  const [filterStatuses, setFilterStatuses] = useState<string[]>([]);   // 複数選択
+  const [sortAsc, setSortAsc] = useState(true);
+  const [filterPanelVisible, setFilterPanelVisible] = useState(false);
 
   // 登録/編集モーダル
   const [isModalVisible, setModalVisible] = useState(false);
@@ -132,10 +154,15 @@ export default function App() {
   const [selMinute, setSelMinute] = useState('');
   const [note, setNote] = useState('');
   const [url, setUrl] = useState('');
+  const [userId, setUserId] = useState('');
   const [password, setPassword] = useState('');
   const [rank, setRank] = useState('B');
   const [selGenreId, setSelGenreId] = useState('other');
   const [checklist, setChecklist] = useState<Record<string, boolean>>({});
+
+  // ピッカー
+  const [hourPickerVisible, setHourPickerVisible] = useState(false);
+  const [minutePickerVisible, setMinutePickerVisible] = useState(false);
 
   // チェックリストモーダル
   const [checkModalItem, setCheckModalItem] = useState<Schedule | null>(null);
@@ -146,10 +173,6 @@ export default function App() {
   const [editGenre, setEditGenre] = useState<Genre | null>(null);
   const [genreName, setGenreName] = useState('');
   const [genreColor, setGenreColor] = useState('#4A90D9');
-
-  // 時間プルダウン
-  const [hourPickerVisible, setHourPickerVisible] = useState(false);
-  const [minutePickerVisible, setMinutePickerVisible] = useState(false);
 
   // 通知設定
   const [notifyEnabled, setNotifyEnabled] = useState(true);
@@ -181,239 +204,145 @@ export default function App() {
     await AsyncStorage.setItem(GENRES_KEY, JSON.stringify(data));
   };
 
-  // ─── 統計 ────────────────────────────────────────
+  // ─── 統計 ──────────────────────────────────────────────────────
   const activeCount = useMemo(() => schedules.filter(s => !['内定', '内定辞退', '不合格'].includes(s.status)).length, [schedules]);
   const internalCount = useMemo(() => schedules.filter(s => s.status === '内定').length, [schedules]);
 
   const upcomingSchedules = useMemo(() => {
     const today = new Date().toISOString().split('T')[0];
-    return schedules
-      .filter(s => s.date >= today && !['内定辞退', '不合格'].includes(s.status))
-      .sort((a, b) => a.date.localeCompare(b.date))
-      .slice(0, 5);
+    return schedules.filter(s => s.date >= today && !INACTIVE.includes(s.status))
+      .sort((a, b) => a.date.localeCompare(b.date)).slice(0, 5);
   }, [schedules]);
 
-  // ─── カレンダーマーキング ──────────────────────
+  // ─── カレンダーマーキング ──────────────────────────────────────
   const markedDates = useMemo(() => {
     const marks: Record<string, any> = {};
     schedules.forEach(s => {
-      const genre = genres.find(g => g.id === s.genreId);
-      const dot = genre ? genre.color : TDU_BLUE;
+      const col = genres.find(g => g.id === s.genreId)?.color ?? TDU_BLUE;
       if (!marks[s.date]) marks[s.date] = { dots: [] };
       if (!marks[s.date].dots) marks[s.date].dots = [];
-      marks[s.date].dots.push({ color: dot });
+      marks[s.date].dots.push({ color: col });
     });
     marks[selectedDate] = { ...(marks[selectedDate] || {}), selected: true, selectedColor: TDU_BLUE };
     return marks;
   }, [schedules, selectedDate, genres]);
 
-  // 日付→企業マップ（同日はステータス優先度が高い順に並べる）
   const dateCompanyMap = useMemo(() => {
     const map: Record<string, Schedule[]> = {};
-    schedules.forEach(s => {
-      if (!map[s.date]) map[s.date] = [];
-      map[s.date].push(s);
-    });
+    schedules.forEach(s => { if (!map[s.date]) map[s.date] = []; map[s.date].push(s); });
     Object.keys(map).forEach(d => {
       map[d].sort((a, b) => (STATUS_PRIORITY[b.status] ?? 0) - (STATUS_PRIORITY[a.status] ?? 0));
     });
     return map;
   }, [schedules]);
 
-  // ─── 持ち駒フィルタ・ソート ────────────────────
+  // ─── フィルタ・ソート ──────────────────────────────────────────
   const filteredSorted = useMemo(() => {
     let list = [...schedules];
     if (searchQuery.trim()) {
       const q = searchQuery.trim().toLowerCase();
       list = list.filter(s => s.company.toLowerCase().includes(q));
     }
-    if (filterGenreId !== 'all') list = list.filter(s => s.genreId === filterGenreId);
-    if (filterStatus !== 'all') list = list.filter(s => s.status === filterStatus);
+    if (filterGenreIds.length > 0) list = list.filter(s => filterGenreIds.includes(s.genreId));
+    if (filterStatuses.length > 0) list = list.filter(s => filterStatuses.includes(s.status));
 
+    const ro: Record<string, number> = { S: 0, A: 1, B: 2, C: 3 };
     switch (sortType) {
       case '直近順': list.sort((a, b) => a.date.localeCompare(b.date)); break;
       case '五十音': list.sort((a, b) => a.company.localeCompare(b.company, 'ja')); break;
-      case '志望度': {
-        const o = { S: 0, A: 1, B: 2, C: 3 };
-        list.sort((a, b) => (o[a.rank as keyof typeof o] ?? 3) - (o[b.rank as keyof typeof o] ?? 3));
-        break;
-      }
+      case '志望度': list.sort((a, b) => (ro[a.rank] ?? 3) - (ro[b.rank] ?? 3)); break;
       case 'ステータス':
         list.sort((a, b) => {
           const sd = STATUS_SORT_ORDER.indexOf(a.status) - STATUS_SORT_ORDER.indexOf(b.status);
           if (sd !== 0) return sd;
-          // ステータスが同じなら志望度が高い方を上に
-          const ro = { S: 0, A: 1, B: 2, C: 3 };
-          return (ro[a.rank as keyof typeof ro] ?? 3) - (ro[b.rank as keyof typeof ro] ?? 3);
-        });
-        break;
+          return (ro[a.rank] ?? 3) - (ro[b.rank] ?? 3);
+        }); break;
       case 'ジャンル': list.sort((a, b) => a.genreId.localeCompare(b.genreId)); break;
     }
     if (!sortAsc) list.reverse();
     return list;
-  }, [schedules, searchQuery, filterGenreId, filterStatus, sortType, sortAsc]);
+  }, [schedules, searchQuery, filterGenreIds, filterStatuses, sortType, sortAsc]);
 
   const filteredByDate = useMemo(() => schedules.filter(s => s.date === selectedDate), [schedules, selectedDate]);
 
-  // ─── 保存 ────────────────────────────────────────
+  // ─── 保存ロジック ──────────────────────────────────────────────
   const handleSave = async () => {
     if (companyName.trim() === '') return;
-
-    const INACTIVE = ['内定辞退', '不合格'];
-    const newIsInactive = INACTIVE.includes(selStatus);
     const name = companyName.trim();
-
-    // 同名の既存エントリ（編集中のものを除く）
-    const sameNameEntries = schedules.filter(
-      s => s.company.trim() === name && s.id !== (selectedItem?.id ?? '')
-    );
+    const newPriority = STATUS_PRIORITY[selStatus] ?? 0;
+    const newIsInactive = INACTIVE.includes(selStatus);
+    const sameNameEntries = schedules.filter(s => s.company.trim() === name && s.id !== (selectedItem?.id ?? ''));
 
     if (sameNameEntries.length > 0) {
       const existingInactive = sameNameEntries.find(s => INACTIVE.includes(s.status));
-      const existingPriority = Math.max(...sameNameEntries.map(s => STATUS_PRIORITY[s.status] ?? 0));
-      const newPriority = STATUS_PRIORITY[selStatus] ?? 0;
+      const existingMaxPriority = Math.max(...sameNameEntries.map(s => STATUS_PRIORITY[s.status] ?? 0));
 
       if (newIsInactive) {
-        // 新規が不合格/内定辞退 → 既存の同名エントリを全削除して新規のみ残す
-        Alert.alert(
-          `${selStatus}として登録`,
+        Alert.alert(`${selStatus}として登録`,
           `「${name}」の既存エントリを削除し、${selStatus}のみ残します。`,
-          [
-            { text: 'キャンセル', style: 'cancel' },
-            { text: '登録', onPress: () => doSaveMerge(sameNameEntries.map(s => s.id)) },
-          ]
-        );
+          [{ text: 'キャンセル', style: 'cancel' }, { text: '登録', onPress: () => doSaveMerge(sameNameEntries.map(s => s.id)) }]);
       } else if (existingInactive) {
-        // 既存が不合格/内定辞退 → 追加しない
-        Alert.alert(
-          '登録できません',
-          `「${name}」はすでに「${existingInactive.status}」として登録されています。
-別の企業名で登録するか、既存エントリを編集してください。`
-        );
-      } else if (newPriority > existingPriority) {
-        // 新規のステータスが高い → 既存を削除して新規のみ
-        Alert.alert(
-          'ステータス更新',
+        Alert.alert('登録できません',
+          `「${name}」はすでに「${existingInactive.status}」として登録されています。`);
+      } else if (newPriority > existingMaxPriority) {
+        Alert.alert('ステータス更新',
           `「${name}」の既存エントリ（${sameNameEntries.map(s => s.status).join('、')}）を削除し、${selStatus}として更新しますか？`,
-          [
-            { text: 'キャンセル', style: 'cancel' },
-            { text: '更新', onPress: () => doSaveMerge(sameNameEntries.map(s => s.id)) },
-          ]
-        );
+          [{ text: 'キャンセル', style: 'cancel' }, { text: '更新', onPress: () => doSaveMerge(sameNameEntries.map(s => s.id)) }]);
       } else {
-        // 新規のステータスが低い or 同じ → 別エントリとして追加確認
-        Alert.alert(
-          '重複確認',
-          `「${name}」（${sameNameEntries.map(s => s.status).join('、')}）がすでに存在します。
-別エントリーとして追加しますか？`,
-          [
-            { text: 'キャンセル', style: 'cancel' },
-            { text: '追加する', onPress: () => doSave() },
-          ]
-        );
+        Alert.alert('重複確認',
+          `「${name}」がすでに存在します。別エントリーとして追加しますか？`,
+          [{ text: 'キャンセル', style: 'cancel' }, { text: '追加する', onPress: () => doSave([]) }]);
       }
       return;
     }
-    doSave();
+    doSave([]);
   };
 
-  // 指定IDの既存エントリを削除してから保存
-  const doSaveMerge = async (deleteIds: string[]) => {
-    const filtered = schedules.filter(s => !deleteIds.includes(s.id));
+  const doSaveMerge = (deleteIds: string[]) => doSave(deleteIds);
+
+  const doSave = async (deleteIds: string[]) => {
+    const autoChecks = STATUS_TO_CHECKS[selStatus] ?? [];
+    const initCL: Record<string, boolean> = {};
+    CHECKLIST_STEPS.forEach(step => { initCL[step] = autoChecks.includes(step); });
+    // 既存のチェックと合成（既にチェック済みのものは保持）
+    const existingCL = selectedItem?.checklist ?? {};
+    CHECKLIST_STEPS.forEach(step => {
+      initCL[step] = initCL[step] || (existingCL[step] ?? false);
+    });
+
     const ns: Schedule = {
       id: selectedItem ? selectedItem.id : Date.now().toString(),
       company: companyName.trim(), date: selDate,
       hour: selHour, minute: selMinute,
       status: selStatus, note: note.trim(),
-      url: url.trim(), password: password.trim(),
-      rank, genreId: selGenreId, checklist,
+      url: url.trim(), userId: userId.trim(), password: password.trim(),
+      rank, genreId: selGenreId,
+      checklist: initCL,
       customChecklist: selectedItem?.customChecklist ?? [],
     };
-    const updated = selectedItem
-      ? filtered.map(s => s.id === selectedItem.id ? ns : s)
-      : [...filtered, ns];
+    const base = deleteIds.length > 0 ? schedules.filter(s => !deleteIds.includes(s.id)) : schedules;
+    const updated = selectedItem ? base.map(s => s.id === selectedItem.id ? ns : s) : [...base, ns];
     await saveSchedules(updated);
     await scheduleNotification(ns);
     closeModal();
-  };
-
-  const doSave = async () => {
-    const ns: Schedule = {
-      id: selectedItem ? selectedItem.id : Date.now().toString(),
-      company: companyName.trim(), date: selDate,
-      hour: selHour, minute: selMinute,
-      status: selStatus, note: note.trim(),
-      url: url.trim(), password: password.trim(),
-      rank, genreId: selGenreId, checklist,
-      customChecklist: selectedItem?.customChecklist ?? [],
-    };
-    const updated = selectedItem
-      ? schedules.map(s => s.id === selectedItem.id ? ns : s)
-      : [...schedules, ns];
-    await saveSchedules(updated);
-    await scheduleNotification(ns);
-    closeModal();
-  };
-
-  // ── 通知スケジュール ──────────────────────────────
-  const scheduleNotification = async (item: Schedule) => {
-    if (!notifyEnabled) return;
-    if (!item.date) return;
-    try {
-      const { status } = await Notifications.requestPermissionsAsync();
-      if (status !== 'granted') return;
-
-      // 既存の同IDの通知をキャンセル
-      const notifId = `notif_${item.id}`;
-      await Notifications.cancelScheduledNotificationAsync(notifId).catch(() => { });
-
-      const [y, m, d] = item.date.split('-').map(Number);
-      const hour = item.hour ? parseInt(item.hour) : 9;
-      const minute = item.minute ? parseInt(item.minute) : 0;
-
-      const notifyDate = new Date(y, m - 1, d - parseInt(notifyDays), hour, minute, 0);
-      if (notifyDate <= new Date()) return; // 過去は無視
-
-      await Notifications.scheduleNotificationAsync({
-        identifier: notifId,
-        content: {
-          title: `📋 ${item.company}`,
-          body: `${item.status}の予定が${notifyDays === '0' ? '今日' : notifyDays + '日後'}です（${item.date} ${item.hour ? item.hour + ':' + item.minute : ''}）`,
-          sound: true,
-        },
-        trigger: { date: notifyDate },
-      });
-    } catch (e) {
-      console.log('通知設定エラー:', e);
-    }
-  };
-
-  // 削除時に通知もキャンセル
-  const cancelNotification = async (id: string) => {
-    await Notifications.cancelScheduledNotificationAsync(`notif_${id}`).catch(() => { });
   };
 
   const closeModal = () => {
     setModalVisible(false); setDetailVisible(false); setSelectedItem(null);
     setCompanyName(''); setNote(''); setSelStatus('検討中');
-    setSelHour(''); setSelMinute(''); setUrl(''); setPassword('');
+    setSelHour(''); setSelMinute(''); setUrl(''); setUserId(''); setPassword('');
     setRank('B'); setSelGenreId('other'); setChecklist({});
   };
 
-  const openAdd = () => {
-    setSelDate(selectedDate);
-    setModalVisible(true);
-  };
+  const openAdd = () => { setSelDate(selectedDate); setModalVisible(true); };
 
   const openDetail = (item: Schedule) => {
     setSelectedItem(item); setCompanyName(item.company);
-    setNote(item.note ?? ''); setSelStatus(item.status);
-    setSelDate(item.date); setSelHour(item.hour ?? '');
-    setSelMinute(item.minute ?? ''); setUrl(item.url ?? '');
-    setPassword(item.password ?? ''); setRank(item.rank ?? 'B');
-    setSelGenreId(item.genreId ?? 'other');
-    setChecklist(item.checklist ?? {});
-    setDetailVisible(true);
+    setNote(item.note ?? ''); setSelStatus(item.status); setSelDate(item.date);
+    setSelHour(item.hour ?? ''); setSelMinute(item.minute ?? '');
+    setUrl(item.url ?? ''); setUserId(item.userId ?? ''); setPassword(item.password ?? '');
+    setRank(item.rank ?? 'B'); setSelGenreId(item.genreId ?? 'other');
+    setChecklist(item.checklist ?? {}); setDetailVisible(true);
   };
 
   const deleteSchedule = (id: string) => {
@@ -422,29 +351,54 @@ export default function App() {
       {
         text: '削除', style: 'destructive', onPress: async () => {
           await cancelNotification(id);
-          const filtered = schedules.filter(s => s.id !== id);
-          await saveSchedules(filtered); closeModal();
+          await saveSchedules(schedules.filter(s => s.id !== id));
+          closeModal();
         }
-      }
+      },
     ]);
   };
 
-  // チェックリスト更新
+  // ─── 通知 ─────────────────────────────────────────────────────
+  const scheduleNotification = async (item: Schedule) => {
+    if (!notifyEnabled || !item.date) return;
+    try {
+      const { status } = await Notifications.requestPermissionsAsync();
+      if (status !== 'granted') return;
+      const notifId = `notif_${item.id}`;
+      await Notifications.cancelScheduledNotificationAsync(notifId).catch(() => { });
+      const [y, m, d] = item.date.split('-').map(Number);
+      const h = item.hour ? parseInt(item.hour) : 9;
+      const min = item.minute ? parseInt(item.minute) : 0;
+      const notifyDate = new Date(y, m - 1, d - parseInt(notifyDays), h, min, 0);
+      if (notifyDate <= new Date()) return;
+      await Notifications.scheduleNotificationAsync({
+        identifier: notifId,
+        content: {
+          title: `📋 ${item.company}`,
+          body: `${item.status}の予定が${notifyDays === '0' ? '今日' : notifyDays + '日後'}です（${item.date}${item.hour ? ' ' + item.hour + ':' + item.minute : ''}）`,
+          sound: true,
+        },
+        trigger: { date: notifyDate },
+      });
+    } catch (e) { console.log('通知エラー:', e); }
+  };
+
+  const cancelNotification = async (id: string) => {
+    await Notifications.cancelScheduledNotificationAsync(`notif_${id}`).catch(() => { });
+  };
+
+  // ─── チェックリスト ────────────────────────────────────────────
   const toggleCheck = async (item: Schedule, step: string) => {
     const updated = schedules.map(s => {
       if (s.id !== item.id) return s;
       const newCL = { ...(s.checklist ?? {}), [step]: !(s.checklist ?? {})[step] };
-      // 内定チェック→ステータスを自動更新
       const newStatus = newCL['内定'] ? '内定' : s.status === '内定' ? '最終面接' : s.status;
       return { ...s, checklist: newCL, status: newStatus };
     });
     await saveSchedules(updated);
-    // checkModalItemも更新
-    const refreshed = updated.find(s => s.id === item.id) ?? null;
-    setCheckModalItem(refreshed);
+    setCheckModalItem(updated.find(s => s.id === item.id) ?? null);
   };
 
-  // カスタム項目をトグル
   const toggleCustomCheck = async (item: Schedule, id: string) => {
     const updated = schedules.map(s => {
       if (s.id !== item.id) return s;
@@ -455,62 +409,53 @@ export default function App() {
     setCheckModalItem(updated.find(s => s.id === item.id) ?? null);
   };
 
-  // カスタム項目を追加
   const addCustomCheck = async (item: Schedule) => {
     if (!newCheckLabel.trim()) return;
-    const newItem = { id: Date.now().toString(), label: newCheckLabel.trim(), checked: false };
-    const updated = schedules.map(s => {
-      if (s.id !== item.id) return s;
-      return { ...s, customChecklist: [...(s.customChecklist ?? []), newItem] };
-    });
+    const newC = { id: Date.now().toString(), label: newCheckLabel.trim(), checked: false };
+    const updated = schedules.map(s => s.id !== item.id ? s : { ...s, customChecklist: [...(s.customChecklist ?? []), newC] });
     await saveSchedules(updated);
     setCheckModalItem(updated.find(s => s.id === item.id) ?? null);
     setNewCheckLabel('');
   };
 
-  // カスタム項目を削除
   const deleteCustomCheck = async (item: Schedule, id: string) => {
-    const updated = schedules.map(s => {
-      if (s.id !== item.id) return s;
-      return { ...s, customChecklist: (s.customChecklist ?? []).filter(c => c.id !== id) };
-    });
+    const updated = schedules.map(s => s.id !== item.id ? s : { ...s, customChecklist: (s.customChecklist ?? []).filter(c => c.id !== id) });
     await saveSchedules(updated);
     setCheckModalItem(updated.find(s => s.id === item.id) ?? null);
   };
 
-  // ─── ジャンル管理 ──────────────────────────────
+  // ─── ジャンル管理 ─────────────────────────────────────────────
   const openAddGenre = () => { setEditGenre(null); setGenreName(''); setGenreColor('#4A90D9'); setGenreModalVisible(true); };
   const openEditGenre = (g: Genre) => { setEditGenre(g); setGenreName(g.name); setGenreColor(g.color); setGenreModalVisible(true); };
   const saveGenre = async () => {
     if (!genreName.trim()) return;
-    let updated: Genre[];
-    if (editGenre) {
-      updated = genres.map(g => g.id === editGenre.id ? { ...g, name: genreName.trim(), color: genreColor } : g);
-    } else {
-      updated = [...genres, { id: Date.now().toString(), name: genreName.trim(), color: genreColor }];
-    }
+    const updated = editGenre
+      ? genres.map(g => g.id === editGenre.id ? { ...g, name: genreName.trim(), color: genreColor } : g)
+      : [...genres, { id: Date.now().toString(), name: genreName.trim(), color: genreColor }];
     await saveGenres(updated);
     setGenreModalVisible(false);
   };
   const deleteGenre = (id: string) => {
     Alert.alert('削除', 'このジャンルを削除しますか？', [
       { text: 'キャンセル', style: 'cancel' },
-      {
-        text: '削除', style: 'destructive', onPress: async () => {
-          await saveGenres(genres.filter(g => g.id !== id));
-          setGenreModalVisible(false);
-        }
-      }
+      { text: '削除', style: 'destructive', onPress: async () => { await saveGenres(genres.filter(g => g.id !== id)); setGenreModalVisible(false); } },
     ]);
   };
 
-  // ─── ヘルパー ─────────────────────────────────
+  // ─── フィルタ複数選択 ──────────────────────────────────────────
+  const toggleFilterGenre = (id: string) =>
+    setFilterGenreIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  const toggleFilterStatus = (st: string) =>
+    setFilterStatuses(prev => prev.includes(st) ? prev.filter(x => x !== st) : [...prev, st]);
+  const isFilterActive = filterGenreIds.length > 0 || filterStatuses.length > 0;
+
+  // ─── ヘルパー ──────────────────────────────────────────────────
   const rankColor = (r: string) => ({ S: '#e74c3c', A: '#e67e22', B: '#2980b9', C: '#7f8c8d' }[r] ?? '#999');
   const genreOf = (id: string) => genres.find(g => g.id === id);
   const timeStr = (h: string, m: string) => h && m ? `${h}:${m}` : h ? `${h}:00` : '';
   const today = new Date().toISOString().split('T')[0];
 
-  // ─── UI ───────────────────────────────────────
+  // ─── UI ────────────────────────────────────────────────────────
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar style="dark" />
@@ -540,17 +485,14 @@ export default function App() {
               markedDates={markedDates}
               theme={{
                 todayTextColor: ACCENT, arrowColor: TDU_BLUE,
-                selectedDayBackgroundColor: TDU_BLUE,
-                calendarBackground: '#f8faff',
-                textSectionTitleColor: TDU_BLUE,
-                dayTextColor: '#222', monthTextColor: TDU_BLUE,
-                textMonthFontWeight: 'bold', textDayFontSize: 13,
+                selectedDayBackgroundColor: TDU_BLUE, calendarBackground: '#f8faff',
+                textSectionTitleColor: TDU_BLUE, dayTextColor: '#222',
+                monthTextColor: TDU_BLUE, textMonthFontWeight: 'bold', textDayFontSize: 13,
               }}
               dayComponent={({ date, state }: any) => {
                 const ds = date.dateString;
                 const items = dateCompanyMap[ds] || [];
-                const isSel = ds === selectedDate;
-                const isToday = ds === today;
+                const isSel = ds === selectedDate, isToday = ds === today;
                 return (
                   <TouchableOpacity onPress={() => { setSelectedDate(ds); setCalDaySelected(true); }}
                     style={{ alignItems: 'center', width: 46, minHeight: 54 }}>
@@ -559,12 +501,9 @@ export default function App() {
                       isSel && { backgroundColor: TDU_BLUE },
                       isToday && !isSel && { borderWidth: 1.5, borderColor: ACCENT },
                     ]}>
-                      <Text style={[
-                        { fontSize: 12 },
-                        state === 'disabled' && { color: '#ccc' },
-                        isSel ? { color: '#fff', fontWeight: 'bold' }
-                          : isToday ? { color: ACCENT, fontWeight: 'bold' }
-                            : { color: '#333' },
+                      <Text style={[{ fontSize: 12 },
+                      state === 'disabled' && { color: '#ccc' },
+                      isSel ? { color: '#fff', fontWeight: 'bold' } : isToday ? { color: ACCENT, fontWeight: 'bold' } : { color: '#333' },
                       ]}>{date.day}</Text>
                     </View>
                     {items.slice(0, 2).map((item: Schedule, i: number) => {
@@ -590,9 +529,7 @@ export default function App() {
                       <TouchableOpacity key={item.id} style={styles.upcomingCard} onPress={() => openDetail(item)}>
                         <View style={{ flex: 1 }}>
                           <Text style={styles.itemTitle}>{item.company}</Text>
-                          <Text style={styles.itemStatus}>
-                            {item.date.replace(/-/g, '/')} {timeStr(item.hour, item.minute) ? timeStr(item.hour, item.minute) + '〜 · ' : ''}{item.status}
-                          </Text>
+                          <Text style={styles.itemStatus}>{item.date.replace(/-/g, '/')} {timeStr(item.hour, item.minute) ? timeStr(item.hour, item.minute) + '〜 · ' : ''}{item.status}</Text>
                         </View>
                         <View style={[styles.rankBadge, { backgroundColor: rankColor(item.rank) }]}>
                           <Text style={styles.rankText}>{item.rank}</Text>
@@ -648,26 +585,19 @@ export default function App() {
             {/* 検索バー */}
             <View style={styles.searchBar}>
               <Text style={styles.searchIcon}>🔍</Text>
-              <TextInput
-                style={styles.searchInput}
-                placeholder="企業名で検索..."
-                value={searchQuery}
-                onChangeText={setSearchQuery}
-                clearButtonMode="while-editing"
-              />
+              <TextInput style={styles.searchInput} placeholder="企業名で検索..."
+                value={searchQuery} onChangeText={setSearchQuery} clearButtonMode="while-editing" />
             </View>
 
-            {/* ── 検索バー＋絞り込みボタン行 ── */}
+            {/* ツールバー */}
             <View style={styles.listToolbar}>
               <TouchableOpacity
-                style={[styles.filterBtn, (filterGenreId !== 'all' || filterStatus !== 'all') && styles.filterBtnActive]}
+                style={[styles.filterBtn, isFilterActive && styles.filterBtnActive]}
                 onPress={() => setFilterPanelVisible(v => !v)}>
-                <Text style={[styles.filterBtnText, (filterGenreId !== 'all' || filterStatus !== 'all') && { color: '#fff' }]}>
-                  絞り込み {(filterGenreId !== 'all' || filterStatus !== 'all') ? '●' : ''}
+                <Text style={[styles.filterBtnText, isFilterActive && { color: '#fff' }]}>
+                  絞り込み{isFilterActive ? ` (${filterGenreIds.length + filterStatuses.length})` : ''}
                 </Text>
               </TouchableOpacity>
-
-              {/* 並替＋昇降順 */}
               <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flex: 1, marginLeft: 8 }}>
                 <View style={{ flexDirection: 'row', gap: 4, alignItems: 'center' }}>
                   {SORT_OPTIONS.map(opt => (
@@ -684,38 +614,32 @@ export default function App() {
               </TouchableOpacity>
             </View>
 
-            {/* ── 絞り込みパネル（折りたたみ） ── */}
+            {/* 絞り込みパネル */}
             {filterPanelVisible && (
               <View style={styles.filterPanel}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                  <Text style={styles.filterPanelTitle}>絞り込み</Text>
-                  <TouchableOpacity onPress={() => { setFilterGenreId('all'); setFilterStatus('all'); }}>
+                  <Text style={styles.filterPanelTitle}>絞り込み（複数選択可）</Text>
+                  <TouchableOpacity onPress={() => { setFilterGenreIds([]); setFilterStatuses([]); }}>
                     <Text style={{ fontSize: 11, color: '#e74c3c' }}>リセット</Text>
                   </TouchableOpacity>
                 </View>
                 <Text style={styles.filterGroupLabel}>業種</Text>
                 <View style={styles.filterChipWrap}>
-                  <TouchableOpacity style={[styles.miniChip, filterGenreId === 'all' && styles.miniChipActive]} onPress={() => setFilterGenreId('all')}>
-                    <Text style={[styles.miniChipText, filterGenreId === 'all' && { color: '#fff' }]}>全て</Text>
-                  </TouchableOpacity>
                   {genres.map(g => (
                     <TouchableOpacity key={g.id}
-                      style={[styles.miniChip, { borderColor: g.color }, filterGenreId === g.id && { backgroundColor: g.color }]}
-                      onPress={() => setFilterGenreId(filterGenreId === g.id ? 'all' : g.id)}>
-                      <Text style={[styles.miniChipText, { color: filterGenreId === g.id ? '#fff' : g.color }]}>{g.name}</Text>
+                      style={[styles.miniChip, { borderColor: g.color }, filterGenreIds.includes(g.id) && { backgroundColor: g.color }]}
+                      onPress={() => toggleFilterGenre(g.id)}>
+                      <Text style={[styles.miniChipText, { color: filterGenreIds.includes(g.id) ? '#fff' : g.color }]}>{g.name}</Text>
                     </TouchableOpacity>
                   ))}
                 </View>
                 <Text style={[styles.filterGroupLabel, { marginTop: 10 }]}>状況</Text>
                 <View style={styles.filterChipWrap}>
-                  <TouchableOpacity style={[styles.miniChip, filterStatus === 'all' && styles.miniChipActive]} onPress={() => setFilterStatus('all')}>
-                    <Text style={[styles.miniChipText, filterStatus === 'all' && { color: '#fff' }]}>全て</Text>
-                  </TouchableOpacity>
                   {STATUS_SORT_ORDER.map(st => (
                     <TouchableOpacity key={st}
-                      style={[styles.miniChip, filterStatus === st && styles.miniChipActive]}
-                      onPress={() => setFilterStatus(filterStatus === st ? 'all' : st)}>
-                      <Text style={[styles.miniChipText, filterStatus === st && { color: '#fff' }]}>{st}</Text>
+                      style={[styles.miniChip, filterStatuses.includes(st) && styles.miniChipActive]}
+                      onPress={() => toggleFilterStatus(st)}>
+                      <Text style={[styles.miniChipText, filterStatuses.includes(st) && { color: '#fff' }]}>{st}</Text>
                     </TouchableOpacity>
                   ))}
                 </View>
@@ -730,48 +654,50 @@ export default function App() {
                 : filteredSorted.map(item => {
                   const gc = genreOf(item.genreId)?.color ?? TDU_BLUE;
                   const isInternal = item.status === '内定';
-                  const isInactive = ['内定辞退', '不合格'].includes(item.status);
+                  const isInactive = INACTIVE.includes(item.status);
                   return (
-                    <TouchableOpacity key={item.id}
-                      style={[styles.listCard,
-                      { backgroundColor: statusCardColor(item.status), borderColor: statusCardBorder(item.status) },
-                      isInactive && { opacity: 0.6 }
-                      ]}
-                      onPress={() => openDetail(item)}>
-                      {/* ジャンル色帯 */}
-                      <View style={[styles.genreBand, { backgroundColor: gc }]} />
-                      <View style={{ flex: 1, paddingLeft: 10 }}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                          <View style={[styles.rankBadge, { backgroundColor: rankColor(item.rank) }]}>
-                            <Text style={styles.rankText}>{item.rank}</Text>
+                    <SwipeableRow key={item.id} onDelete={() => deleteSchedule(item.id)}>
+                      <TouchableOpacity
+                        style={[styles.listCard,
+                        { backgroundColor: statusCardColor(item.status), borderColor: statusCardBorder(item.status) },
+                        isInactive && { opacity: 0.6 }]}
+                        onPress={() => openDetail(item)}
+                        activeOpacity={0.85}>
+                        <View style={[styles.genreBand, { backgroundColor: gc }]} />
+                        <View style={{ flex: 1, paddingLeft: 10 }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                            <View style={[styles.rankBadge, { backgroundColor: rankColor(item.rank) }]}>
+                              <Text style={styles.rankText}>{item.rank}</Text>
+                            </View>
+                            <Text style={[styles.itemTitle, isInactive && { color: '#999' }]}>
+                              {item.company}{isInternal ? ' 🌸' : ''}
+                            </Text>
                           </View>
-                          <Text style={[styles.itemTitle, isInactive && { color: '#999' }]}>
-                            {item.company}{isInternal ? ' 🌸' : ''}
-                          </Text>
+                          <Text style={styles.dateText}>{item.date.replace(/-/g, '/')}{timeStr(item.hour, item.minute) ? ' ' + timeStr(item.hour, item.minute) + '〜' : ''}</Text>
+                          {item.url ? (
+                            <TouchableOpacity onPress={() => Linking.openURL(item.url.startsWith('http') ? item.url : 'https://' + item.url)}>
+                              <Text style={[styles.notePreview, { color: ACCENT }]} numberOfLines={1}>🔗 {item.url}</Text>
+                            </TouchableOpacity>
+                          ) : null}
+                          {item.note ? <Text style={styles.notePreview} numberOfLines={1}>📝 {item.note}</Text> : null}
                         </View>
-                        <Text style={styles.dateText}>{item.date.replace(/-/g, '/')}{timeStr(item.hour, item.minute) ? ' ' + timeStr(item.hour, item.minute) + '〜' : ''}</Text>
-                        {item.url ? <Text style={styles.notePreview} numberOfLines={1}>🔗 {item.url}</Text> : null}
-                        {item.note ? <Text style={styles.notePreview} numberOfLines={1}>📝 {item.note}</Text> : null}
-                      </View>
-                      <View style={{ alignItems: 'flex-end', gap: 6 }}>
-                        <View style={[styles.statusBadge,
-                        isInternal && { backgroundColor: '#e74c3c' },
-                        isInactive && { backgroundColor: '#aaa' }]}>
-                          <Text style={styles.statusBadgeText}>{item.status}</Text>
+                        <View style={{ alignItems: 'flex-end', gap: 6 }}>
+                          <View style={[styles.statusBadge,
+                          isInternal && { backgroundColor: '#e74c3c' },
+                          isInactive && { backgroundColor: '#aaa' }]}>
+                            <Text style={styles.statusBadgeText}>{item.status}</Text>
+                          </View>
+                          <TouchableOpacity style={styles.checkBtn} onPress={() => setCheckModalItem(item)}>
+                            <Text style={styles.checkBtnText}>✓ 進捗</Text>
+                          </TouchableOpacity>
                         </View>
-                        {/* チェックリストボタン */}
-                        <TouchableOpacity style={styles.checkBtn}
-                          onPress={() => setCheckModalItem(item)}>
-                          <Text style={styles.checkBtnText}>✓ 進捗</Text>
-                        </TouchableOpacity>
-                      </View>
-                    </TouchableOpacity>
+                      </TouchableOpacity>
+                    </SwipeableRow>
                   );
                 })
               }
               <View style={{ height: 80 }} />
             </ScrollView>
-
             <TouchableOpacity style={styles.fab} onPress={openAdd}>
               <Text style={styles.fabText}>＋</Text>
             </TouchableOpacity>
@@ -781,7 +707,6 @@ export default function App() {
         {/* ── 設定タブ ── */}
         {activeTab === 'settings' && (
           <ScrollView style={{ flex: 1, padding: 20 }}>
-            {/* ジャンル管理 */}
             <Text style={styles.settingSection}>ジャンル管理</Text>
             {genres.map(g => (
               <TouchableOpacity key={g.id} style={styles.genreRow} onPress={() => openEditGenre(g)}>
@@ -794,7 +719,6 @@ export default function App() {
               <Text style={styles.outlineButtonText}>+ ジャンルを追加</Text>
             </TouchableOpacity>
 
-            {/* 通知設定 */}
             <Text style={[styles.settingSection, { marginTop: 28 }]}>通知設定</Text>
             <View style={styles.settingRow}>
               <Text style={styles.settingLabel}>リマインダー通知</Text>
@@ -817,19 +741,17 @@ export default function App() {
               </View>
             )}
 
-            {/* データ管理 */}
             <Text style={[styles.settingSection, { marginTop: 28 }]}>データ管理</Text>
             <TouchableOpacity style={styles.dangerButton} onPress={() => {
               Alert.alert('全データ削除', '全ての企業データを削除しますか？', [
                 { text: 'キャンセル', style: 'cancel' },
-                { text: '削除', style: 'destructive', onPress: async () => { await saveSchedules([]); } }
+                { text: '削除', style: 'destructive', onPress: async () => { await saveSchedules([]); } },
               ]);
             }}>
               <Text style={styles.dangerButtonText}>全データを削除する</Text>
             </TouchableOpacity>
-
             <View style={styles.aboutBox}>
-              <Text style={styles.aboutText}>就活管理リマインダー v3.0</Text>
+              <Text style={styles.aboutText}>就活管理リマインダー v4.0</Text>
             </View>
           </ScrollView>
         )}
@@ -837,8 +759,7 @@ export default function App() {
         {/* タブバー */}
         <View style={styles.tabBar}>
           {(['calendar', 'list', 'settings'] as TabType[]).map((tab, i) => {
-            const icons = ['📅', '📋', '⚙️'];
-            const labels = ['カレンダー', '持ち駒', '設定'];
+            const icons = ['📅', '📋', '⚙️'], labels = ['カレンダー', '持ち駒', '設定'];
             return (
               <TouchableOpacity key={tab} style={styles.tabButton} onPress={() => setActiveTab(tab)}>
                 <Text style={[styles.tabIcon, activeTab === tab && styles.tabIconActive]}>{icons[i]}</Text>
@@ -901,7 +822,6 @@ export default function App() {
                   ))}
                 </View>
 
-                {/* 日付・時間 */}
                 <View style={{ flexDirection: 'row', gap: 10 }}>
                   <View style={{ flex: 2 }}>
                     <Text style={styles.label}>日付</Text>
@@ -910,21 +830,24 @@ export default function App() {
                   <View style={{ flex: 1 }}>
                     <Text style={styles.label}>時間</Text>
                     <View style={{ flexDirection: 'row', gap: 4 }}>
-                      {/* 時プルダウン */}
-                      <TouchableOpacity style={[styles.input, { flex: 1, justifyContent: 'center' }]} onPress={() => setHourPickerVisible(true)}>
-                        <Text style={{ fontSize: 15, color: selHour ? '#333' : '#aaa' }}>{selHour || '時'}</Text>
+                      <TouchableOpacity style={[styles.input, { flex: 1, justifyContent: 'center', paddingVertical: 13 }]}
+                        onPress={() => setHourPickerVisible(true)}>
+                        <Text style={{ fontSize: 14, color: selHour ? '#333' : '#aaa' }}>{selHour || '時'}</Text>
                       </TouchableOpacity>
                       <Text style={{ alignSelf: 'center', color: '#333' }}>:</Text>
-                      {/* 分プルダウン */}
-                      <TouchableOpacity style={[styles.input, { flex: 1, justifyContent: 'center' }]} onPress={() => setMinutePickerVisible(true)}>
-                        <Text style={{ fontSize: 15, color: selMinute ? '#333' : '#aaa' }}>{selMinute || '分'}</Text>
+                      <TouchableOpacity style={[styles.input, { flex: 1, justifyContent: 'center', paddingVertical: 13 }]}
+                        onPress={() => setMinutePickerVisible(true)}>
+                        <Text style={{ fontSize: 14, color: selMinute ? '#333' : '#aaa' }}>{selMinute || '分'}</Text>
                       </TouchableOpacity>
                     </View>
                   </View>
                 </View>
 
-                <Text style={styles.label}>URL</Text>
+                <Text style={styles.label}>URL（マイページ等）</Text>
                 <TextInput style={styles.input} placeholder="https://..." value={url} onChangeText={setUrl} autoCapitalize="none" keyboardType="url" />
+
+                <Text style={styles.label}>ユーザーID</Text>
+                <TextInput style={styles.input} placeholder="ログインID・メールアドレス等" value={userId} onChangeText={setUserId} autoCapitalize="none" />
 
                 <Text style={styles.label}>パスワード</Text>
                 <TextInput style={styles.input} placeholder="パスワード" value={password} onChangeText={setPassword} autoCapitalize="none" />
@@ -944,74 +867,81 @@ export default function App() {
           </KeyboardAvoidingView>
         </Modal>
 
-        {/* ── 時プルダウン ── */}
+        {/* 時ピッカー */}
         <Modal visible={hourPickerVisible} transparent animationType="fade" onRequestClose={() => setHourPickerVisible(false)}>
           <View style={styles.pickerOverlay}>
             <TouchableOpacity style={StyleSheet.absoluteFillObject} onPress={() => setHourPickerVisible(false)} />
             <View style={styles.pickerBox} onStartShouldSetResponder={() => true}>
               <Text style={styles.pickerTitle}>時を選択</Text>
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, justifyContent: 'center' }}>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'center', marginTop: 8 }}>
                 {HOURS.map(h => (
-                  <TouchableOpacity key={h} style={[styles.pickerItem, selHour === h && styles.pickerItemActive]}
+                  <TouchableOpacity key={h}
+                    style={[styles.pickerItem, selHour === h && styles.pickerItemActive]}
                     onPress={() => { setSelHour(h); setHourPickerVisible(false); }}>
                     <Text style={[styles.pickerItemText, selHour === h && { color: '#fff' }]}>{h}</Text>
                   </TouchableOpacity>
                 ))}
               </View>
+              <TouchableOpacity onPress={() => { setSelHour(''); setHourPickerVisible(false); }}
+                style={{ marginTop: 14, alignItems: 'center' }}>
+                <Text style={{ color: '#999', fontSize: 12 }}>クリア</Text>
+              </TouchableOpacity>
             </View>
           </View>
         </Modal>
 
-        {/* ── 分プルダウン ── */}
+        {/* 分ピッカー */}
         <Modal visible={minutePickerVisible} transparent animationType="fade" onRequestClose={() => setMinutePickerVisible(false)}>
           <View style={styles.pickerOverlay}>
             <TouchableOpacity style={StyleSheet.absoluteFillObject} onPress={() => setMinutePickerVisible(false)} />
-            <View style={styles.pickerBox} onStartShouldSetResponder={() => true}>
+            <View style={[styles.pickerBox, { width: '70%' }]} onStartShouldSetResponder={() => true}>
               <Text style={styles.pickerTitle}>分を選択</Text>
-              <View style={{ flexDirection: 'row', gap: 12, justifyContent: 'center', marginTop: 10 }}>
+              <View style={{ flexDirection: 'row', gap: 12, justifyContent: 'center', marginTop: 12 }}>
                 {MINUTES.map(m => (
-                  <TouchableOpacity key={m} style={[styles.pickerItem, selMinute === m && styles.pickerItemActive]}
+                  <TouchableOpacity key={m}
+                    style={[styles.pickerItem, { width: 52, height: 52 }, selMinute === m && styles.pickerItemActive]}
                     onPress={() => { setSelMinute(m); setMinutePickerVisible(false); }}>
-                    <Text style={[styles.pickerItemText, selMinute === m && { color: '#fff' }]}>{m}</Text>
+                    <Text style={[styles.pickerItemText, { fontSize: 16 }, selMinute === m && { color: '#fff' }]}>{m}</Text>
                   </TouchableOpacity>
                 ))}
               </View>
+              <TouchableOpacity onPress={() => { setSelMinute(''); setMinutePickerVisible(false); }}
+                style={{ marginTop: 14, alignItems: 'center' }}>
+                <Text style={{ color: '#999', fontSize: 12 }}>クリア</Text>
+              </TouchableOpacity>
             </View>
           </View>
         </Modal>
 
-        {/* ── チェックリストモーダル ── */}
-        <Modal visible={!!checkModalItem} transparent animationType="slide" onRequestClose={() => { setCheckModalItem(null); setNewCheckLabel(''); }}>
+        {/* チェックリストモーダル */}
+        <Modal visible={!!checkModalItem} transparent animationType="slide"
+          onRequestClose={() => { setCheckModalItem(null); setNewCheckLabel(''); }}>
           <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.pickerOverlay}>
-            <TouchableOpacity style={StyleSheet.absoluteFillObject} activeOpacity={1} onPress={() => { setCheckModalItem(null); setNewCheckLabel(''); }} />
+            <TouchableOpacity style={StyleSheet.absoluteFillObject} activeOpacity={1}
+              onPress={() => { setCheckModalItem(null); setNewCheckLabel(''); }} />
             <View style={[styles.modalContent, { maxHeight: '85%' }]} onStartShouldSetResponder={() => true}>
               <Text style={styles.modalTitle}>{checkModalItem?.company}</Text>
-
               <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-                {/* 固定ステップ */}
                 <Text style={[styles.label, { marginTop: 8 }]}>選考ステップ</Text>
                 {CHECKLIST_STEPS.map(step => {
                   const checked = (checkModalItem?.checklist ?? {})[step] ?? false;
-                  const isInternal = step === '内定';
+                  const isInter = step === '内定';
                   return (
                     <TouchableOpacity key={step}
-                      style={[styles.checkRow, checked && isInternal && { backgroundColor: '#fff0f0', borderRadius: 8 }]}
+                      style={[styles.checkRow, checked && isInter && { backgroundColor: '#fff0f0', borderRadius: 8 }]}
                       onPress={() => checkModalItem && toggleCheck(checkModalItem, step)}>
-                      <View style={[styles.checkbox, checked && { backgroundColor: isInternal ? '#e74c3c' : TDU_BLUE, borderColor: isInternal ? '#e74c3c' : TDU_BLUE }]}>
+                      <View style={[styles.checkbox, checked && { backgroundColor: isInter ? '#e74c3c' : TDU_BLUE, borderColor: isInter ? '#e74c3c' : TDU_BLUE }]}>
                         {checked && <Text style={{ color: '#fff', fontSize: 12, fontWeight: 'bold' }}>✓</Text>}
                       </View>
-                      <Text style={[styles.checkLabel, checked && { color: isInternal ? '#e74c3c' : TDU_BLUE, fontWeight: 'bold' }]}>
-                        {step}{isInternal && checked ? ' 🌸' : ''}
+                      <Text style={[styles.checkLabel, checked && { color: isInter ? '#e74c3c' : TDU_BLUE, fontWeight: 'bold' }]}>
+                        {step}{isInter && checked ? ' 🌸' : ''}
                       </Text>
                     </TouchableOpacity>
                   );
                 })}
 
-                {/* 区切り */}
                 <View style={{ borderTopWidth: 1, borderColor: '#f0f0f0', marginTop: 16, marginBottom: 4 }} />
                 <Text style={styles.label}>カスタム項目</Text>
-
-                {/* カスタム項目一覧 */}
                 {(checkModalItem?.customChecklist ?? []).length === 0 && (
                   <Text style={{ fontSize: 12, color: '#bbb', marginBottom: 8, paddingLeft: 8 }}>追加した項目がここに表示されます</Text>
                 )}
@@ -1023,24 +953,17 @@ export default function App() {
                       {c.checked && <Text style={{ color: '#fff', fontSize: 12, fontWeight: 'bold' }}>✓</Text>}
                     </TouchableOpacity>
                     <Text style={[styles.checkLabel, { flex: 1 }, c.checked && { color: '#27AE60', fontWeight: 'bold' }]}>{c.label}</Text>
-                    {/* 削除ボタン */}
                     <TouchableOpacity onPress={() => checkModalItem && deleteCustomCheck(checkModalItem, c.id)}
                       style={{ paddingHorizontal: 8, paddingVertical: 4 }}>
                       <Text style={{ color: '#ccc', fontSize: 16 }}>✕</Text>
                     </TouchableOpacity>
                   </View>
                 ))}
-
-                {/* カスタム項目追加入力 */}
                 <View style={styles.customAddRow}>
-                  <TextInput
-                    style={styles.customAddInput}
-                    placeholder="項目を入力（例: 適性検査）"
-                    value={newCheckLabel}
-                    onChangeText={setNewCheckLabel}
+                  <TextInput style={styles.customAddInput} placeholder="項目を入力（例: 適性検査）"
+                    value={newCheckLabel} onChangeText={setNewCheckLabel}
                     returnKeyType="done"
-                    onSubmitEditing={() => checkModalItem && addCustomCheck(checkModalItem)}
-                  />
+                    onSubmitEditing={() => checkModalItem && addCustomCheck(checkModalItem)} />
                   <TouchableOpacity
                     style={[styles.customAddBtn, !newCheckLabel.trim() && { backgroundColor: '#ccc' }]}
                     onPress={() => checkModalItem && addCustomCheck(checkModalItem)}
@@ -1048,7 +971,6 @@ export default function App() {
                     <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 14 }}>追加</Text>
                   </TouchableOpacity>
                 </View>
-
                 <TouchableOpacity style={[styles.saveButton, { marginTop: 20, alignSelf: 'center', paddingHorizontal: 40 }]}
                   onPress={() => { setCheckModalItem(null); setNewCheckLabel(''); }}>
                   <Text style={styles.saveButtonText}>閉じる</Text>
@@ -1059,7 +981,7 @@ export default function App() {
           </KeyboardAvoidingView>
         </Modal>
 
-        {/* ── ジャンル追加/編集モーダル ── */}
+        {/* ジャンル編集モーダル */}
         <Modal visible={genreModalVisible} transparent animationType="slide" onRequestClose={() => setGenreModalVisible(false)}>
           <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
             <TouchableOpacity style={StyleSheet.absoluteFillObject} onPress={() => setGenreModalVisible(false)} activeOpacity={1} />
@@ -1102,9 +1024,11 @@ export default function App() {
   );
 }
 
+// ─── スタイル ────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: '#fff' },
   container: { flex: 1 },
+
   topNav: { paddingVertical: 10, borderBottomWidth: 1, borderColor: '#f0f0f0' },
   headerStats: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20 },
   headerTitle: { fontSize: 17, fontWeight: 'bold', color: TDU_BLUE },
@@ -1112,26 +1036,10 @@ const styles = StyleSheet.create({
   statNum: { fontSize: 18, fontWeight: 'bold', color: TDU_BLUE },
   statLabel: { fontSize: 9, color: TDU_BLUE },
 
-  // カレンダー企業ラベル
   calLabel: { borderLeftWidth: 2, borderRadius: 3, paddingHorizontal: 2, marginTop: 1, width: 44 },
   calLabelText: { fontSize: 7, fontWeight: 'bold' },
   calMore: { fontSize: 7, color: '#999', marginTop: 1 },
 
-  // 検索バー
-  searchBar: { flexDirection: 'row', alignItems: 'center', margin: 12, backgroundColor: '#f5f5f5', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8 },
-  searchIcon: { fontSize: 14, marginRight: 6 },
-  searchInput: { flex: 1, fontSize: 14, color: '#333' },
-
-  // ジャンルフィルタ
-  genreFilter: { paddingLeft: 12, marginBottom: 8 },
-  genreChip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, borderWidth: 1, borderColor: '#ddd', marginRight: 6 },
-  genreChipActive: { backgroundColor: TDU_BLUE, borderColor: TDU_BLUE },
-  genreChipText: { fontSize: 11, color: '#666' },
-
-  // ジャンル色帯
-  genreBand: { width: 4, borderRadius: 4, alignSelf: 'stretch' },
-
-  // 持ち駒カード
   upcomingCard: { flexDirection: 'row', alignItems: 'center', padding: 12, backgroundColor: '#f0f4ff', borderRadius: 10, marginBottom: 8 },
   todoArea: { flex: 1, paddingHorizontal: 16, paddingTop: 14 },
   sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
@@ -1143,7 +1051,32 @@ const styles = StyleSheet.create({
   itemStatus: { fontSize: 11, color: '#888', marginTop: 3 },
   itemArrow: { color: '#ccc', fontSize: 16 },
   emptyText: { textAlign: 'center', color: '#bbb', marginTop: 24, fontSize: 13 },
-  listCard: { padding: 14, borderRadius: 12, marginBottom: 10, flexDirection: 'row', alignItems: 'center', borderWidth: 1, elevation: 1, overflow: 'hidden' },
+
+  searchBar: { flexDirection: 'row', alignItems: 'center', margin: 12, backgroundColor: '#f5f5f5', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8 },
+  searchIcon: { fontSize: 14, marginRight: 6 },
+  searchInput: { flex: 1, fontSize: 14, color: '#333' },
+
+  listToolbar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 6, gap: 6 },
+  filterBtn: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 12, borderWidth: 1, borderColor: TDU_BLUE, backgroundColor: '#fff' },
+  filterBtnActive: { backgroundColor: TDU_BLUE },
+  filterBtnText: { fontSize: 11, color: TDU_BLUE, fontWeight: 'bold' },
+  filterPanel: { marginHorizontal: 12, marginBottom: 6, padding: 12, backgroundColor: '#f8faff', borderRadius: 12, borderWidth: 1, borderColor: '#dde8ff' },
+  filterPanelTitle: { fontSize: 13, fontWeight: 'bold', color: TDU_BLUE },
+  filterGroupLabel: { fontSize: 11, color: '#888', fontWeight: 'bold', marginBottom: 6 },
+  filterChipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  miniChip: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12, borderWidth: 1, borderColor: '#ddd', backgroundColor: '#f8f8f8' },
+  miniChipActive: { backgroundColor: TDU_BLUE, borderColor: TDU_BLUE },
+  miniChipText: { fontSize: 10, color: '#666' },
+  ascBtn: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12, backgroundColor: '#e8f0fe', borderWidth: 1, borderColor: TDU_BLUE },
+  ascBtnText: { fontSize: 10, color: TDU_BLUE, fontWeight: 'bold' },
+
+  // スワイプ削除
+  swipeDeleteBg: { position: 'absolute', right: 0, top: 0, bottom: 0, width: 80, backgroundColor: '#e74c3c', borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
+  swipeDeleteBtn: { flex: 1, justifyContent: 'center', alignItems: 'center', width: 80 },
+  swipeDeleteText: { color: '#fff', fontSize: 11, fontWeight: 'bold', textAlign: 'center' },
+
+  listCard: { padding: 14, borderRadius: 12, flexDirection: 'row', alignItems: 'center', borderWidth: 1, elevation: 1, backgroundColor: '#fff', overflow: 'hidden' },
+  genreBand: { width: 4, borderRadius: 4, alignSelf: 'stretch' },
   dateText: { fontSize: 11, color: '#999', marginTop: 4 },
   notePreview: { fontSize: 10, color: '#aaa', marginTop: 2 },
   statusBadge: { backgroundColor: TDU_BLUE, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
@@ -1153,16 +1086,9 @@ const styles = StyleSheet.create({
   checkBtn: { backgroundColor: '#f0f4ff', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
   checkBtnText: { fontSize: 10, color: TDU_BLUE, fontWeight: 'bold' },
 
-  // ソート
-  sortChip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, backgroundColor: '#f0f2f5' },
-  sortChipActive: { backgroundColor: TDU_BLUE },
-  sortChipText: { fontSize: 12, color: '#666' },
-
-  // FAB
   fab: { position: 'absolute', bottom: 16, right: 20, width: 52, height: 52, borderRadius: 26, backgroundColor: TDU_BLUE, alignItems: 'center', justifyContent: 'center', elevation: 5 },
   fabText: { color: '#fff', fontSize: 26, lineHeight: 30 },
 
-  // 設定
   settingSection: { fontSize: 12, fontWeight: 'bold', color: '#888', marginBottom: 12, letterSpacing: 1 },
   settingRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 14, borderBottomWidth: 1, borderColor: '#f0f0f0' },
   settingLabel: { fontSize: 14, color: '#333', flex: 1 },
@@ -1174,8 +1100,10 @@ const styles = StyleSheet.create({
   dangerButtonText: { color: '#e74c3c', fontWeight: 'bold' },
   aboutBox: { backgroundColor: '#f8f9fa', padding: 16, borderRadius: 10, marginTop: 20 },
   aboutText: { fontSize: 13, color: '#666', lineHeight: 20 },
+  sortChip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, backgroundColor: '#f0f2f5' },
+  sortChipActive: { backgroundColor: TDU_BLUE },
+  sortChipText: { fontSize: 12, color: '#666' },
 
-  // タブバー
   tabBar: { flexDirection: 'row', height: 70, borderTopWidth: 1, borderColor: '#f0f0f0', backgroundColor: '#fff', paddingBottom: 10 },
   tabButton: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   tabIcon: { fontSize: 20, opacity: 0.3 },
@@ -1183,7 +1111,6 @@ const styles = StyleSheet.create({
   tabLabel: { fontSize: 9, color: '#ccc', marginTop: 3 },
   tabLabelActive: { color: TDU_BLUE, fontWeight: 'bold' },
 
-  // モーダル共通
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
   modalContent: { backgroundColor: '#fff', borderTopLeftRadius: 25, borderTopRightRadius: 25, padding: 24, maxHeight: '92%' },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
@@ -1197,39 +1124,21 @@ const styles = StyleSheet.create({
   statusSelected: { backgroundColor: TDU_BLUE },
   statusOptionText: { fontSize: 11, color: '#666' },
   rankOption: { width: 40, height: 40, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  genreChip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, borderWidth: 1, borderColor: '#ddd', marginRight: 6 },
+  genreChipText: { fontSize: 11, color: '#666' },
   modalButtons: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 24 },
   cancelText: { color: '#999', fontSize: 15 },
   saveButton: { backgroundColor: TDU_BLUE, paddingVertical: 13, paddingHorizontal: 44, borderRadius: 14 },
   saveButtonDisabled: { backgroundColor: '#aaa' },
   saveButtonText: { color: '#fff', fontWeight: 'bold', fontSize: 15 },
 
-  // 時間ピッカー
   pickerOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center' },
   pickerBox: { backgroundColor: '#fff', borderRadius: 20, padding: 20, width: '85%' },
-  pickerTitle: { fontSize: 16, fontWeight: 'bold', color: '#333', marginBottom: 12, textAlign: 'center' },
-  pickerItem: { width: 44, height: 44, margin: 4, borderRadius: 10, backgroundColor: '#f0f2f5', alignItems: 'center', justifyContent: 'center' },
+  pickerTitle: { fontSize: 16, fontWeight: 'bold', color: '#333', marginBottom: 4, textAlign: 'center' },
+  pickerItem: { width: 44, height: 44, borderRadius: 10, backgroundColor: '#f0f2f5', alignItems: 'center', justifyContent: 'center' },
   pickerItemActive: { backgroundColor: TDU_BLUE },
   pickerItemText: { fontSize: 14, color: '#333' },
 
-  // リストツールバー
-  listToolbar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 6, gap: 6 },
-  filterBtn: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 12, borderWidth: 1, borderColor: TDU_BLUE, backgroundColor: '#fff' },
-  filterBtnActive: { backgroundColor: TDU_BLUE },
-  filterBtnText: { fontSize: 11, color: TDU_BLUE, fontWeight: 'bold' },
-  filterPanel: { marginHorizontal: 12, marginBottom: 6, padding: 12, backgroundColor: '#f8faff', borderRadius: 12, borderWidth: 1, borderColor: '#dde8ff' },
-  filterPanelTitle: { fontSize: 13, fontWeight: 'bold', color: TDU_BLUE },
-  filterGroupLabel: { fontSize: 11, color: '#888', fontWeight: 'bold', marginBottom: 6 },
-  filterChipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  // フィルタ・並替エリア（後方互換）
-  filterSection: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, marginBottom: 4 },
-  filterLabel: { fontSize: 10, color: '#999', width: 26, marginRight: 4, fontWeight: 'bold' },
-  miniChip: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12, borderWidth: 1, borderColor: '#ddd', backgroundColor: '#f8f8f8' },
-  miniChipActive: { backgroundColor: TDU_BLUE, borderColor: TDU_BLUE },
-  miniChipText: { fontSize: 10, color: '#666' },
-  ascBtn: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12, backgroundColor: '#e8f0fe', borderWidth: 1, borderColor: TDU_BLUE },
-  ascBtnText: { fontSize: 10, color: TDU_BLUE, fontWeight: 'bold' },
-
-  // チェックリスト
   checkRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderColor: '#f5f5f5', paddingHorizontal: 8 },
   checkbox: { width: 24, height: 24, borderRadius: 6, borderWidth: 2, borderColor: '#ddd', alignItems: 'center', justifyContent: 'center', marginRight: 12 },
   checkLabel: { fontSize: 15, color: '#333' },
@@ -1237,7 +1146,6 @@ const styles = StyleSheet.create({
   customAddInput: { flex: 1, backgroundColor: '#f8f9fa', padding: 11, borderRadius: 10, fontSize: 14 },
   customAddBtn: { backgroundColor: TDU_BLUE, paddingVertical: 11, paddingHorizontal: 16, borderRadius: 10 },
 
-  // カラーパレット
   colorDot: { width: 32, height: 32, borderRadius: 16 },
   colorDotActive: { borderWidth: 3, borderColor: '#333' },
 });
