@@ -11,18 +11,12 @@
       "resizeMode": "contain",
       "backgroundColor": "#031659"
     },
-    "assetBundlePatterns": [
-      "**/*"
-    ],
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.moritaryoga.shukatsukanri",
       "buildNumber": "1",
       "infoPlist": {
-        "NSUserNotificationUsageDescription": "選考の締め切りや面接日程をリマインドするために通知を使用します。",
-        "UIBackgroundModes": [
-          "fetch"
-        ]
+        "NSUserNotificationUsageDescription": "選考の締め切りや面接日程をリマインドするために通知を使用します。"
       }
     },
     "android": {
@@ -34,8 +28,10 @@
       },
       "permissions": [
         "RECEIVE_BOOT_COMPLETED",
-        "VIBRATE"
-      ]
+        "VIBRATE",
+        "POST_NOTIFICATIONS"
+      ],
+      "softwareKeyboardLayoutMode": "pan"
     },
     "plugins": [
       [
@@ -43,13 +39,13 @@
         {
           "icon": "./assets/notification-icon.png",
           "color": "#003366",
-          "sounds": []
+          "defaultChannel": "default"
         }
       ]
     ],
     "extra": {
       "eas": {
-        "projectId": "ここにeas build後に発行されるIDを入れる"
+        "projectId": "cca45756-3efc-4222-b3c9-59440d07cb16"
       }
     }
   }

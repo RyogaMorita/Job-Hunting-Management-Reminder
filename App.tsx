@@ -4,9 +4,10 @@ import { useFonts, CormorantGaramond_300Light, CormorantGaramond_400Regular, Cor
 
 import {
   StyleSheet, Text, View, TouchableOpacity, ScrollView,
-  SafeAreaView, Modal, TextInput, Alert, KeyboardAvoidingView,
-  Platform, Switch, Animated, PanResponder, Linking, Clipboard, Image, Dimensions,
+  Modal, TextInput, Alert, KeyboardAvoidingView,
+  Platform, Switch, Animated, PanResponder, Linking, Image, Dimensions,
 } from 'react-native';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { Calendar } from 'react-native-calendars';
 import { StatusBar } from 'expo-status-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -17,6 +18,15 @@ Notifications.setNotificationHandler({
     shouldShowAlert: true, shouldPlaySound: true, shouldSetBadge: false,
   }),
 });
+
+if (Platform.OS === 'android') {
+  Notifications.setNotificationChannelAsync('default', {
+    name: '就活リマインダー',
+    importance: Notifications.AndroidImportance.HIGH,
+    vibrationPattern: [0, 250, 250, 250],
+    lightColor: '#003366',
+  });
+}
 
 // ─── 定数 ─────────────────────────────────────────────────────────
 const STORAGE_KEY = '@schedules_v11';
@@ -496,9 +506,16 @@ export default function App() {
       memoPR: memoPR || undefined,
       memoQuestions: memoQuestions || undefined,
     };
-    const base = deleteIds.length > 0 ? schedules.filter(s => !deleteIds.includes(s.id)) : schedules;
-    const updated = selectedItem ? base.map(s => s.id === selectedItem.id ? newSchedule : s) : [...base, newSchedule];
-    await saveSchedules(updated);
+    // 関数型更新で常に最新の schedules を参照（Android クロージャー問題対策）
+    const savedId = selectedItem?.id ?? null;
+    await new Promise<void>(resolve => {
+      setSchedules(prev => {
+        const base = deleteIds.length > 0 ? prev.filter(s => !deleteIds.includes(s.id)) : prev;
+        const updated = savedId ? base.map(s => s.id === savedId ? newSchedule : s) : [...base, newSchedule];
+        AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updated)).then(resolve);
+        return updated;
+      });
+    });
     await scheduleNotification(newSchedule);
     closeModal();
   };
@@ -599,6 +616,7 @@ export default function App() {
             title: `📋 ${item.company}`,
             body: `${item.status}の予定が${day === '0' ? '今日' : day + '日後'}です（${item.date}${item.hour ? ' ' + item.hour + ':' + item.minute : ''}）`,
             sound: true,
+            ...(Platform.OS === 'android' && { channelId: 'default' }),
           },
           trigger: { type: 'date' as const, date: notifyDate },
         });
@@ -666,9 +684,15 @@ export default function App() {
     const autoChecks = STATUS_TO_CHECKS[ns] ?? [];
     const initCL: Record<string, boolean> = { ...(item.checklist ?? {}) };
     CHECKLIST_STEPS.forEach(step => { if (autoChecks.includes(step)) initCL[step] = true; });
-    // 常に同一エントリのstatusだけ更新（新エントリ作成しない → 古いデータが残らない）
-    const updated = schedules.map(s => s.id !== item.id ? s : { ...s, status: ns, checklist: initCL });
-    await saveSchedules(updated);
+    const targetId = item.id;
+    // 関数型更新で常に最新の schedules を参照
+    await new Promise<void>(resolve => {
+      setSchedules(prev => {
+        const updated = prev.map(s => s.id !== targetId ? s : { ...s, status: ns, checklist: initCL });
+        AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updated)).then(resolve);
+        return updated;
+      });
+    });
   };
 
   // ─── ジャンル管理 ─────────────────────────────────────────────
@@ -727,8 +751,9 @@ export default function App() {
   // ─── UI ────────────────────────────────────────────────────────
   if (!fontsLoaded) return null;
   return (
+    <SafeAreaProvider>
     <SafeAreaView style={[styles.safeArea, { backgroundColor: C.bg }]}>
-      <StatusBar style="dark" />
+      <StatusBar style={isDark ? 'light' : 'dark'} />
       <View style={[styles.container, { backgroundColor: C.bg }]}>
 
         {/* ヘッダー */}
@@ -835,11 +860,14 @@ export default function App() {
                               }}
                               style={{ alignItems: 'center', width: 46, minHeight: 44 }}>
                               <View style={[
-                                { width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
+                                { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
                                 isSel && { backgroundColor: TDU_BLUE },
                                 isToday && !isSel && { borderWidth: 1.5, borderColor: ACCENT },
                               ]}>
-                                <Text style={[{ fontSize: 12 },
+                                <Text style={[{
+                                  fontSize: 12, textAlign: 'center',
+                                  includeFontPadding: false, // Android 余白除去
+                                },
                                 (() => {
                                   if (isSel) return { color: '#fff', fontWeight: 'bold' };
                                   if (isToday) return { color: ACCENT, fontWeight: 'bold' };
@@ -1197,6 +1225,7 @@ export default function App() {
                         title: '📋 テスト通知',
                         body: '就活管理アプリからのリマインド通知が正常に届いています',
                         sound: true,
+                        ...(Platform.OS === 'android' && { channelId: 'default' }),
                       },
                       trigger: { type: 'timeInterval' as const, seconds: 5, repeats: false },
                     });
@@ -1445,7 +1474,7 @@ export default function App() {
 
         {/* ── 企業登録/編集モーダル ── */}
         <Modal visible={isModalVisible || isDetailVisible} animationType="slide" transparent onRequestClose={closeModal}>
-          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={Platform.OS === 'android' ? 25 : 0} style={styles.modalOverlay}>
             <TouchableOpacity style={StyleSheet.absoluteFillObject} onPress={() => closeModal()} activeOpacity={1} />
             <View style={[styles.modalContent, { backgroundColor: C.bg }]}>
               <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
@@ -1838,7 +1867,7 @@ export default function App() {
         {/* チェックリストモーダル */}
         <Modal visible={!!checkModalItem} transparent animationType="slide"
           onRequestClose={() => { setCheckModalItem(null); setNewCheckLabel(''); }}>
-          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.pickerOverlay}>
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={Platform.OS === 'android' ? 25 : 0} style={styles.pickerOverlay}>
             <TouchableOpacity style={StyleSheet.absoluteFillObject} activeOpacity={1}
               onPress={() => { setCheckModalItem(null); setNewCheckLabel(''); }} />
             <View style={[styles.modalContent, { maxHeight: '85%', backgroundColor: C.bg }]} onStartShouldSetResponder={() => true}>
@@ -1905,7 +1934,7 @@ export default function App() {
 
         {/* ジャンル編集モーダル */}
         <Modal visible={genreModalVisible} transparent animationType="slide" onRequestClose={() => setGenreModalVisible(false)}>
-          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={Platform.OS === 'android' ? 25 : 0} style={styles.modalOverlay}>
             <TouchableOpacity style={StyleSheet.absoluteFillObject} onPress={() => setGenreModalVisible(false)} activeOpacity={1} />
             <View style={[styles.modalContent, { maxHeight: '70%', backgroundColor: C.bg }]}>
               <Text style={[styles.modalTitle, { color: C.text }]}>{editGenre ? (STATUS_OPTIONS.includes(editGenre.id) ? 'ステータス色を編集' : 'ジャンルを編集') : 'ジャンルを追加'}</Text>
@@ -1948,6 +1977,7 @@ export default function App() {
 
       </View>
     </SafeAreaView>
+    </SafeAreaProvider>
   );
 }
 
