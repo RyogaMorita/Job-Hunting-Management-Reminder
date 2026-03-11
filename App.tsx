@@ -4,14 +4,20 @@ import { useFonts, CormorantGaramond_300Light, CormorantGaramond_400Regular, Cor
 
 import {
   StyleSheet, Text, View, TouchableOpacity, ScrollView,
-  Modal, TextInput, Alert, KeyboardAvoidingView,
-  Platform, Switch, Animated, PanResponder, Linking, Image, Dimensions,
+  SafeAreaView, Modal, TextInput, Alert, KeyboardAvoidingView,
+  Platform, Switch, Animated, PanResponder, Linking, Clipboard, Image, Dimensions,
 } from 'react-native';
-import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { Calendar } from 'react-native-calendars';
 import { StatusBar } from 'expo-status-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
+import * as StoreReview from 'expo-store-review';
+import { SafeAreaProvider, SafeAreaView as SafeAreaViewContext } from 'react-native-safe-area-context';
+import {
+  BannerAd, BannerAdSize, TestIds,
+  InterstitialAd, AdEventType,
+  RewardedAd, RewardedAdEventType,
+} from 'react-native-google-mobile-ads';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -19,16 +25,24 @@ Notifications.setNotificationHandler({
   }),
 });
 
-if (Platform.OS === 'android') {
-  Notifications.setNotificationChannelAsync('default', {
-    name: '就活リマインダー',
-    importance: Notifications.AndroidImportance.HIGH,
-    vibrationPattern: [0, 250, 250, 250],
-    lightColor: '#003366',
-  });
-}
-
 // ─── 定数 ─────────────────────────────────────────────────────────
+// ─── 広告ID ──────────────────────────────────────────────────────
+const AD_UNIT_ID = __DEV__ ? TestIds.BANNER : 'ca-app-pub-7090599455468315/1730004001';
+const INTERSTITIAL_ID = __DEV__ ? TestIds.INTERSTITIAL : 'ca-app-pub-7090599455468315/8081141006';
+const REWARDED_ID = __DEV__ ? TestIds.REWARDED : 'ca-app-pub-7090599455468315/8667464364';
+const REVIEW_KEY = '@review_requested';
+
+// ─── 就活Tips（リワード解放コンテンツ）────────────────────────────
+const SHUKATSU_TIPS = [
+  { title: 'ESを通過するコツ', content: '企業の求める人物像をJD（職務記述書）から読み取り、具体的なエピソードと結びつけて書く。数字を使って成果を示すと説得力が増す。' },
+  { title: '面接でよく聞かれる質問TOP5', content: '①自己紹介 ②志望動機 ③学生時代に力を入れたこと ④強みと弱み ⑤5年後のビジョン。この5つを完璧に準備しておけば80%は対応できる。' },
+  { title: '逆質問で差をつける方法', content: '「入社後に活躍している方の共通点は何ですか？」「チームの雰囲気を教えてください」など、企業研究を踏まえた質問が好印象。「特にありません」はNG。' },
+  { title: 'OB・OG訪問を最大活用する方法', content: 'OB訪問では「実際に入社して良かった点・悪かった点」を聞く。ネガティブな情報ほど本音に近い。志望度が高い企業ほど複数人に会うべき。' },
+  { title: 'GD（グループディスカッション）必勝法', content: '役割（司会・タイムキーパー・書記）にこだわらず、議論を前進させることを意識する。他の人の意見を引き出す「○○さんはどう思いますか？」が高評価につながる。' },
+  { title: 'インターンで内定を取る方法', content: '発言量より発言の質を重視。「なぜ？」を3回繰り返して深掘りした意見を述べる。積極的に社員に話しかけて顔を覚えてもらうことが重要。' },
+  { title: '内定交渉・承諾期限の延ばし方', content: '「第一志望の企業の選考結果を待っています」と正直に伝えるのが基本。ただし期限延長は1回まで。無断で過ぎるのは絶対NG。' },
+];
+
 const STORAGE_KEY = '@schedules_v11';
 const GENRES_KEY = '@genres_v11';
 const STATUS_COLORS_KEY = '@status_colors_v2';
@@ -252,6 +266,13 @@ export default function App() {
 
   const [activeTab, setActiveTab] = useState<TabType>('calendar');
   const [schedules, setSchedules] = useState<Schedule[]>([]);
+
+  // ─── 広告 state ──────────────────────────────────────────────
+  const [rewardedTip, setRewardedTip] = useState<{ title: string; content: string } | null>(null);
+  const [offerModalVisible, setOfferModalVisible] = useState(false); // 内定後広告オファー
+  const [pendingInternalCompany, setPendingInternalCompany] = useState<string>(''); // 内定企業名
+  const interstitialRef = useRef<InterstitialAd | null>(null);
+  const rewardedRef = useRef<RewardedAd | null>(null);
   const [genres, setGenres] = useState<Genre[]>(DEFAULT_GENRES);
   const [statusColors, setStatusColors] = useState<StatusColors>(DEFAULT_STATUS_COLORS);
   const [statusOptions, setStatusOptions] = useState<string[]>([...DEFAULT_STATUS_OPTIONS]);
@@ -341,6 +362,49 @@ export default function App() {
 
   useEffect(() => { loadAll(); }, []);
 
+  // ─── 広告初期化 ──────────────────────────────────────────────
+  useEffect(() => {
+    // インタースティシャル広告をロード
+    const interstitial = InterstitialAd.createForAdRequest(INTERSTITIAL_ID, {
+      requestNonPersonalizedAdsOnly: true,
+    });
+    interstitialRef.current = interstitial;
+    interstitial.load();
+
+    // リワード広告をロード
+    const rewarded = RewardedAd.createForAdRequest(REWARDED_ID, {
+      requestNonPersonalizedAdsOnly: true,
+    });
+    rewardedRef.current = rewarded;
+    rewarded.load();
+  }, []);
+
+  // インタースティシャルを表示（3回に1回）
+  const showInterstitialIfNeeded = async () => {
+    const countStr = await AsyncStorage.getItem('@interstitial_count');
+    const count = countStr ? parseInt(countStr) + 1 : 1;
+    await AsyncStorage.setItem('@interstitial_count', String(count));
+    if (count % 3 === 0 && interstitialRef.current?.loaded) {
+      interstitialRef.current.show();
+      // 次回用にリロード
+      setTimeout(() => interstitialRef.current?.load(), 1000);
+    }
+  };
+
+  // リワード広告を表示してTipsを解放
+  const showRewardedAd = () => {
+    if (!rewardedRef.current?.loaded) {
+      Alert.alert('広告の準備中', 'しばらくしてからもう一度お試しください。');
+      return;
+    }
+    const tip = SHUKATSU_TIPS[Math.floor(Math.random() * SHUKATSU_TIPS.length)];
+    rewardedRef.current.addAdEventListener(RewardedAdEventType.EARNED_REWARD, () => {
+      setRewardedTip(tip);
+      setTimeout(() => rewardedRef.current?.load(), 1000);
+    });
+    rewardedRef.current.show();
+  };
+
   const loadAll = async () => {
     try {
       const s = await AsyncStorage.getItem(STORAGE_KEY);
@@ -359,6 +423,24 @@ export default function App() {
       if (sc) setStatusColors({ ...DEFAULT_STATUS_COLORS, ...JSON.parse(sc) });
       const so = await AsyncStorage.getItem(STATUS_OPTIONS_KEY);
       if (so) { setStatusOptions(JSON.parse(so)); }
+
+      // 起動回数カウント
+      const launchCount = await AsyncStorage.getItem('@launch_count');
+      const count = launchCount ? parseInt(launchCount) + 1 : 1;
+      await AsyncStorage.setItem('@launch_count', String(count));
+
+      // 5回・20回起動でレビュー促進
+      if (count === 5 || count === 20) {
+        const already = await AsyncStorage.getItem(REVIEW_KEY);
+        if (!already && await StoreReview.hasAction()) {
+          await StoreReview.requestReview();
+          await AsyncStorage.setItem(REVIEW_KEY, 'true');
+        }
+      }
+
+      // 起動時インタースティシャル（3回に1回）
+      setTimeout(() => showInterstitialIfNeeded(), 2000);
+
     } catch (e) { Alert.alert('エラー', '読み込み失敗'); }
   };
 
@@ -506,16 +588,9 @@ export default function App() {
       memoPR: memoPR || undefined,
       memoQuestions: memoQuestions || undefined,
     };
-    // 関数型更新で常に最新の schedules を参照（Android クロージャー問題対策）
-    const savedId = selectedItem?.id ?? null;
-    await new Promise<void>(resolve => {
-      setSchedules(prev => {
-        const base = deleteIds.length > 0 ? prev.filter(s => !deleteIds.includes(s.id)) : prev;
-        const updated = savedId ? base.map(s => s.id === savedId ? newSchedule : s) : [...base, newSchedule];
-        AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updated)).then(resolve);
-        return updated;
-      });
-    });
+    const base = deleteIds.length > 0 ? schedules.filter(s => !deleteIds.includes(s.id)) : schedules;
+    const updated = selectedItem ? base.map(s => s.id === selectedItem.id ? newSchedule : s) : [...base, newSchedule];
+    await saveSchedules(updated);
     await scheduleNotification(newSchedule);
     closeModal();
   };
@@ -616,7 +691,6 @@ export default function App() {
             title: `📋 ${item.company}`,
             body: `${item.status}の予定が${day === '0' ? '今日' : day + '日後'}です（${item.date}${item.hour ? ' ' + item.hour + ':' + item.minute : ''}）`,
             sound: true,
-            ...(Platform.OS === 'android' && { channelId: 'default' }),
           },
           trigger: { type: 'date' as const, date: notifyDate },
         });
@@ -640,6 +714,13 @@ export default function App() {
       if (s.id !== item.id) return s;
       const newCL = { ...(s.checklist ?? {}), [step]: !(s.checklist ?? {})[step] };
       const newStatus = newCL['内定'] ? '内定' : s.status === '内定' ? '最終面接' : s.status;
+      // 内定チェック時にオファーモーダルを表示
+      if (newCL['内定'] && newStatus === '内定') {
+        setTimeout(() => {
+          setPendingInternalCompany(s.company);
+          setOfferModalVisible(true);
+        }, 500);
+      }
       return { ...s, checklist: newCL, status: newStatus };
     });
     await saveSchedules(updated);
@@ -684,15 +765,9 @@ export default function App() {
     const autoChecks = STATUS_TO_CHECKS[ns] ?? [];
     const initCL: Record<string, boolean> = { ...(item.checklist ?? {}) };
     CHECKLIST_STEPS.forEach(step => { if (autoChecks.includes(step)) initCL[step] = true; });
-    const targetId = item.id;
-    // 関数型更新で常に最新の schedules を参照
-    await new Promise<void>(resolve => {
-      setSchedules(prev => {
-        const updated = prev.map(s => s.id !== targetId ? s : { ...s, status: ns, checklist: initCL });
-        AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updated)).then(resolve);
-        return updated;
-      });
-    });
+    // 常に同一エントリのstatusだけ更新（新エントリ作成しない → 古いデータが残らない）
+    const updated = schedules.map(s => s.id !== item.id ? s : { ...s, status: ns, checklist: initCL });
+    await saveSchedules(updated);
   };
 
   // ─── ジャンル管理 ─────────────────────────────────────────────
@@ -751,9 +826,8 @@ export default function App() {
   // ─── UI ────────────────────────────────────────────────────────
   if (!fontsLoaded) return null;
   return (
-    <SafeAreaProvider>
     <SafeAreaView style={[styles.safeArea, { backgroundColor: C.bg }]}>
-      <StatusBar style={isDark ? 'light' : 'dark'} />
+      <StatusBar style="dark" />
       <View style={[styles.container, { backgroundColor: C.bg }]}>
 
         {/* ヘッダー */}
@@ -860,14 +934,11 @@ export default function App() {
                               }}
                               style={{ alignItems: 'center', width: 46, minHeight: 44 }}>
                               <View style={[
-                                { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
+                                { width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
                                 isSel && { backgroundColor: TDU_BLUE },
                                 isToday && !isSel && { borderWidth: 1.5, borderColor: ACCENT },
                               ]}>
-                                <Text style={[{
-                                  fontSize: 12, textAlign: 'center',
-                                  includeFontPadding: false, // Android 余白除去
-                                },
+                                <Text style={[{ fontSize: 12 },
                                 (() => {
                                   if (isSel) return { color: '#fff', fontWeight: 'bold' };
                                   if (isToday) return { color: ACCENT, fontWeight: 'bold' };
@@ -1225,7 +1296,6 @@ export default function App() {
                         title: '📋 テスト通知',
                         body: '就活管理アプリからのリマインド通知が正常に届いています',
                         sound: true,
-                        ...(Platform.OS === 'android' && { channelId: 'default' }),
                       },
                       trigger: { type: 'timeInterval' as const, seconds: 5, repeats: false },
                     });
@@ -1356,12 +1426,73 @@ export default function App() {
               </View>
             ))}
 
+            {/* 設定タブバナー広告 */}
+            <View style={{ alignItems: 'center', marginTop: 20 }}>
+              <BannerAd
+                unitId={AD_UNIT_ID}
+                size={BannerAdSize.BANNER}
+                requestOptions={{ requestNonPersonalizedAdsOnly: true }}
+              />
+            </View>
+
+            {/* 開発者を支援 */}
+            <Text style={[styles.settingSection, { marginTop: 24 }]}>開発者を支援する</Text>
+            <TouchableOpacity
+              style={[styles.supportBtn, { backgroundColor: isDark ? '#1c2333' : '#e8f0fe', borderColor: isDark ? '#6ea8fe' : TDU_BLUE }]}
+              onPress={showRewardedAd}
+            >
+              <Text style={{ fontSize: 20 }}>🎬</Text>
+              <View style={{ flex: 1, marginLeft: 12 }}>
+                <Text style={[styles.supportBtnTitle, { color: isDark ? '#6ea8fe' : TDU_BLUE }]}>30秒広告を見て応援する</Text>
+                <Text style={[styles.supportBtnSub, { color: C.text2 }]}>就活Tipsをランダムで1つプレゼント🎁</Text>
+              </View>
+              <Text style={{ fontSize: 18 }}>▶</Text>
+            </TouchableOpacity>
+
             <View style={[styles.aboutBox, { backgroundColor: C.bg2, marginTop: 24 }]}>
               <Text style={[styles.aboutText, { color: C.text2 }]}>就活管理リマインダー v4.0</Text>
             </View>
           </ScrollView>
         )}
 
+
+        {/* 内定おめでとう！広告オファーモーダル */}
+        <Modal visible={offerModalVisible} transparent animationType="fade" onRequestClose={() => setOfferModalVisible(false)}>
+          <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', padding: 24 }}>
+            <View style={{ backgroundColor: C.bg, borderRadius: 20, padding: 24, width: '90%', alignItems: 'center', gap: 12 }}>
+              <Text style={{ fontSize: 36 }}>🎉</Text>
+              <Text style={{ fontSize: 18, fontWeight: 'bold', color: isDark ? '#6ea8fe' : TDU_BLUE }}>内定おめでとうございます！</Text>
+              <Text style={{ fontSize: 14, color: C.text2, textAlign: 'center' }}>{pendingInternalCompany}の内定、本当におめでとうございます！</Text>
+              <Text style={{ fontSize: 13, color: C.text2, textAlign: 'center', marginTop: 4 }}>広告を見て開発者を応援しますか？{'\n'}就活Tipsを1つプレゼントします🎁</Text>
+              <TouchableOpacity
+                style={{ backgroundColor: isDark ? '#1c2333' : TDU_BLUE, borderRadius: 12, paddingVertical: 12, paddingHorizontal: 24, width: '100%', alignItems: 'center', marginTop: 8 }}
+                onPress={() => { setOfferModalVisible(false); setTimeout(showRewardedAd, 300); }}
+              >
+                <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 15 }}>▶ 広告を見てTipsをもらう</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setOfferModalVisible(false)}>
+                <Text style={{ color: C.text2, fontSize: 13, marginTop: 4 }}>スキップ</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+
+        {/* リワード Tips表示モーダル */}
+        <Modal visible={!!rewardedTip} transparent animationType="slide" onRequestClose={() => setRewardedTip(null)}>
+          <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end', padding: 0 }}>
+            <View style={{ backgroundColor: C.bg, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 28, gap: 12 }}>
+              <Text style={{ fontSize: 13, color: isDark ? '#6ea8fe' : ACCENT, fontWeight: 'bold' }}>🎁 就活Tips</Text>
+              <Text style={{ fontSize: 17, fontWeight: 'bold', color: C.text }}>{rewardedTip?.title}</Text>
+              <Text style={{ fontSize: 14, color: C.text2, lineHeight: 22 }}>{rewardedTip?.content}</Text>
+              <TouchableOpacity
+                style={{ backgroundColor: isDark ? '#1c2333' : TDU_BLUE, borderRadius: 12, paddingVertical: 12, alignItems: 'center', marginTop: 8 }}
+                onPress={() => setRewardedTip(null)}
+              >
+                <Text style={{ color: '#fff', fontWeight: 'bold' }}>閉じる</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
 
         {/* ステータス追加モーダル */}
         <Modal visible={addStatusModal} transparent animationType="fade" onRequestClose={() => setAddStatusModal(false)}>
@@ -1474,7 +1605,7 @@ export default function App() {
 
         {/* ── 企業登録/編集モーダル ── */}
         <Modal visible={isModalVisible || isDetailVisible} animationType="slide" transparent onRequestClose={closeModal}>
-          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={Platform.OS === 'android' ? 25 : 0} style={styles.modalOverlay}>
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
             <TouchableOpacity style={StyleSheet.absoluteFillObject} onPress={() => closeModal()} activeOpacity={1} />
             <View style={[styles.modalContent, { backgroundColor: C.bg }]}>
               <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
@@ -1867,7 +1998,7 @@ export default function App() {
         {/* チェックリストモーダル */}
         <Modal visible={!!checkModalItem} transparent animationType="slide"
           onRequestClose={() => { setCheckModalItem(null); setNewCheckLabel(''); }}>
-          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={Platform.OS === 'android' ? 25 : 0} style={styles.pickerOverlay}>
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.pickerOverlay}>
             <TouchableOpacity style={StyleSheet.absoluteFillObject} activeOpacity={1}
               onPress={() => { setCheckModalItem(null); setNewCheckLabel(''); }} />
             <View style={[styles.modalContent, { maxHeight: '85%', backgroundColor: C.bg }]} onStartShouldSetResponder={() => true}>
@@ -1934,7 +2065,7 @@ export default function App() {
 
         {/* ジャンル編集モーダル */}
         <Modal visible={genreModalVisible} transparent animationType="slide" onRequestClose={() => setGenreModalVisible(false)}>
-          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={Platform.OS === 'android' ? 25 : 0} style={styles.modalOverlay}>
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
             <TouchableOpacity style={StyleSheet.absoluteFillObject} onPress={() => setGenreModalVisible(false)} activeOpacity={1} />
             <View style={[styles.modalContent, { maxHeight: '70%', backgroundColor: C.bg }]}>
               <Text style={[styles.modalTitle, { color: C.text }]}>{editGenre ? (STATUS_OPTIONS.includes(editGenre.id) ? 'ステータス色を編集' : 'ジャンルを編集') : 'ジャンルを追加'}</Text>
@@ -1977,7 +2108,6 @@ export default function App() {
 
       </View>
     </SafeAreaView>
-    </SafeAreaProvider>
   );
 }
 
@@ -2057,6 +2187,9 @@ const styles = StyleSheet.create({
   dangerButtonText: { color: '#e74c3c', fontWeight: 'bold' },
   aboutBox: { padding: 16, borderRadius: 10, marginTop: 20 },
   aboutText: { fontSize: 13, color: '#666', lineHeight: 20 },
+  supportBtn: { flexDirection: 'row', alignItems: 'center', borderRadius: 14, borderWidth: 1.5, padding: 16, marginTop: 8 },
+  supportBtnTitle: { fontSize: 15, fontWeight: 'bold' },
+  supportBtnSub: { fontSize: 12, marginTop: 2 },
   sortChip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, backgroundColor: '#f0f2f5' },
   sortChipActive: { backgroundColor: TDU_BLUE },
   sortChipText: { fontSize: 12, color: '#666' },

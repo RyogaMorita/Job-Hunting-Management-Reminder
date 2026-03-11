@@ -14,9 +14,10 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.moritaryoga.shukatsukanri",
-      "buildNumber": "1",
+      "buildNumber": "2",
       "infoPlist": {
-        "NSUserNotificationUsageDescription": "選考の締め切りや面接日程をリマインドするために通知を使用します。"
+        "NSUserNotificationUsageDescription": "選考の締め切りや面接日程をリマインドするために通知を使用します。",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
@@ -34,6 +35,13 @@
       "softwareKeyboardLayoutMode": "pan"
     },
     "plugins": [
+      [
+        "react-native-google-mobile-ads",
+        {
+          "androidAppId": "ca-app-pub-7090599455468315~4962817795",
+          "iosAppId": "ca-app-pub-7090599455468315~4962817795"
+        }
+      ],
       [
         "expo-notifications",
         {
