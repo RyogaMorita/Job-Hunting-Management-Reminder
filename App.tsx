@@ -269,7 +269,8 @@ export default function App() {
 
   // ─── 広告 state ──────────────────────────────────────────────
   const [rewardedTip, setRewardedTip] = useState<{ title: string; content: string } | null>(null);
-  const [offerModalVisible, setOfferModalVisible] = useState(false); // 内定後広告オファー
+  const [offerModalVisible, setOfferModalVisible] = useState(false);
+  const [firstLaunchModal, setFirstLaunchModal] = useState(false);
   const [pendingInternalCompany, setPendingInternalCompany] = useState<string>(''); // 内定企業名
   const interstitialRef = useRef<InterstitialAd | null>(null);
   const rewardedRef = useRef<RewardedAd | null>(null);
@@ -384,10 +385,14 @@ export default function App() {
     const countStr = await AsyncStorage.getItem('@interstitial_count');
     const count = countStr ? parseInt(countStr) + 1 : 1;
     await AsyncStorage.setItem('@interstitial_count', String(count));
-    if (count % 3 === 0 && interstitialRef.current?.loaded) {
-      interstitialRef.current.show();
-      // 次回用にリロード
-      setTimeout(() => interstitialRef.current?.load(), 1000);
+    if (count % 3 === 0) {
+      const interstitial = InterstitialAd.createForAdRequest(INTERSTITIAL_ID, {
+        requestNonPersonalizedAdsOnly: true,
+      });
+      interstitial.addAdEventListener(AdEventType.LOADED, () => {
+        interstitial.show();
+      });
+      interstitial.load();
     }
   };
 
@@ -428,6 +433,11 @@ export default function App() {
       const launchCount = await AsyncStorage.getItem('@launch_count');
       const count = launchCount ? parseInt(launchCount) + 1 : 1;
       await AsyncStorage.setItem('@launch_count', String(count));
+
+      // 初回起動モーダル
+      if (count === 1) {
+        setTimeout(() => setFirstLaunchModal(true), 1000);
+      }
 
       // 5回・20回起動でレビュー促進
       if (count === 5 || count === 20) {
@@ -837,7 +847,11 @@ export default function App() {
               <Text style={[styles.statNum, { color: isDark ? '#6ea8fe' : TDU_BLUE }]}>{activeCount}</Text>
               <Text style={[styles.statLabel, { color: isDark ? '#6ea8fe' : TDU_BLUE }]}>持ち駒</Text>
             </View>
-            <Text style={styles.headerTitle}>就活管理</Text>
+            <BannerAd
+              unitId={AD_UNIT_ID}
+              size={BannerAdSize.BANNER}
+              requestOptions={{ requestNonPersonalizedAdsOnly: true }}
+            />
             <View style={[styles.statChip, { backgroundColor: isDark ? '#2d2007' : '#fff3cd' }]}>
               <Text style={[styles.statNum, { color: '#856404' }]}>{internalCount}</Text>
               <Text style={[styles.statLabel, { color: '#856404' }]}>内定</Text>
@@ -1260,26 +1274,6 @@ export default function App() {
             </View>
 
             <Text style={[styles.settingSection, { marginTop: 28 }]}>通知設定</Text>
-            <View style={[styles.settingRow, { borderColor: C.border2 }]}>
-              <Text style={[styles.settingLabel, { color: C.text }]}>リマインダー通知</Text>
-              <Switch value={notifyEnabled}
-                onValueChange={async v => { setNotifyEnabled(v); await AsyncStorage.setItem('@notify_enabled', JSON.stringify(v)); }}
-                trackColor={{ true: TDU_BLUE }} />
-            </View>
-            {notifyEnabled && (
-              <View style={[styles.settingRow, { flexDirection: 'column', alignItems: 'flex-start', gap: 10 }]}>
-                <Text style={[styles.settingLabel, { color: C.text }]}>通知タイミング</Text>
-                <View style={{ flexDirection: 'row', gap: 8 }}>
-                  {['0', '1', '2', '3'].map(d => (
-                    <TouchableOpacity key={d}
-                      style={[styles.sortChip, { backgroundColor: C.bg2 }, notifyDays === d && styles.sortChipActive]}
-                      onPress={async () => { setNotifyDays(d); await AsyncStorage.setItem('@notify_days', d); }}>
-                      <Text style={[styles.sortChipText, notifyDays === d && { color: '#fff' }]}>{d}日前</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </View>
-            )}
 
             <Text style={[styles.settingSection, { marginTop: 28 }]}>通知テスト</Text>
             <View style={[styles.settingRow, { borderColor: C.border2, flexDirection: 'column', alignItems: 'flex-start', gap: 8 }]}>
@@ -1455,6 +1449,27 @@ export default function App() {
           </ScrollView>
         )}
 
+
+        {/* 初回起動モーダル */}
+        <Modal visible={firstLaunchModal} transparent animationType="fade" onRequestClose={() => setFirstLaunchModal(false)}>
+          <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', padding: 24 }}>
+            <View style={{ backgroundColor: C.bg, borderRadius: 20, padding: 24, width: '90%', gap: 14 }}>
+              <Text style={{ fontSize: 22, fontWeight: 'bold', color: isDark ? '#6ea8fe' : TDU_BLUE, textAlign: 'center' }}>ようこそ！🎉</Text>
+              <Text style={{ fontSize: 15, fontWeight: 'bold', color: C.text }}>就活管理リマインダーの使い方</Text>
+              <View style={{ gap: 8 }}>
+                <Text style={{ fontSize: 13, color: C.text2, lineHeight: 20 }}>📅 <Text style={{ fontWeight: 'bold', color: C.text }}>カレンダータブ</Text>{'\n'}日付をタップして企業を登録。ダブルタップで素早く追加できます。</Text>
+                <Text style={{ fontSize: 13, color: C.text2, lineHeight: 20 }}>👥 <Text style={{ fontWeight: 'bold', color: C.text }}>持ち駒タブ</Text>{'\n'}登録した企業の選考状況を一覧管理。「→」で次のステップへ進めます。</Text>
+                <Text style={{ fontSize: 13, color: C.text2, lineHeight: 20 }}>⚙️ <Text style={{ fontWeight: 'bold', color: C.text }}>設定タブ</Text>{'\n'}詳しい使い方は設定タブ下部の「ヘルプ・使い方」をご覧ください。</Text>
+              </View>
+              <TouchableOpacity
+                style={{ backgroundColor: isDark ? '#1c2333' : TDU_BLUE, borderRadius: 12, paddingVertical: 12, alignItems: 'center', marginTop: 4 }}
+                onPress={() => setFirstLaunchModal(false)}
+              >
+                <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 15 }}>はじめる</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
 
         {/* 内定おめでとう！広告オファーモーダル */}
         <Modal visible={offerModalVisible} transparent animationType="fade" onRequestClose={() => setOfferModalVisible(false)}>
