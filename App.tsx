@@ -271,6 +271,9 @@ export default function App() {
   const [rewardedTip, setRewardedTip] = useState<{ title: string; content: string } | null>(null);
   const [offerModalVisible, setOfferModalVisible] = useState(false);
   const [firstLaunchModal, setFirstLaunchModal] = useState(false);
+  const [adFree, setAdFree] = useState(false);
+  const [actionCount, setActionCount] = useState(0);
+  const [bannerKey, setBannerKey] = useState(0);
   const [pendingInternalCompany, setPendingInternalCompany] = useState<string>(''); // 内定企業名
   const interstitialRef = useRef<InterstitialAd | null>(null);
   const rewardedRef = useRef<RewardedAd | null>(null);
@@ -380,19 +383,62 @@ export default function App() {
     rewarded.load();
   }, []);
 
-  // インタースティシャルを表示（3回に1回）
-  const showInterstitialIfNeeded = async () => {
-    const countStr = await AsyncStorage.getItem('@interstitial_count');
-    const count = countStr ? parseInt(countStr) + 1 : 1;
-    await AsyncStorage.setItem('@interstitial_count', String(count));
-    if (count % 3 === 0) {
-      const interstitial = InterstitialAd.createForAdRequest(INTERSTITIAL_ID, {
-        requestNonPersonalizedAdsOnly: true,
-      });
-      interstitial.addAdEventListener(AdEventType.LOADED, () => {
-        interstitial.show();
-      });
-      interstitial.load();
+  // インタースティシャルを表示（adFreeでない場合のみ）
+  const showInterstitialNow = () => {
+    if (adFree) return;
+    const interstitial = InterstitialAd.createForAdRequest(INTERSTITIAL_ID, {
+      requestNonPersonalizedAdsOnly: true,
+    });
+    interstitial.addAdEventListener(AdEventType.LOADED, () => {
+      interstitial.show();
+    });
+    interstitial.load();
+  };
+
+  // 操作カウント（adFreeでない・7起動以上の場合のみ、次の操作で1回表示してリセット）
+  // 操作トリガー（タブ切り替え・会社登録時に呼ぶ）
+  // 7回起動後の最初の操作で1回だけ広告を表示し、起動カウントをリセット
+  const countAction = async () => {
+    if (adFree) return;
+    const launchStr = await AsyncStorage.getItem('@launch_count');
+    const launches = launchStr ? parseInt(launchStr) : 0;
+    if (launches < 7) return; // 7回未満はスキップ
+    const triggered = await AsyncStorage.getItem('@interstitial_triggered');
+    if (triggered === 'true') return; // 今回の起動サイクルで既に表示済み
+    // 表示済みフラグを立てて起動カウントをリセット
+    await AsyncStorage.setItem('@interstitial_triggered', 'true');
+    await AsyncStorage.setItem('@launch_count', '0');
+    showInterstitialNow();
+  };
+
+  // 広告削除購入（仮実装 - 実際はiap連携）
+  const purchaseAdFree = async () => {
+    Alert.alert(
+      '広告を削除する',
+      '¥120で広告を完全に削除しますか？',
+      [
+        { text: 'キャンセル', style: 'cancel' },
+        {
+          text: '購入する',
+          onPress: async () => {
+            // TODO: expo-iap での実装
+            await AsyncStorage.setItem('@ad_free', 'true');
+            setAdFree(true);
+            Alert.alert('ありがとうございます！', '広告が削除されました🎉');
+          }
+        }
+      ]
+    );
+  };
+
+  // 購入復元
+  const restorePurchase = async () => {
+    const val = await AsyncStorage.getItem('@ad_free');
+    if (val === 'true') {
+      setAdFree(true);
+      Alert.alert('復元完了', '広告削除が復元されました。');
+    } else {
+      Alert.alert('復元できませんでした', '購入履歴が見つかりません。');
     }
   };
 
@@ -448,8 +494,12 @@ export default function App() {
         }
       }
 
-      // 起動時インタースティシャル（3回に1回）
-      setTimeout(() => showInterstitialIfNeeded(), 2000);
+      // 広告削除状態を読み込み
+      const af = await AsyncStorage.getItem('@ad_free');
+      if (af === 'true') setAdFree(true);
+
+      // 起動時に表示済みフラグをリセット（新しい起動サイクル開始）
+      await AsyncStorage.setItem('@interstitial_triggered', 'false');
 
     } catch (e) { Alert.alert('エラー', '読み込み失敗'); }
   };
@@ -841,20 +891,31 @@ export default function App() {
       <View style={[styles.container, { backgroundColor: C.bg }]}>
 
         {/* ヘッダー */}
-        <View style={styles.topNav}>
-          <View style={styles.headerStats}>
-            <View style={[styles.statChip, { backgroundColor: C.statChip }]}>
-              <Text style={[styles.statNum, { color: isDark ? '#6ea8fe' : TDU_BLUE }]}>{activeCount}</Text>
-              <Text style={[styles.statLabel, { color: isDark ? '#6ea8fe' : TDU_BLUE }]}>持ち駒</Text>
-            </View>
-            <BannerAd
-              unitId={AD_UNIT_ID}
-              size={BannerAdSize.BANNER}
-              requestOptions={{ requestNonPersonalizedAdsOnly: true }}
-            />
-            <View style={[styles.statChip, { backgroundColor: isDark ? '#2d2007' : '#fff3cd' }]}>
+        <View style={[styles.topNav, { borderBottomColor: C.border }]}>
+          {/* 1行目：内定 + 広告 */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingTop: 6 }}>
+            <View style={[styles.statChip, { backgroundColor: isDark ? '#2d2007' : '#fff3cd', marginRight: 8 }]}>
               <Text style={[styles.statNum, { color: '#856404' }]}>{internalCount}</Text>
               <Text style={[styles.statLabel, { color: '#856404' }]}>内定</Text>
+            </View>
+            {!adFree ? (
+              <View style={{ width: 280, height: 50, overflow: 'hidden', justifyContent: 'center' }}>
+                <BannerAd
+                  key={bannerKey}
+                  unitId={AD_UNIT_ID}
+                  size={BannerAdSize.BANNER}
+                  requestOptions={{ requestNonPersonalizedAdsOnly: true }}
+                />
+              </View>
+            ) : (
+              <Text style={[styles.headerTitle, { flex: 1, textAlign: 'center' }]}>就活管理</Text>
+            )}
+          </View>
+          {/* 2行目：持ち駒 */}
+          <View style={{ paddingHorizontal: 16, paddingBottom: 6, paddingTop: 2 }}>
+            <View style={[styles.statChip, { backgroundColor: C.statChip, alignSelf: 'flex-start' }]}>
+              <Text style={[styles.statNum, { color: isDark ? '#6ea8fe' : TDU_BLUE }]}>{activeCount}</Text>
+              <Text style={[styles.statLabel, { color: isDark ? '#6ea8fe' : TDU_BLUE }]}>持ち駒</Text>
             </View>
           </View>
         </View>
@@ -1042,13 +1103,9 @@ export default function App() {
               )}
             </View>
             {/* カレンダータブのFAB */}
-            <TouchableOpacity style={styles.fab} onPress={() => openAdd()}>
+            <TouchableOpacity style={styles.fab} onPress={() => { openAdd(); countAction(); }}>
               <Text style={styles.fabText}>＋</Text>
             </TouchableOpacity>
-          </View>
-        )}
-
-        {/* ── 持ち駒タブ ── */}
         {activeTab === 'list' && (
           <View style={{ flex: 1 }}>
             {/* 検索バー */}
@@ -1191,7 +1248,7 @@ export default function App() {
               }
               <View style={{ height: 80 }} />
             </ScrollView>
-            <TouchableOpacity style={styles.fab} onPress={() => openAdd()}>
+            <TouchableOpacity style={styles.fab} onPress={() => { openAdd(); countAction(); }}>
               <Text style={styles.fabText}>＋</Text>
             </TouchableOpacity>
           </View>
@@ -1421,27 +1478,54 @@ export default function App() {
             ))}
 
             {/* 設定タブバナー広告 */}
-            <View style={{ alignItems: 'center', marginTop: 20 }}>
-              <BannerAd
-                unitId={AD_UNIT_ID}
-                size={BannerAdSize.BANNER}
-                requestOptions={{ requestNonPersonalizedAdsOnly: true }}
-              />
-            </View>
+            {!adFree && (
+              <View style={{ alignItems: 'center', marginTop: 20 }}>
+                <BannerAd
+                  unitId={AD_UNIT_ID}
+                  size={BannerAdSize.BANNER}
+                  requestOptions={{ requestNonPersonalizedAdsOnly: true }}
+                />
+              </View>
+            )}
 
             {/* 開発者を支援 */}
             <Text style={[styles.settingSection, { marginTop: 24 }]}>開発者を支援する</Text>
-            <TouchableOpacity
-              style={[styles.supportBtn, { backgroundColor: isDark ? '#1c2333' : '#e8f0fe', borderColor: isDark ? '#6ea8fe' : TDU_BLUE }]}
-              onPress={showRewardedAd}
-            >
-              <Text style={{ fontSize: 20 }}>🎬</Text>
-              <View style={{ flex: 1, marginLeft: 12 }}>
-                <Text style={[styles.supportBtnTitle, { color: isDark ? '#6ea8fe' : TDU_BLUE }]}>30秒広告を見て応援する</Text>
-                <Text style={[styles.supportBtnSub, { color: C.text2 }]}>就活Tipsをランダムで1つプレゼント🎁</Text>
+            {!adFree ? (
+              <>
+                <TouchableOpacity
+                  style={[styles.supportBtn, { backgroundColor: isDark ? '#1c2333' : '#e8f0fe', borderColor: isDark ? '#6ea8fe' : TDU_BLUE }]}
+                  onPress={showRewardedAd}
+                >
+                  <Text style={{ fontSize: 20 }}>🎬</Text>
+                  <View style={{ flex: 1, marginLeft: 12 }}>
+                    <Text style={[styles.supportBtnTitle, { color: isDark ? '#6ea8fe' : TDU_BLUE }]}>30秒広告を見て応援する</Text>
+                    <Text style={[styles.supportBtnSub, { color: C.text2 }]}>就活Tipsをランダムで1つプレゼント🎁</Text>
+                  </View>
+                  <Text style={{ fontSize: 18 }}>▶</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.supportBtn, { backgroundColor: isDark ? '#1c2333' : '#fff8e1', borderColor: '#f59e0b', marginTop: 10 }]}
+                  onPress={purchaseAdFree}
+                >
+                  <Text style={{ fontSize: 20 }}>✨</Text>
+                  <View style={{ flex: 1, marginLeft: 12 }}>
+                    <Text style={[styles.supportBtnTitle, { color: '#b45309' }]}>広告を削除する　¥120</Text>
+                    <Text style={[styles.supportBtnSub, { color: C.text2 }]}>すべての広告を完全に非表示にします</Text>
+                  </View>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={restorePurchase} style={{ alignItems: 'center', marginTop: 8 }}>
+                  <Text style={{ color: C.text2, fontSize: 12 }}>購入を復元する</Text>
+                </TouchableOpacity>
+              </>
+            ) : (
+              <View style={[styles.supportBtn, { backgroundColor: isDark ? '#1c2333' : '#f0fdf4', borderColor: '#22c55e' }]}>
+                <Text style={{ fontSize: 20 }}>✅</Text>
+                <View style={{ flex: 1, marginLeft: 12 }}>
+                  <Text style={[styles.supportBtnTitle, { color: '#16a34a' }]}>広告削除済み</Text>
+                  <Text style={[styles.supportBtnSub, { color: C.text2 }]}>ご支援ありがとうございます🙏</Text>
+                </View>
               </View>
-              <Text style={{ fontSize: 18 }}>▶</Text>
-            </TouchableOpacity>
+            )}
 
             <View style={[styles.aboutBox, { backgroundColor: C.bg2, marginTop: 24 }]}>
               <Text style={[styles.aboutText, { color: C.text2 }]}>就活管理リマインダー v4.0</Text>
@@ -1603,7 +1687,7 @@ export default function App() {
             const isActive = activeTab === tab;
             const activeColor = isDark ? '#6ea8fe' : TDU_BLUE;
             return (
-              <TouchableOpacity key={tab} style={styles.tabButton} onPress={() => setActiveTab(tab)}>
+              <TouchableOpacity key={tab} style={styles.tabButton} onPress={() => { setActiveTab(tab); setBannerKey(k => k + 1); countAction(); }}>
                 <Image
                   source={imgSrcs[i]}
                   style={[styles.tabImg,
