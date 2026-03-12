@@ -9,10 +9,7 @@
       }
     },
     "production": {
-      "autoIncrement": false,
-      "ios": {
-        "buildNumber": "15"
-      }
+      "autoIncrement": false
     }
   }
 }
