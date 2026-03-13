@@ -22,6 +22,7 @@ import {
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowAlert: true, shouldPlaySound: true, shouldSetBadge: false,
+    shouldShowBanner: true, shouldShowList: true,
   }),
 });
 
@@ -752,7 +753,7 @@ export default function App() {
             body: `${item.status}の予定が${day === '0' ? '今日' : day + '日後'}です（${item.date}${item.hour ? ' ' + item.hour + ':' + item.minute : ''}）`,
             sound: true,
           },
-          trigger: { type: 'date' as const, date: notifyDate },
+          trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: notifyDate },
         });
       }
     } catch (e) { console.log('通知エラー:', e); }
@@ -978,13 +979,14 @@ export default function App() {
                           textDayFontWeight: '300',
                           textDayHeaderFontSize: 0.1,
                           weekVerticalMargin: 2,
+                          // @ts-ignore
                           'stylesheet.calendar.header': {
                             header: { height: 0, overflow: 'hidden', margin: 0, padding: 0 },
                             week: { height: 0, overflow: 'hidden', margin: 0, padding: 0 },
                             dayHeader: { height: 0, overflow: 'hidden', margin: 0, padding: 0 },
                             monthText: { height: 0, margin: 0, padding: 0 },
-                          } as any,
-                        }}
+                          },
+                        } as any}
                         dayComponent={({ date, state }: any) => {
                           const ds = date.dateString;
                           const items = dateCompanyMap[ds] || [];
@@ -1103,6 +1105,9 @@ export default function App() {
             <TouchableOpacity style={styles.fab} onPress={() => { openAdd(); countAction(); }}>
               <Text style={styles.fabText}>＋</Text>
             </TouchableOpacity>
+          </View>
+        )}
+
         {activeTab === 'list' && (
           <View style={{ flex: 1 }}>
             {/* 検索バー */}
@@ -1345,7 +1350,7 @@ export default function App() {
                         body: '就活管理アプリからのリマインド通知が正常に届いています',
                         sound: true,
                       },
-                      trigger: { type: 'timeInterval' as const, seconds: 5, repeats: false },
+                      trigger: { type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL, seconds: 5, repeats: false },
                     });
                     Alert.alert('送信完了', '5秒後に通知が届きます。アプリをバックグラウンドにしてお待ちください。');
                   } catch (e) { Alert.alert('エラー', '通知の送信に失敗しました: ' + String(e)); }
