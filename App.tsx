@@ -90,7 +90,7 @@ interface NotifySetting { daysBeforeList: string[]; hourStr: string; minuteStr: 
 interface Schedule {
   id: string; company: string; date: string; hour: string; minute: string;
   status: string; note: string; url: string; userId: string; password: string;
-  rank: string; genreId: string; calendarColor?: string;
+  rank: string; genreId: string;
   checklist: Record<string, boolean>;
   customChecklist: { id: string; label: string; checked: boolean }[];
   notifyEnabled?: boolean;
@@ -486,6 +486,14 @@ export default function App() {
         setTimeout(() => setFirstLaunchModal(true), 1000);
       }
 
+      // 5回・20回起動でレビュー促進
+      if (count === 5 || count === 20) {
+        const already = await AsyncStorage.getItem(REVIEW_KEY);
+        if (!already && await StoreReview.hasAction()) {
+          await StoreReview.requestReview();
+          await AsyncStorage.setItem(REVIEW_KEY, 'true');
+        }
+      }
 
       // 広告削除状態を読み込み
       const af = await AsyncStorage.getItem('@ad_free');
@@ -529,7 +537,7 @@ export default function App() {
     const marks: Record<string, any> = {};
     schedules.forEach(s => {
       if (!s.date) return; // ① 日付なしエントリを除外
-      const col = s.calendarColor ?? statusColors[s.status] ?? TDU_BLUE;
+      const col = genres.find(g => g.id === s.genreId)?.color ?? TDU_BLUE;
       if (!marks[s.date]) marks[s.date] = { dots: [] };
       if (!marks[s.date].dots) marks[s.date].dots = [];
       marks[s.date].dots.push({ color: col });
@@ -640,7 +648,6 @@ export default function App() {
       memoResearch: memoResearch || undefined,
       memoPR: memoPR || undefined,
       memoQuestions: memoQuestions || undefined,
-      calendarColor: statusColors[selStatus] ?? '#95A5A6',
     };
     const base = deleteIds.length > 0 ? schedules.filter(s => !deleteIds.includes(s.id)) : schedules;
     const updated = selectedItem ? base.map(s => s.id === selectedItem.id ? newSchedule : s) : [...base, newSchedule];
@@ -1018,7 +1025,7 @@ export default function App() {
                                 ]}>{date.day}</Text>
                               </View>
                               {items.slice(0, 2).map((item: Schedule, i: number) => {
-                                const sc = item.calendarColor ?? statusColorOf(item.status);
+                                const sc = statusColorOf(item.status);
                                 return (
                                   <View key={i} style={[styles.calLabel, { backgroundColor: sc + '33', borderLeftColor: sc }]}>
                                     <Text style={[styles.calLabelText, { color: sc }]} numberOfLines={1}>{item.company}</Text>
@@ -1228,29 +1235,13 @@ export default function App() {
                           isInactive && { backgroundColor: '#aaa' }]}>
                             <Text style={styles.statusBadgeText}>{item.status}</Text>
                           </View>
-                          <View style={{ flexDirection: 'row', gap: 4, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                            {item.userId ? (
-                              <TouchableOpacity
-                                style={[styles.nextStatusBtn, { borderColor: isDark ? '#555' : '#ccc' }]}
-                                onPress={() => { Clipboard.setString(item.userId); Alert.alert('コピーしました', 'IDをコピーしました'); }}>
-                                <Text style={[styles.nextStatusBtnText, { color: isDark ? '#aaa' : '#666' }]}>ID📋</Text>
-                              </TouchableOpacity>
-                            ) : null}
-                            {item.password ? (
-                              <TouchableOpacity
-                                style={[styles.nextStatusBtn, { borderColor: isDark ? '#555' : '#ccc' }]}
-                                onPress={() => { Clipboard.setString(item.password); Alert.alert('コピーしました', 'PWをコピーしました'); }}>
-                                <Text style={[styles.nextStatusBtnText, { color: isDark ? '#aaa' : '#666' }]}>PW📋</Text>
-                              </TouchableOpacity>
-                            ) : null}
-                            {ns && !isInactive ? (
-                              <TouchableOpacity
-                                style={[styles.nextStatusBtn, { borderColor: sc }]}
-                                onPress={() => advanceStatus(item)}>
-                                <Text style={[styles.nextStatusBtnText, { color: sc }]} numberOfLines={1}>{ns} →</Text>
-                              </TouchableOpacity>
-                            ) : null}
-                          </View>
+                          {ns && !isInactive ? (
+                            <TouchableOpacity
+                              style={[styles.nextStatusBtn, { borderColor: sc }]}
+                              onPress={() => advanceStatus(item)}>
+                              <Text style={[styles.nextStatusBtnText, { color: sc }]} numberOfLines={1}>{ns} →</Text>
+                            </TouchableOpacity>
+                          ) : null}
                         </View>
                       </TouchableOpacity>
                     </SwipeableRow>
@@ -1283,8 +1274,8 @@ export default function App() {
                 </Text>
               </TouchableOpacity>
             )}
-            <TouchableOpacity style={[styles.outlineButton, isDark && { borderColor: '#6ea8fe' }]} onPress={() => openAddGenre()}>
-              <Text style={[styles.outlineButtonText, isDark && { color: '#6ea8fe' }]}>+ ジャンルを追加</Text>
+            <TouchableOpacity style={styles.outlineButton} onPress={() => openAddGenre()}>
+              <Text style={styles.outlineButtonText}>+ ジャンルを追加</Text>
             </TouchableOpacity>
 
             <Text style={[styles.settingSection, { marginTop: 28 }]}>ステータス管理</Text>
@@ -1292,26 +1283,21 @@ export default function App() {
               const sc = statusColors[st] ?? '#95A5A6';
               const isFixed = DEFAULT_STATUS_OPTIONS.includes(st);
               return (
-                <View key={st} style={[styles.genreRow, { borderColor: C.border2 }]}>
-                  <View style={[styles.genreColorDot, { backgroundColor: sc }]} />
-                  <Text style={[styles.settingLabel, { color: C.text }]}>{st}</Text>
-                  <TouchableOpacity style={{ paddingHorizontal: 8, paddingVertical: 4 }} onPress={() => {
+                <TouchableOpacity key={st} style={[styles.genreRow, { borderColor: C.border2 }]}
+                  onPress={() => {
                     setEditGenre({ id: st, name: st, color: sc });
                     setGenreName(st); setGenreColor(sc); setGenreModalVisible(true);
+                  }}
+                  onLongPress={() => {
+                    if (!isFixed) Alert.alert('削除', `「${st}」を削除しますか？`, [
+                      { text: 'キャンセル', style: 'cancel' },
+                      { text: '削除', style: 'destructive', onPress: () => saveStatusOptions(statusOptions.filter(s => s !== st)) },
+                    ]);
                   }}>
-                    <Text style={{ color: TDU_BLUE, fontSize: 12 }}>色</Text>
-                  </TouchableOpacity>
-                  {!isFixed && (
-                    <TouchableOpacity style={{ paddingHorizontal: 8, paddingVertical: 4 }} onPress={() => {
-                      Alert.alert('削除', `「${st}」を削除しますか？`, [
-                        { text: 'キャンセル', style: 'cancel' },
-                        { text: '削除', style: 'destructive', onPress: () => saveStatusOptions(statusOptions.filter(s => s !== st)) },
-                      ]);
-                    }}>
-                      <Text style={{ color: '#e74c3c', fontSize: 12 }}>削除</Text>
-                    </TouchableOpacity>
-                  )}
-                </View>
+                  <View style={[styles.genreColorDot, { backgroundColor: sc }]} />
+                  <Text style={[styles.settingLabel, { flex: 1, color: C.text }]}>{st}</Text>
+                  <Text style={{ color: '#ccc' }}>›</Text>
+                </TouchableOpacity>
               );
             })}
             {statusOptions.length > 5 && (
@@ -1321,9 +1307,9 @@ export default function App() {
                 </Text>
               </TouchableOpacity>
             )}
-            <TouchableOpacity style={[styles.outlineButton, { marginTop: 8 }, isDark && { borderColor: '#6ea8fe' }]}
+            <TouchableOpacity style={[styles.outlineButton, { marginTop: 8 }]}
               onPress={() => { setNewStatusName(''); setAddStatusModal(true); }}>
-              <Text style={[styles.outlineButtonText, isDark && { color: '#6ea8fe' }]}>+ ステータスを追加</Text>
+              <Text style={styles.outlineButtonText}>+ ステータスを追加</Text>
             </TouchableOpacity>
 
 
@@ -1341,6 +1327,7 @@ export default function App() {
               </View>
             </View>
 
+            <Text style={[styles.settingSection, { marginTop: 28 }]}>通知設定</Text>
 
             <Text style={[styles.settingSection, { marginTop: 28 }]}>通知テスト</Text>
             <View style={[styles.settingRow, { borderColor: C.border2, flexDirection: 'column', alignItems: 'flex-start', gap: 8 }]}>
@@ -1491,8 +1478,9 @@ export default function App() {
             {!adFree && (
               <View style={{ alignItems: 'center', marginTop: 20 }}>
                 <BannerAd
+                  key={'settings-' + activeTab}
                   unitId={AD_UNIT_ID}
-                  size={BannerAdSize.BANNER}
+                  size={BannerAdSize.ADAPTIVE_BANNER}
                   requestOptions={{ requestNonPersonalizedAdsOnly: true }}
                 />
               </View>
@@ -1538,7 +1526,7 @@ export default function App() {
             )}
 
             <View style={[styles.aboutBox, { backgroundColor: C.bg2, marginTop: 24 }]}>
-              <Text style={[styles.aboutText, { color: C.text2 }]}>就活管理リマインダー v1.1.0</Text>
+              <Text style={[styles.aboutText, { color: C.text2 }]}>就活管理リマインダー v4.0</Text>
             </View>
           </ScrollView>
         )}
@@ -1728,22 +1716,7 @@ export default function App() {
                 </View>
 
                 <Text style={[styles.label, { color: C.text3 }]}>企業名 *</Text>
-                <TextInput style={[styles.input, { backgroundColor: C.inputBg, color: C.text }]} placeholder="例：株式会社〇〇" value={companyName} onChangeText={(text) => {
-                  setCompanyName(text);
-                  // 新規登録時のみ同名企業データを引き継ぐ
-                  if (!selectedItem) {
-                    const match = schedules
-                      .filter(s => s.company === text.trim())
-                      .sort((a, b) => (STATUS_PRIORITY[b.status] ?? 0) - (STATUS_PRIORITY[a.status] ?? 0))[0];
-                    if (match) {
-                      setSelGenreId(match.genreId ?? 'other');
-                      setUrl(match.url ?? '');
-                      setUserId(match.userId ?? '');
-                      setPassword(match.password ?? '');
-                      setRank(match.rank ?? 'B');
-                    }
-                  }
-                }} returnKeyType="done" />
+                <TextInput style={[styles.input, { backgroundColor: C.inputBg, color: C.text }]} placeholder="例：株式会社〇〇" value={companyName} onChangeText={setCompanyName} returnKeyType="done" />
 
                 <Text style={[styles.label, { color: C.text3 }]}>ジャンル</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false}>
