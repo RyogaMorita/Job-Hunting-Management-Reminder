@@ -22,7 +22,6 @@ import {
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowAlert: true, shouldPlaySound: true, shouldSetBadge: false,
-    shouldShowBanner: true, shouldShowList: true,
   }),
 });
 
@@ -408,7 +407,7 @@ export default function App() {
     if (triggered === 'true') return; // 今回の起動サイクルで既に表示済み
     // 表示済みフラグを立てて起動カウントをリセット
     await AsyncStorage.setItem('@interstitial_triggered', 'true');
-    await AsyncStorage.setItem('@launch_count', '0');
+    await AsyncStorage.setItem('@launch_count', '1'); // 0だと次回起動でcount=1になりようこそが再表示される
     showInterstitialNow();
   };
 
@@ -753,7 +752,7 @@ export default function App() {
             body: `${item.status}の予定が${day === '0' ? '今日' : day + '日後'}です（${item.date}${item.hour ? ' ' + item.hour + ':' + item.minute : ''}）`,
             sound: true,
           },
-          trigger: { type: 'date', date: notifyDate } as any,
+          trigger: { type: 'date' as const, date: notifyDate },
         });
       }
     } catch (e) { console.log('通知エラー:', e); }
@@ -893,32 +892,29 @@ export default function App() {
 
         {/* ヘッダー */}
         <View style={[styles.topNav, { borderBottomColor: C.border }]}>
-          {/* 1行目：内定 + 広告 */}
-          <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingTop: 6 }}>
-            <View style={[styles.statChip, { backgroundColor: isDark ? '#2d2007' : '#fff3cd', marginRight: 8 }]}>
+          {/* 1行目：持駒・タイトル・内定 */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: 6, paddingBottom: 6 }}>
+            <View style={[styles.statChip, { backgroundColor: C.statChip }]}>
+              <Text style={[styles.statNum, { color: isDark ? '#6ea8fe' : TDU_BLUE }]}>{activeCount}</Text>
+              <Text style={[styles.statLabel, { color: isDark ? '#6ea8fe' : TDU_BLUE }]}>持駒</Text>
+            </View>
+            <Text style={[styles.headerTitle, { flex: 1, textAlign: 'center' }]}>就活管理リマインダー</Text>
+            <View style={[styles.statChip, { backgroundColor: isDark ? '#2d2007' : '#fff3cd' }]}>
               <Text style={[styles.statNum, { color: '#856404' }]}>{internalCount}</Text>
               <Text style={[styles.statLabel, { color: '#856404' }]}>内定</Text>
             </View>
-            {!adFree ? (
-              <View style={{ width: 280, height: 50, overflow: 'hidden', justifyContent: 'center' }}>
-                <BannerAd
-                  key={bannerKey}
-                  unitId={AD_UNIT_ID}
-                  size={BannerAdSize.BANNER}
-                  requestOptions={{ requestNonPersonalizedAdsOnly: true }}
-                />
-              </View>
-            ) : (
-              <Text style={[styles.headerTitle, { flex: 1, textAlign: 'center' }]}>就活管理</Text>
-            )}
           </View>
-          {/* 2行目：持ち駒 */}
-          <View style={{ paddingHorizontal: 16, paddingBottom: 6, paddingTop: 2 }}>
-            <View style={[styles.statChip, { backgroundColor: C.statChip, alignSelf: 'flex-start' }]}>
-              <Text style={[styles.statNum, { color: isDark ? '#6ea8fe' : TDU_BLUE }]}>{activeCount}</Text>
-              <Text style={[styles.statLabel, { color: isDark ? '#6ea8fe' : TDU_BLUE }]}>持ち駒</Text>
+          {/* 2行目：広告（課金済みなら非表示→カレンダーが自動で上に移動） */}
+          {!adFree && (
+            <View style={{ width: '100%', height: 60, alignItems: 'center', justifyContent: 'center' }}>
+              <BannerAd
+                key={bannerKey}
+                unitId={AD_UNIT_ID}
+                size={BannerAdSize.ADAPTIVE_BANNER}
+                requestOptions={{ requestNonPersonalizedAdsOnly: true }}
+              />
             </View>
-          </View>
+          )}
         </View>
 
         {/* ── カレンダータブ ── */}
@@ -987,8 +983,8 @@ export default function App() {
                             week: { height: 0, overflow: 'hidden', margin: 0, padding: 0 },
                             dayHeader: { height: 0, overflow: 'hidden', margin: 0, padding: 0 },
                             monthText: { height: 0, margin: 0, padding: 0 },
-                          },
-                        } as any}
+                          } as any,
+                        }}
                         dayComponent={({ date, state }: any) => {
                           const ds = date.dateString;
                           const items = dateCompanyMap[ds] || [];
@@ -1107,9 +1103,6 @@ export default function App() {
             <TouchableOpacity style={styles.fab} onPress={() => { openAdd(); countAction(); }}>
               <Text style={styles.fabText}>＋</Text>
             </TouchableOpacity>
-          </View>
-        )}
-
         {activeTab === 'list' && (
           <View style={{ flex: 1 }}>
             {/* 検索バー */}
@@ -1352,7 +1345,7 @@ export default function App() {
                         body: '就活管理アプリからのリマインド通知が正常に届いています',
                         sound: true,
                       },
-                      trigger: { type: 'timeInterval', seconds: 5, repeats: false } as any,
+                      trigger: { type: 'timeInterval' as const, seconds: 5, repeats: false },
                     });
                     Alert.alert('送信完了', '5秒後に通知が届きます。アプリをバックグラウンドにしてお待ちください。');
                   } catch (e) { Alert.alert('エラー', '通知の送信に失敗しました: ' + String(e)); }
