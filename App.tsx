@@ -770,16 +770,10 @@ export default function App() {
       const newStatus = newCL['内定'] ? '内定' : s.status === '内定' ? '最終面接' : s.status;
       // 内定チェック時にオファーモーダルを表示
       if (newCL['内定'] && newStatus === '内定') {
-        setTimeout(async () => {
+        setTimeout(() => {
           setPendingInternalCompany(s.company);
           setOfferModalVisible(true);
-          // 内定時一回限定レビュー促進
-          const already = await AsyncStorage.getItem(REVIEW_KEY);
-          if (!already && await StoreReview.hasAction()) {
-            await StoreReview.requestReview();
-            await AsyncStorage.setItem(REVIEW_KEY, 'true');
-          }
-        }, 1500);
+        }, 500);
       }
       return { ...s, checklist: newCL, status: newStatus };
     });
@@ -1234,41 +1228,29 @@ export default function App() {
                           isInactive && { backgroundColor: '#aaa' }]}>
                             <Text style={styles.statusBadgeText}>{item.status}</Text>
                           </View>
-                          {ns && !isInactive ? (
-                            <TouchableOpacity
-                              style={[styles.nextStatusBtn, { borderColor: sc }]}
-                              onPress={() => advanceStatus(item)}>
-                              <Text style={[styles.nextStatusBtnText, { color: sc }]} numberOfLines={1}>{ns} →</Text>
-                            </TouchableOpacity>
-                          ) : null}
-                          {item.userId ? (
-                            <TouchableOpacity
-                              style={[styles.nextStatusBtn, { borderColor: '#888' }]}
-                              onPress={() => { Clipboard.setString(item.userId); Alert.alert('コピー', 'IDをコピーしました'); }}>
-                              <Text style={[styles.nextStatusBtnText, { color: '#888' }]}>ID📋</Text>
-                            </TouchableOpacity>
-                          ) : null}
-                          {item.password ? (
-                            <TouchableOpacity
-                              style={[styles.nextStatusBtn, { borderColor: '#888' }]}
-                              onPress={() => { Clipboard.setString(item.password); Alert.alert('コピー', 'パスワードをコピーしました'); }}>
-                              <Text style={[styles.nextStatusBtnText, { color: '#888' }]}>PW📋</Text>
-                            </TouchableOpacity>
-                          ) : null}
-                          {item.userId ? (
-                            <TouchableOpacity
-                              style={{ borderWidth: 1, borderColor: C.border, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4 }}
-                              onPress={() => { Clipboard.setString(item.userId); Alert.alert('コピーしました', 'IDをコピーしました'); }}>
-                              <Text style={{ fontSize: 10, color: C.text2 }}>ID コピー</Text>
-                            </TouchableOpacity>
-                          ) : null}
-                          {item.password ? (
-                            <TouchableOpacity
-                              style={{ borderWidth: 1, borderColor: C.border, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4 }}
-                              onPress={() => { Clipboard.setString(item.password); Alert.alert('コピーしました', 'パスワードをコピーしました'); }}>
-                              <Text style={{ fontSize: 10, color: C.text2 }}>PW コピー</Text>
-                            </TouchableOpacity>
-                          ) : null}
+                          <View style={{ flexDirection: 'row', gap: 4, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                            {item.userId ? (
+                              <TouchableOpacity
+                                style={[styles.nextStatusBtn, { borderColor: isDark ? '#555' : '#ccc' }]}
+                                onPress={() => { Clipboard.setString(item.userId); Alert.alert('コピーしました', 'IDをコピーしました'); }}>
+                                <Text style={[styles.nextStatusBtnText, { color: isDark ? '#aaa' : '#666' }]}>ID📋</Text>
+                              </TouchableOpacity>
+                            ) : null}
+                            {item.password ? (
+                              <TouchableOpacity
+                                style={[styles.nextStatusBtn, { borderColor: isDark ? '#555' : '#ccc' }]}
+                                onPress={() => { Clipboard.setString(item.password); Alert.alert('コピーしました', 'PWをコピーしました'); }}>
+                                <Text style={[styles.nextStatusBtnText, { color: isDark ? '#aaa' : '#666' }]}>PW📋</Text>
+                              </TouchableOpacity>
+                            ) : null}
+                            {ns && !isInactive ? (
+                              <TouchableOpacity
+                                style={[styles.nextStatusBtn, { borderColor: sc }]}
+                                onPress={() => advanceStatus(item)}>
+                                <Text style={[styles.nextStatusBtnText, { color: sc }]} numberOfLines={1}>{ns} →</Text>
+                              </TouchableOpacity>
+                            ) : null}
+                          </View>
                         </View>
                       </TouchableOpacity>
                     </SwipeableRow>
@@ -1301,8 +1283,8 @@ export default function App() {
                 </Text>
               </TouchableOpacity>
             )}
-            <TouchableOpacity style={[styles.outlineButton, { borderColor: isDark ? '#6ea8fe' : TDU_BLUE }, { borderColor: isDark ? '#6ea8fe' : TDU_BLUE }]} onPress={() => openAddGenre()}>
-              <Text style={[styles.outlineButtonText, { color: isDark ? '#6ea8fe' : TDU_BLUE }]}>+ ジャンルを追加</Text>
+            <TouchableOpacity style={[styles.outlineButton, isDark && { borderColor: '#6ea8fe' }]} onPress={() => openAddGenre()}>
+              <Text style={[styles.outlineButtonText, isDark && { color: '#6ea8fe' }]}>+ ジャンルを追加</Text>
             </TouchableOpacity>
 
             <Text style={[styles.settingSection, { marginTop: 28 }]}>ステータス管理</Text>
@@ -1339,9 +1321,9 @@ export default function App() {
                 </Text>
               </TouchableOpacity>
             )}
-            <TouchableOpacity style={[styles.outlineButton, { borderColor: isDark ? '#6ea8fe' : TDU_BLUE }, { marginTop: 8 }]}
+            <TouchableOpacity style={[styles.outlineButton, { marginTop: 8 }, isDark && { borderColor: '#6ea8fe' }]}
               onPress={() => { setNewStatusName(''); setAddStatusModal(true); }}>
-              <Text style={[styles.outlineButtonText, { color: isDark ? '#6ea8fe' : TDU_BLUE }]}>+ ステータスを追加</Text>
+              <Text style={[styles.outlineButtonText, isDark && { color: '#6ea8fe' }]}>+ ステータスを追加</Text>
             </TouchableOpacity>
 
 
@@ -1359,12 +1341,12 @@ export default function App() {
               </View>
             </View>
 
-            
+
             <Text style={[styles.settingSection, { marginTop: 28 }]}>通知テスト</Text>
             <View style={[styles.settingRow, { borderColor: C.border2, flexDirection: 'column', alignItems: 'flex-start', gap: 8 }]}>
               <Text style={{ color: C.text2, fontSize: 13 }}>5秒後にテスト通知を送信します</Text>
               <TouchableOpacity
-                style={[styles.outlineButton, { borderColor: isDark ? '#6ea8fe' : TDU_BLUE }, { marginTop: 0, alignSelf: 'flex-start', paddingHorizontal: 20 }]}
+                style={[styles.outlineButton, { marginTop: 0, alignSelf: 'flex-start', paddingHorizontal: 20 }]}
                 onPress={async () => {
                   try {
                     const { status } = await Notifications.requestPermissionsAsync();
@@ -1381,15 +1363,15 @@ export default function App() {
                     Alert.alert('送信完了', '5秒後に通知が届きます。アプリをバックグラウンドにしてお待ちください。');
                   } catch (e) { Alert.alert('エラー', '通知の送信に失敗しました: ' + String(e)); }
                 }}>
-                <Text style={[styles.outlineButtonText, { color: isDark ? '#6ea8fe' : TDU_BLUE }]}>テスト通知を送る</Text>
+                <Text style={styles.outlineButtonText}>テスト通知を送る</Text>
               </TouchableOpacity>
             </View>
 
             <Text style={[styles.settingSection, { marginTop: 28 }]}>データ管理</Text>
             {/* ⑭ CSV エクスポート */}
-            <TouchableOpacity style={[styles.outlineButton, { borderColor: isDark ? '#6ea8fe' : TDU_BLUE }, { marginBottom: 12 }]} onPress={() => {
+            <TouchableOpacity style={[styles.outlineButton, { marginBottom: 12 }]} onPress={() => {
               const escape = (v: string) => `"${(v ?? '').replace(/"/g, '""')}"`;
-              const header = '企業名\tステータス\t日付\t時間\t志望度\tジャンル\tメモ\n';
+              const header = '企業名,ステータス,日付,時間,志望度,ジャンル,メモ\n';
               const rows = schedules.map(s => {
                 const genreName = genres.find(g => g.id === s.genreId)?.name ?? '';
                 return [
@@ -1400,12 +1382,12 @@ export default function App() {
                   escape(s.rank),
                   escape(genreName),
                   escape(s.note),
-                ].join('	');
+                ].join(',');
               }).join('\n');
               Clipboard.setString(header + rows);
               Alert.alert('コピー完了', `${schedules.length}社のデータをクリップボードにコピーしました。\nスプレッドシートに貼り付けてください。`);
             }}>
-              <Text style={[styles.outlineButtonText, { color: isDark ? '#6ea8fe' : TDU_BLUE }]}>📋 CSVをクリップボードにコピー</Text>
+              <Text style={styles.outlineButtonText}>📋 CSVをクリップボードにコピー</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.dangerButton} onPress={() => {
               Alert.alert('全データ削除', '全ての企業データを削除しますか？', [
@@ -1556,7 +1538,7 @@ export default function App() {
             )}
 
             <View style={[styles.aboutBox, { backgroundColor: C.bg2, marginTop: 24 }]}>
-              <Text style={[styles.aboutText, { color: C.text2 }]}>就活管理リマインダー v4.0</Text>
+              <Text style={[styles.aboutText, { color: C.text2 }]}>就活管理リマインダー v1.1.0</Text>
             </View>
           </ScrollView>
         )}
@@ -1746,7 +1728,22 @@ export default function App() {
                 </View>
 
                 <Text style={[styles.label, { color: C.text3 }]}>企業名 *</Text>
-                <TextInput style={[styles.input, { backgroundColor: C.inputBg, color: C.text }]} placeholder="例：株式会社〇〇" value={companyName} onChangeText={setCompanyName} returnKeyType="done" />
+                <TextInput style={[styles.input, { backgroundColor: C.inputBg, color: C.text }]} placeholder="例：株式会社〇〇" value={companyName} onChangeText={(text) => {
+                  setCompanyName(text);
+                  // 新規登録時のみ同名企業データを引き継ぐ
+                  if (!selectedItem) {
+                    const match = schedules
+                      .filter(s => s.company === text.trim())
+                      .sort((a, b) => (STATUS_PRIORITY[b.status] ?? 0) - (STATUS_PRIORITY[a.status] ?? 0))[0];
+                    if (match) {
+                      setSelGenreId(match.genreId ?? 'other');
+                      setUrl(match.url ?? '');
+                      setUserId(match.userId ?? '');
+                      setPassword(match.password ?? '');
+                      setRank(match.rank ?? 'B');
+                    }
+                  }
+                }} returnKeyType="done" />
 
                 <Text style={[styles.label, { color: C.text3 }]}>ジャンル</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false}>
