@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { requestPurchase, getProducts, finishTransaction, purchaseErrorListener, purchaseUpdatedListener, getAvailablePurchases } from 'expo-iap';
 import { useColorScheme } from 'react-native';
 import { useFonts, CormorantGaramond_300Light, CormorantGaramond_400Regular, CormorantGaramond_300Light_Italic } from '@expo-google-fonts/cormorant-garamond';
 
@@ -29,6 +30,7 @@ Notifications.setNotificationHandler({
 // ─── 定数 ─────────────────────────────────────────────────────────
 // ─── 広告ID ──────────────────────────────────────────────────────
 const AD_UNIT_ID = __DEV__ ? TestIds.BANNER : 'ca-app-pub-7090599455468315/1730004001';
+const IAP_PRODUCT_ID = 'com.moritaryoga.shukatsukanri.adfree';
 const APP_OPEN_ID = __DEV__ ? TestIds.APP_OPEN : 'ca-app-pub-7090599455468315/3637103731';
 const REWARDED_ID = __DEV__ ? TestIds.REWARDED : 'ca-app-pub-7090599455468315/8667464364';
 const REVIEW_KEY = '@review_requested';
@@ -409,34 +411,36 @@ export default function App() {
     showAppOpenAd();
   };
 
-  // 広告削除購入（仮実装 - 実際はiap連携）
+  // 広告削除購入（expo-iap本番実装）
   const purchaseAdFree = async () => {
-    Alert.alert(
-      '広告を削除する',
-      '¥120で広告を完全に削除しますか？',
-      [
-        { text: 'キャンセル', style: 'cancel' },
-        {
-          text: '購入する',
-          onPress: async () => {
-            // TODO: expo-iap での実装
-            await AsyncStorage.setItem('@ad_free', 'true');
-            setAdFree(true);
-            Alert.alert('ありがとうございます！', '広告が削除されました🎉');
-          }
-        }
-      ]
-    );
+    try {
+      const products = await getProducts([IAP_PRODUCT_ID]);
+      if (!products || products.length === 0) {
+        Alert.alert('エラー', '商品情報を取得できませんでした。');
+        return;
+      }
+      await requestPurchase({ sku: IAP_PRODUCT_ID });
+    } catch (err: any) {
+      if (err?.code !== 'E_USER_CANCELLED') {
+        Alert.alert('購入エラー', '購入処理に失敗しました。もう一度お試しください。');
+      }
+    }
   };
 
-  // 購入復元
+  // 購入復元（expo-iap本番実装）
   const restorePurchase = async () => {
-    const val = await AsyncStorage.getItem('@ad_free');
-    if (val === 'true') {
-      setAdFree(true);
-      Alert.alert('復元完了', '広告削除が復元されました。');
-    } else {
-      Alert.alert('復元できませんでした', '購入履歴が見つかりません。');
+    try {
+      const purchases = await getAvailablePurchases();
+      const found = purchases.some((p: any) => p.productId === IAP_PRODUCT_ID);
+      if (found) {
+        await AsyncStorage.setItem('@ad_free', 'true');
+        setAdFree(true);
+        Alert.alert('復元完了', '広告削除が復元されました🎉');
+      } else {
+        Alert.alert('復元できませんでした', '購入履歴が見つかりません。');
+      }
+    } catch (err) {
+      Alert.alert('エラー', '復元処理に失敗しました。');
     }
   };
 
