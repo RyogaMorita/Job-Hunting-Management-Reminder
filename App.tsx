@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { requestPurchase, getProducts, finishTransaction, purchaseErrorListener, purchaseUpdatedListener, getAvailablePurchases } from 'expo-iap';
+import { initConnection, endConnection, requestPurchase, getProducts, finishTransaction, purchaseErrorListener, purchaseUpdatedListener, getAvailablePurchases } from 'expo-iap';
 import { useColorScheme } from 'react-native';
 import { useFonts, CormorantGaramond_300Light, CormorantGaramond_400Regular, CormorantGaramond_300Light_Italic } from '@expo-google-fonts/cormorant-garamond';
 
@@ -368,6 +368,30 @@ export default function App() {
   const [wheelDay, setWheelDay] = useState(new Date().getDate());
 
   useEffect(() => { loadAll(); }, []);
+
+  // ─── IAP初期化（initConnectionが必須） ───────────────────────
+  useEffect(() => {
+    let purchaseUpdate: any;
+    let purchaseError: any;
+    initConnection().then(() => {
+      purchaseUpdate = purchaseUpdatedListener(async (purchase: any) => {
+        if (purchase.productId === IAP_PRODUCT_ID) {
+          await finishTransaction({ purchase, isConsumable: false });
+          await AsyncStorage.setItem('@ad_free', 'true');
+          setAdFree(true);
+          Alert.alert('ありがとうございます！', '広告が削除されました🎉');
+        }
+      });
+      purchaseError = purchaseErrorListener((error: any) => {
+        if (error?.code !== 'E_USER_CANCELLED') console.log('IAP error:', error);
+      });
+    }).catch((err: any) => console.log('IAP init error:', err));
+    return () => {
+      purchaseUpdate?.remove();
+      purchaseError?.remove();
+      endConnection();
+    };
+  }, []);
 
   // ─── 広告初期化 ──────────────────────────────────────────────
   useEffect(() => {
