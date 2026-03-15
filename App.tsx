@@ -804,7 +804,11 @@ export default function App() {
     const initCL: Record<string, boolean> = { ...(item.checklist ?? {}) };
     CHECKLIST_STEPS.forEach(step => { if (autoChecks.includes(step)) initCL[step] = true; });
     // 常に同一エントリのstatusだけ更新（新エントリ作成しない → 古いデータが残らない）
-    const updated = schedules.map(s => s.id !== item.id ? s : { ...s, status: ns, checklist: initCL });
+    // calendarColorが未設定の場合は現在のステータス色で固定（以降変わらない）
+    const updated = schedules.map(s => s.id !== item.id ? s : {
+      ...s, status: ns, checklist: initCL,
+      calendarColor: s.calendarColor ?? statusColors[s.status] ?? '#95A5A6',
+    });
     await saveSchedules(updated);
   };
 
