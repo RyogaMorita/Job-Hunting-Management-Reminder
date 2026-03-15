@@ -15,7 +15,7 @@ import * as StoreReview from 'expo-store-review';
 import { SafeAreaProvider, SafeAreaView as SafeAreaViewContext } from 'react-native-safe-area-context';
 import {
   BannerAd, BannerAdSize, TestIds,
-  InterstitialAd, AdEventType,
+  AppOpenAd, AdEventType,
   RewardedAd, RewardedAdEventType,
 } from 'react-native-google-mobile-ads';
 
@@ -29,7 +29,7 @@ Notifications.setNotificationHandler({
 // ─── 定数 ─────────────────────────────────────────────────────────
 // ─── 広告ID ──────────────────────────────────────────────────────
 const AD_UNIT_ID = __DEV__ ? TestIds.BANNER : 'ca-app-pub-7090599455468315/1730004001';
-const INTERSTITIAL_ID = __DEV__ ? TestIds.INTERSTITIAL : 'ca-app-pub-7090599455468315/8081141006';
+const APP_OPEN_ID = __DEV__ ? TestIds.APP_OPEN : 'ca-app-pub-7090599455468315/3637103731';
 const REWARDED_ID = __DEV__ ? TestIds.REWARDED : 'ca-app-pub-7090599455468315/8667464364';
 const REVIEW_KEY = '@review_requested';
 
@@ -276,7 +276,7 @@ export default function App() {
   const [actionCount, setActionCount] = useState(0);
   const [bannerKey, setBannerKey] = useState(0);
   const [pendingInternalCompany, setPendingInternalCompany] = useState<string>(''); // 内定企業名
-  const interstitialRef = useRef<InterstitialAd | null>(null);
+  const appOpenRef = useRef<AppOpenAd | null>(null);
   const rewardedRef = useRef<RewardedAd | null>(null);
   const [genres, setGenres] = useState<Genre[]>(DEFAULT_GENRES);
   const [statusColors, setStatusColors] = useState<StatusColors>(DEFAULT_STATUS_COLORS);
@@ -369,12 +369,12 @@ export default function App() {
 
   // ─── 広告初期化 ──────────────────────────────────────────────
   useEffect(() => {
-    // インタースティシャル広告をロード
-    const interstitial = InterstitialAd.createForAdRequest(INTERSTITIAL_ID, {
+    // App Open広告をロード
+    const appOpen = AppOpenAd.createForAdRequest(APP_OPEN_ID, {
       requestNonPersonalizedAdsOnly: true,
     });
-    interstitialRef.current = interstitial;
-    interstitial.load();
+    appOpenRef.current = appOpen;
+    appOpen.load();
 
     // リワード広告をロード
     const rewarded = RewardedAd.createForAdRequest(REWARDED_ID, {
@@ -384,29 +384,29 @@ export default function App() {
     rewarded.load();
   }, []);
 
-  // インタースティシャルを表示（adFreeでない場合のみ）
-  const showInterstitialNow = () => {
+  // App Open広告を表示
+  const showAppOpenAd = () => {
     if (adFree) return;
-    const interstitial = InterstitialAd.createForAdRequest(INTERSTITIAL_ID, {
+    const appOpen = AppOpenAd.createForAdRequest(APP_OPEN_ID, {
       requestNonPersonalizedAdsOnly: true,
     });
-    interstitial.addAdEventListener(AdEventType.LOADED, () => {
-      interstitial.show();
+    appOpen.addAdEventListener(AdEventType.LOADED, () => {
+      appOpen.show();
     });
-    interstitial.load();
+    appOpen.load();
   };
 
-  // 5回起動ごとに1回インタースティシャル表示
+  // 4回起動ごとに1回App Open広告表示
   const countAction = async () => {
     if (adFree) return;
     const launchStr = await AsyncStorage.getItem('@launch_count');
     const launches = launchStr ? parseInt(launchStr) : 0;
-    if (launches < 5) return; // 5回未満はスキップ
+    if (launches < 4) return; // 4回未満はスキップ
     const triggered = await AsyncStorage.getItem('@interstitial_triggered');
-    if (triggered === 'true') return; // 今回の起動サイクルで既に表示済み
+    if (triggered === 'true') return;
     await AsyncStorage.setItem('@interstitial_triggered', 'true');
     await AsyncStorage.setItem('@launch_count', '1');
-    showInterstitialNow();
+    showAppOpenAd();
   };
 
   // 広告削除購入（仮実装 - 実際はiap連携）
