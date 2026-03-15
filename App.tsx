@@ -674,17 +674,36 @@ export default function App() {
   // 同名企業から情報引き継ぎして新規登録フォームを開く
   const openAddWithInherit = (prev: Schedule) => {
     setSelDate(selectedDate);
-    // 引き継ぐもの: ジャンル, URL, userId, password, rank
     setSelGenreId(prev.genreId ?? 'other');
     setUrl(prev.url ?? '');
     setUserId(prev.userId ?? '');
     setPassword(prev.password ?? '');
     setRank(prev.rank ?? 'B');
-    // 引き継がないもの: status, date, note は初期値のまま
+    setNote(prev.note ?? '');
+    setMemoResearch(prev.memoResearch ?? '');
+    setMemoPR(prev.memoPR ?? '');
+    setMemoQuestions(prev.memoQuestions ?? '');
+    // 引き継がないもの: status・date・通知設定
     setSelStatus('検討中');
-    setNote('');
     setCompanyName(prev.company);
     setModalVisible(true);
+  };
+
+  // 企業名入力時に同名企業のデータを自動継承（新規登録時のみ）
+  const handleCompanyNameChange = (text: string) => {
+    setCompanyName(text);
+    if (selectedItem) return; // 編集モードは継承しない
+    const match = schedules.find(s => s.company.trim() === text.trim() && text.trim() !== '');
+    if (!match) return;
+    setRank(match.rank ?? 'B');
+    setSelGenreId(match.genreId ?? 'other');
+    setUrl(match.url ?? '');
+    setUserId(match.userId ?? '');
+    setPassword(match.password ?? '');
+    setNote(match.note ?? '');
+    setMemoResearch(match.memoResearch ?? '');
+    setMemoPR(match.memoPR ?? '');
+    setMemoQuestions(match.memoQuestions ?? '');
   };
 
   const openDetail = (item: Schedule) => {
@@ -1288,17 +1307,16 @@ export default function App() {
               const sc = statusColors[st] ?? '#95A5A6';
               const isFixed = DEFAULT_STATUS_OPTIONS.includes(st);
               return (
-                <View key={st} style={[styles.genreRow, { borderColor: C.border2 }]}>
+                <TouchableOpacity key={st} style={[styles.genreRow, { borderColor: C.border2 }]} onPress={() => {
+                  setEditGenre({ id: st, name: st, color: sc });
+                  setGenreName(st); setGenreColor(sc); setGenreModalVisible(true);
+                }}>
                   <View style={[styles.genreColorDot, { backgroundColor: sc }]} />
                   <Text style={[styles.settingLabel, { color: C.text }]}>{st}</Text>
-                  <TouchableOpacity style={{ paddingHorizontal: 8, paddingVertical: 4 }} onPress={() => {
-                    setEditGenre({ id: st, name: st, color: sc });
-                    setGenreName(st); setGenreColor(sc); setGenreModalVisible(true);
-                  }}>
-                    <Text style={{ color: TDU_BLUE, fontSize: 12 }}>色</Text>
-                  </TouchableOpacity>
+                  <Text style={{ color: '#ccc' }}>›</Text>
                   {!isFixed && (
-                    <TouchableOpacity style={{ paddingHorizontal: 8, paddingVertical: 4 }} onPress={() => {
+                    <TouchableOpacity style={{ paddingHorizontal: 8, paddingVertical: 4 }} onPress={(e) => {
+                      e.stopPropagation();
                       Alert.alert('削除', `「${st}」を削除しますか？`, [
                         { text: 'キャンセル', style: 'cancel' },
                         { text: '削除', style: 'destructive', onPress: () => saveStatusOptions(statusOptions.filter(s => s !== st)) },
@@ -1307,7 +1325,7 @@ export default function App() {
                       <Text style={{ color: '#e74c3c', fontSize: 12 }}>削除</Text>
                     </TouchableOpacity>
                   )}
-                </View>
+                </TouchableOpacity>
               );
             })}
             {statusOptions.length > 5 && (
@@ -1336,8 +1354,6 @@ export default function App() {
                 ))}
               </View>
             </View>
-
-            <Text style={[styles.settingSection, { marginTop: 28 }]}>通知設定</Text>
 
             <Text style={[styles.settingSection, { marginTop: 28 }]}>通知テスト</Text>
             <View style={[styles.settingRow, { borderColor: C.border2, flexDirection: 'column', alignItems: 'flex-start', gap: 8 }]}>
@@ -1725,7 +1741,7 @@ export default function App() {
                 </View>
 
                 <Text style={[styles.label, { color: C.text3 }]}>企業名 *</Text>
-                <TextInput style={[styles.input, { backgroundColor: C.inputBg, color: C.text }]} placeholder="例：株式会社〇〇" value={companyName} onChangeText={setCompanyName} returnKeyType="done" />
+                <TextInput style={[styles.input, { backgroundColor: C.inputBg, color: C.text }]} placeholder="例：株式会社〇〇" value={companyName} onChangeText={handleCompanyNameChange} returnKeyType="done" />
 
                 <Text style={[styles.label, { color: C.text3 }]}>ジャンル</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false}>
