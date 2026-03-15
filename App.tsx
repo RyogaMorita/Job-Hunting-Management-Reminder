@@ -1232,7 +1232,21 @@ export default function App() {
                               <Text style={{ color: '#fff', fontSize: 10, fontWeight: 'bold' }}>{cdLabel}</Text>
                             </View>}
                           </View>
-                          <Text style={styles.dateText}>{item.date ? item.date.replace(/-/g, '/') + (timeStr(item.hour, item.minute) ? ' ' + timeStr(item.hour, item.minute) + '〜' : '') : '日付未定'}</Text>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                            <Text style={styles.dateText}>{item.date ? item.date.replace(/-/g, '/') + (timeStr(item.hour, item.minute) ? ' ' + timeStr(item.hour, item.minute) + '〜' : '') : '日付未定'}</Text>
+                            {item.userId ? (
+                              <TouchableOpacity onPress={() => { Clipboard.setString(item.userId); Alert.alert('コピー', 'IDをコピーしました'); }}
+                                style={{ backgroundColor: '#e8f0fe', borderRadius: 6, paddingHorizontal: 7, paddingVertical: 2 }}>
+                                <Text style={{ fontSize: 10, color: ACCENT, fontWeight: 'bold' }}>IDコピー</Text>
+                              </TouchableOpacity>
+                            ) : null}
+                            {item.password ? (
+                              <TouchableOpacity onPress={() => { Clipboard.setString(item.password); Alert.alert('コピー', 'PWをコピーしました'); }}
+                                style={{ backgroundColor: '#fde8f0', borderRadius: 6, paddingHorizontal: 7, paddingVertical: 2 }}>
+                                <Text style={{ fontSize: 10, color: '#c0392b', fontWeight: 'bold' }}>PWコピー</Text>
+                              </TouchableOpacity>
+                            ) : null}
+                          </View>
                           {item.url ? (
                             <TouchableOpacity
                               style={styles.urlChip}
@@ -1876,7 +1890,7 @@ export default function App() {
                       <View style={{ flex: 1 }}>
                         <TouchableOpacity style={[styles.input, { justifyContent: 'center', paddingVertical: 13 }]}
                           onPress={() => { setShowHourPicker(v => !v); setShowMinutePicker(false); }}>
-                          <Text style={{ fontSize: 14, color: selHour ? '#333' : '#aaa' }}>{selHour || '時'}</Text>
+                          <Text style={{ fontSize: 14, color: selHour ? C.text : '#aaa' }}>{selHour || '時'}</Text>
                         </TouchableOpacity>
                         {showHourPicker && (
                           <ScrollView style={[styles.inlinePicker, { backgroundColor: C.bg2, borderColor: C.border }]} nestedScrollEnabled>
@@ -1887,19 +1901,19 @@ export default function App() {
                               {HOURS.map(selHr => (
                                 <TouchableOpacity key={selHr} style={[styles.inlinePickerItem, { backgroundColor: C.bg3 }, selHour === selHr && styles.inlinePickerItemActive]}
                                   onPress={() => { setSelHour(selHr); setShowHourPicker(false); }}>
-                                  <Text style={[{ fontSize: 13, color: '#333' }, selHour === selHr && { color: '#fff', fontWeight: 'bold' }]}>{selHr}</Text>
+                                  <Text style={[{ fontSize: 13, color: C.text }, selHour === selHr && { color: '#fff', fontWeight: 'bold' }]}>{selHr}</Text>
                                 </TouchableOpacity>
                               ))}
                             </View>
                           </ScrollView>
                         )}
                       </View>
-                      <Text style={{ alignSelf: 'center', color: '#333', paddingTop: 13 }}>:</Text>
+                      <Text style={{ alignSelf: 'center', color: C.text, paddingTop: 13 }}>:</Text>
                       {/* 分インラインドロップダウン */}
                       <View style={{ flex: 1 }}>
                         <TouchableOpacity style={[styles.input, { justifyContent: 'center', paddingVertical: 13 }]}
                           onPress={() => { setShowMinutePicker(v => !v); setShowHourPicker(false); }}>
-                          <Text style={{ fontSize: 14, color: selMinute ? '#333' : '#aaa' }}>{selMinute || '分'}</Text>
+                          <Text style={{ fontSize: 14, color: selMinute ? C.text : '#aaa' }}>{selMinute || '分'}</Text>
                         </TouchableOpacity>
                         {showMinutePicker && (
                           <View style={[styles.inlinePicker, { flexDirection: 'row', flexWrap: 'wrap', gap: 4, backgroundColor: C.bg2, borderColor: C.border }]}>
@@ -1909,7 +1923,7 @@ export default function App() {
                             {MINUTES.map(selMin => (
                               <TouchableOpacity key={selMin} style={[styles.inlinePickerItem, { flex: 1, minWidth: 50, backgroundColor: C.bg3 }, selMinute === selMin && styles.inlinePickerItemActive]}
                                 onPress={() => { setSelMinute(selMin); setShowMinutePicker(false); }}>
-                                <Text style={[{ fontSize: 14, color: '#333' }, selMinute === selMin && { color: '#fff', fontWeight: 'bold' }]}>{selMin}</Text>
+                                <Text style={[{ fontSize: 14, color: C.text }, selMinute === selMin && { color: '#fff', fontWeight: 'bold' }]}>{selMin}</Text>
                               </TouchableOpacity>
                             ))}
                           </View>
