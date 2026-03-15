@@ -1006,7 +1006,7 @@ export default function App() {
                                 ]}>{date.day}</Text>
                               </View>
                               {items.slice(0, 2).map((item: Schedule, i: number) => {
-                                const sc = statusColorOf(item.status);
+                                const sc = item.calendarColor ?? statusColorOf(item.status);
                                 return (
                                   <View key={i} style={[styles.calLabel, { backgroundColor: sc + '33', borderLeftColor: sc }]}>
                                     <Text style={[styles.calLabelText, { color: sc }]} numberOfLines={1}>{item.company}</Text>
@@ -1060,7 +1060,7 @@ export default function App() {
                     {filteredByDate.length === 0
                       ? <Text style={[styles.emptyText, { color: C.text3 }]}>この日の予定はありません</Text>
                       : filteredByDate.map(item => {
-                        const sc = statusColorOf(item.status);
+                        const sc = item.calendarColor ?? statusColorOf(item.status);
                         return (
                           <TouchableOpacity key={item.id}
                             style={[styles.itemCard, { borderLeftColor: sc, borderLeftWidth: 3, borderColor: C.border2, backgroundColor: C.bg }]}
