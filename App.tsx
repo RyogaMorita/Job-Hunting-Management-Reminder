@@ -92,7 +92,7 @@ interface NotifySetting { daysBeforeList: string[]; hourStr: string; minuteStr: 
 interface Schedule {
   id: string; company: string; date: string; hour: string; minute: string;
   status: string; note: string; url: string; userId: string; password: string;
-  rank: string; genreId: string;
+  rank: string; genreId: string; calendarColor?: string;
   checklist: Record<string, boolean>;
   customChecklist: { id: string; label: string; checked: boolean }[];
   notifyEnabled?: boolean;
@@ -529,14 +529,14 @@ export default function App() {
     const marks: Record<string, any> = {};
     schedules.forEach(s => {
       if (!s.date) return; // ① 日付なしエントリを除外
-      const col = genres.find(g => g.id === s.genreId)?.color ?? TDU_BLUE;
+      const col = s.calendarColor ?? statusColors[s.status] ?? TDU_BLUE;
       if (!marks[s.date]) marks[s.date] = { dots: [] };
       if (!marks[s.date].dots) marks[s.date].dots = [];
       marks[s.date].dots.push({ color: col });
     });
     marks[selectedDate] = { ...(marks[selectedDate] || {}), selected: true, selectedColor: TDU_BLUE };
     return marks;
-  }, [schedules, selectedDate, genres]);
+  }, [schedules, selectedDate, statusColors]);
 
   const dateCompanyMap = useMemo(() => {
     const map: Record<string, Schedule[]> = {};
@@ -640,6 +640,9 @@ export default function App() {
       memoResearch: memoResearch || undefined,
       memoPR: memoPR || undefined,
       memoQuestions: memoQuestions || undefined,
+      calendarColor: selectedItem
+        ? (statusColors[selStatus] ?? selectedItem.calendarColor ?? '#95A5A6')
+        : (statusColors[selStatus] ?? '#95A5A6'),
     };
     const base = deleteIds.length > 0 ? schedules.filter(s => !deleteIds.includes(s.id)) : schedules;
     const updated = selectedItem ? base.map(s => s.id === selectedItem.id ? newSchedule : s) : [...base, newSchedule];
@@ -769,9 +772,15 @@ export default function App() {
       const newStatus = newCL['内定'] ? '内定' : s.status === '内定' ? '最終面接' : s.status;
       // 内定チェック時にオファーモーダルを表示
       if (newCL['内定'] && newStatus === '内定') {
-        setTimeout(() => {
+        setTimeout(async () => {
           setPendingInternalCompany(s.company);
           setOfferModalVisible(true);
+          // 内定時一回限定レビュー促進
+          const reviewDone = await AsyncStorage.getItem(REVIEW_KEY);
+          if (!reviewDone && await StoreReview.hasAction()) {
+            await StoreReview.requestReview();
+            await AsyncStorage.setItem(REVIEW_KEY, 'true');
+          }
         }, 500);
       }
       return { ...s, checklist: newCL, status: newStatus };
