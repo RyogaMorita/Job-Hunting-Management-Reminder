@@ -14,7 +14,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.moritaryoga.shukatsukanri",
-      "buildNumber": "26",
+      "buildNumber": "27",
       "infoPlist": {
         "NSUserNotificationUsageDescription": "選考の締め切りや面接日程をリマインドするために通知を使用します。",
         "ITSAppUsesNonExemptEncryption": false
