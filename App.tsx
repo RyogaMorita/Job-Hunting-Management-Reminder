@@ -29,8 +29,8 @@ Notifications.setNotificationHandler({
 
 // ─── 定数 ─────────────────────────────────────────────────────────
 // ─── 広告ID ──────────────────────────────────────────────────────
-const AD_UNIT_ID = __DEV__ ? TestIds.BANNER : 'ca-app-pub-7090599455468315/1730004001';
 const IAP_PRODUCT_ID = 'com.moritaryoga.shukatsukanri.adfree';
+const AD_UNIT_ID = __DEV__ ? TestIds.BANNER : 'ca-app-pub-7090599455468315/1730004001';
 const APP_OPEN_ID = __DEV__ ? TestIds.APP_OPEN : 'ca-app-pub-7090599455468315/3637103731';
 const REWARDED_ID = __DEV__ ? TestIds.REWARDED : 'ca-app-pub-7090599455468315/8667464364';
 const REVIEW_KEY = '@review_requested';
@@ -371,30 +371,18 @@ export default function App() {
 
   // ─── 広告初期化 ──────────────────────────────────────────────
   useEffect(() => {
-    // App Open広告をロード
-    const appOpen = AppOpenAd.createForAdRequest(APP_OPEN_ID, {
-      requestNonPersonalizedAdsOnly: true,
-    });
+    const appOpen = AppOpenAd.createForAdRequest(APP_OPEN_ID, { requestNonPersonalizedAdsOnly: true });
     appOpenRef.current = appOpen;
     appOpen.load();
-
-    // リワード広告をロード
-    const rewarded = RewardedAd.createForAdRequest(REWARDED_ID, {
-      requestNonPersonalizedAdsOnly: true,
-    });
+    const rewarded = RewardedAd.createForAdRequest(REWARDED_ID, { requestNonPersonalizedAdsOnly: true });
     rewardedRef.current = rewarded;
     rewarded.load();
   }, []);
 
-  // App Open広告を表示
   const showAppOpenAd = () => {
     if (adFree) return;
-    const appOpen = AppOpenAd.createForAdRequest(APP_OPEN_ID, {
-      requestNonPersonalizedAdsOnly: true,
-    });
-    appOpen.addAdEventListener(AdEventType.LOADED, () => {
-      appOpen.show();
-    });
+    const appOpen = AppOpenAd.createForAdRequest(APP_OPEN_ID, { requestNonPersonalizedAdsOnly: true });
+    appOpen.addAdEventListener(AdEventType.LOADED, () => { appOpen.show(); });
     appOpen.load();
   };
 
@@ -403,7 +391,7 @@ export default function App() {
     if (adFree) return;
     const launchStr = await AsyncStorage.getItem('@launch_count');
     const launches = launchStr ? parseInt(launchStr) : 0;
-    if (launches < 4) return; // 4回未満はスキップ
+    if (launches < 4) return;
     const triggered = await AsyncStorage.getItem('@interstitial_triggered');
     if (triggered === 'true') return;
     await AsyncStorage.setItem('@interstitial_triggered', 'true');
@@ -415,15 +403,10 @@ export default function App() {
   const purchaseAdFree = async () => {
     try {
       const products = await getProducts([IAP_PRODUCT_ID]);
-      if (!products || products.length === 0) {
-        Alert.alert('エラー', '商品情報を取得できませんでした。');
-        return;
-      }
+      if (!products || products.length === 0) { Alert.alert('エラー', '商品情報を取得できませんでした。'); return; }
       await requestPurchase({ sku: IAP_PRODUCT_ID });
     } catch (err: any) {
-      if (err?.code !== 'E_USER_CANCELLED') {
-        Alert.alert('購入エラー', '購入処理に失敗しました。もう一度お試しください。');
-      }
+      if (err?.code !== 'E_USER_CANCELLED') Alert.alert('購入エラー', '購入処理に失敗しました。もう一度お試しください。');
     }
   };
 
@@ -432,16 +415,9 @@ export default function App() {
     try {
       const purchases = await getAvailablePurchases();
       const found = purchases.some((p: any) => p.productId === IAP_PRODUCT_ID);
-      if (found) {
-        await AsyncStorage.setItem('@ad_free', 'true');
-        setAdFree(true);
-        Alert.alert('復元完了', '広告削除が復元されました🎉');
-      } else {
-        Alert.alert('復元できませんでした', '購入履歴が見つかりません。');
-      }
-    } catch (err) {
-      Alert.alert('エラー', '復元処理に失敗しました。');
-    }
+      if (found) { await AsyncStorage.setItem('@ad_free', 'true'); setAdFree(true); Alert.alert('復元完了', '広告削除が復元されました🎉'); }
+      else Alert.alert('復元できませんでした', '購入履歴が見つかりません。');
+    } catch { Alert.alert('エラー', '復元処理に失敗しました。'); }
   };
 
   // リワード広告を表示してTipsを解放
@@ -641,8 +617,8 @@ export default function App() {
       memoPR: memoPR || undefined,
       memoQuestions: memoQuestions || undefined,
       calendarColor: selectedItem
-        ? (statusColors[selStatus] ?? selectedItem.calendarColor ?? '#95A5A6')
-        : (statusColors[selStatus] ?? '#95A5A6'),
+        ? (statusColors[selStatus] ?? selectedItem.calendarColor ?? '#95A5A6') // 編集時: 新ステータス色で更新
+        : (statusColors[selStatus] ?? '#95A5A6'), // 新規: 登録時のステータス色で固定
     };
     const base = deleteIds.length > 0 ? schedules.filter(s => !deleteIds.includes(s.id)) : schedules;
     const updated = selectedItem ? base.map(s => s.id === selectedItem.id ? newSchedule : s) : [...base, newSchedule];
@@ -1284,21 +1260,26 @@ export default function App() {
               const sc = statusColors[st] ?? '#95A5A6';
               const isFixed = DEFAULT_STATUS_OPTIONS.includes(st);
               return (
-                <TouchableOpacity key={st} style={[styles.genreRow, { borderColor: C.border2 }]}
-                  onPress={() => {
+                <View key={st} style={[styles.genreRow, { borderColor: C.border2 }]}>
+                  <View style={[styles.genreColorDot, { backgroundColor: sc }]} />
+                  <Text style={[styles.settingLabel, { color: C.text }]}>{st}</Text>
+                  <TouchableOpacity style={{ paddingHorizontal: 8, paddingVertical: 4 }} onPress={() => {
                     setEditGenre({ id: st, name: st, color: sc });
                     setGenreName(st); setGenreColor(sc); setGenreModalVisible(true);
-                  }}
-                  onLongPress={() => {
-                    if (!isFixed) Alert.alert('削除', `「${st}」を削除しますか？`, [
-                      { text: 'キャンセル', style: 'cancel' },
-                      { text: '削除', style: 'destructive', onPress: () => saveStatusOptions(statusOptions.filter(s => s !== st)) },
-                    ]);
                   }}>
-                  <View style={[styles.genreColorDot, { backgroundColor: sc }]} />
-                  <Text style={[styles.settingLabel, { flex: 1, color: C.text }]}>{st}</Text>
-                  <Text style={{ color: '#ccc' }}>›</Text>
-                </TouchableOpacity>
+                    <Text style={{ color: TDU_BLUE, fontSize: 12 }}>色</Text>
+                  </TouchableOpacity>
+                  {!isFixed && (
+                    <TouchableOpacity style={{ paddingHorizontal: 8, paddingVertical: 4 }} onPress={() => {
+                      Alert.alert('削除', `「${st}」を削除しますか？`, [
+                        { text: 'キャンセル', style: 'cancel' },
+                        { text: '削除', style: 'destructive', onPress: () => saveStatusOptions(statusOptions.filter(s => s !== st)) },
+                      ]);
+                    }}>
+                      <Text style={{ color: '#e74c3c', fontSize: 12 }}>削除</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
               );
             })}
             {statusOptions.length > 5 && (
