@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { useIAP, requestPurchase, getProducts, finishTransaction, purchaseErrorListener, purchaseUpdatedListener } from 'expo-iap';
 import { useColorScheme } from 'react-native';
 import { useFonts, CormorantGaramond_300Light, CormorantGaramond_400Regular, CormorantGaramond_300Light_Italic } from '@expo-google-fonts/cormorant-garamond';
 
@@ -29,7 +28,6 @@ Notifications.setNotificationHandler({
 
 // ─── 定数 ─────────────────────────────────────────────────────────
 // ─── 広告ID ──────────────────────────────────────────────────────
-const IAP_PRODUCT_ID = 'com.moritaryoga.shukatsukanri.adfree';
 const AD_UNIT_ID = __DEV__ ? TestIds.BANNER : 'ca-app-pub-7090599455468315/1730004001';
 const INTERSTITIAL_ID = __DEV__ ? TestIds.INTERSTITIAL : 'ca-app-pub-7090599455468315/8081141006';
 const REWARDED_ID = __DEV__ ? TestIds.REWARDED : 'ca-app-pub-7090599455468315/8667464364';
@@ -398,53 +396,47 @@ export default function App() {
     interstitial.load();
   };
 
-  // 操作カウント（adFreeでない・7起動以上の場合のみ、次の操作で1回表示してリセット）
-  // 操作トリガー（タブ切り替え・会社登録時に呼ぶ）
-  // 7回起動後の最初の操作で1回だけ広告を表示し、起動カウントをリセット
+  // 5回起動ごとに1回インタースティシャル表示
   const countAction = async () => {
     if (adFree) return;
     const launchStr = await AsyncStorage.getItem('@launch_count');
     const launches = launchStr ? parseInt(launchStr) : 0;
-    if (launches < 7) return; // 7回未満はスキップ
+    if (launches < 5) return; // 5回未満はスキップ
     const triggered = await AsyncStorage.getItem('@interstitial_triggered');
     if (triggered === 'true') return; // 今回の起動サイクルで既に表示済み
-    // 表示済みフラグを立てて起動カウントをリセット
     await AsyncStorage.setItem('@interstitial_triggered', 'true');
-    await AsyncStorage.setItem('@launch_count', '1'); // 0だと次回起動でcount=1になりようこそが再表示される
+    await AsyncStorage.setItem('@launch_count', '1');
     showInterstitialNow();
   };
 
-  // 広告削除購入（expo-iap本番実装）
+  // 広告削除購入（仮実装 - 実際はiap連携）
   const purchaseAdFree = async () => {
-    try {
-      const products = await getProducts([IAP_PRODUCT_ID]);
-      if (!products || products.length === 0) {
-        Alert.alert('エラー', '商品情報を取得できませんでした。');
-        return;
-      }
-      await requestPurchase({ sku: IAP_PRODUCT_ID });
-    } catch (err: any) {
-      if (err?.code !== 'E_USER_CANCELLED') {
-        Alert.alert('購入エラー', '購入処理に失敗しました。もう一度お試しください。');
-      }
-    }
+    Alert.alert(
+      '広告を削除する',
+      '¥120で広告を完全に削除しますか？',
+      [
+        { text: 'キャンセル', style: 'cancel' },
+        {
+          text: '購入する',
+          onPress: async () => {
+            // TODO: expo-iap での実装
+            await AsyncStorage.setItem('@ad_free', 'true');
+            setAdFree(true);
+            Alert.alert('ありがとうございます！', '広告が削除されました🎉');
+          }
+        }
+      ]
+    );
   };
 
-  // 購入復元（expo-iap本番実装）
+  // 購入復元
   const restorePurchase = async () => {
-    try {
-      const { getAvailablePurchases } = await import('expo-iap');
-      const purchases = await getAvailablePurchases();
-      const found = purchases.some((p: any) => p.productId === IAP_PRODUCT_ID);
-      if (found) {
-        await AsyncStorage.setItem('@ad_free', 'true');
-        setAdFree(true);
-        Alert.alert('復元完了', '広告削除が復元されました🎉');
-      } else {
-        Alert.alert('復元できませんでした', '購入履歴が見つかりません。');
-      }
-    } catch (err) {
-      Alert.alert('エラー', '復元処理に失敗しました。');
+    const val = await AsyncStorage.getItem('@ad_free');
+    if (val === 'true') {
+      setAdFree(true);
+      Alert.alert('復元完了', '広告削除が復元されました。');
+    } else {
+      Alert.alert('復元できませんでした', '購入履歴が見つかりません。');
     }
   };
 
@@ -490,7 +482,6 @@ export default function App() {
       if (count === 1) {
         setTimeout(() => setFirstLaunchModal(true), 1000);
       }
-
 
       // 広告削除状態を読み込み
       const af = await AsyncStorage.getItem('@ad_free');
@@ -774,15 +765,9 @@ export default function App() {
       const newStatus = newCL['内定'] ? '内定' : s.status === '内定' ? '最終面接' : s.status;
       // 内定チェック時にオファーモーダルを表示
       if (newCL['内定'] && newStatus === '内定') {
-        setTimeout(async () => {
+        setTimeout(() => {
           setPendingInternalCompany(s.company);
           setOfferModalVisible(true);
-          // 内定時一回限定レビュー促進
-          const reviewDone = await AsyncStorage.getItem(REVIEW_KEY);
-          if (!reviewDone && await StoreReview.hasAction()) {
-            await StoreReview.requestReview();
-            await AsyncStorage.setItem(REVIEW_KEY, 'true');
-          }
         }, 500);
       }
       return { ...s, checklist: newCL, status: newStatus };
@@ -1286,26 +1271,21 @@ export default function App() {
               const sc = statusColors[st] ?? '#95A5A6';
               const isFixed = DEFAULT_STATUS_OPTIONS.includes(st);
               return (
-                <View key={st} style={[styles.genreRow, { borderColor: C.border2 }]}>
-                  <View style={[styles.genreColorDot, { backgroundColor: sc }]} />
-                  <Text style={[styles.settingLabel, { color: C.text }]}>{st}</Text>
-                  <TouchableOpacity style={{ paddingHorizontal: 8, paddingVertical: 4 }} onPress={() => {
+                <TouchableOpacity key={st} style={[styles.genreRow, { borderColor: C.border2 }]}
+                  onPress={() => {
                     setEditGenre({ id: st, name: st, color: sc });
                     setGenreName(st); setGenreColor(sc); setGenreModalVisible(true);
+                  }}
+                  onLongPress={() => {
+                    if (!isFixed) Alert.alert('削除', `「${st}」を削除しますか？`, [
+                      { text: 'キャンセル', style: 'cancel' },
+                      { text: '削除', style: 'destructive', onPress: () => saveStatusOptions(statusOptions.filter(s => s !== st)) },
+                    ]);
                   }}>
-                    <Text style={{ color: TDU_BLUE, fontSize: 12 }}>色</Text>
-                  </TouchableOpacity>
-                  {!isFixed && (
-                    <TouchableOpacity style={{ paddingHorizontal: 8, paddingVertical: 4 }} onPress={() => {
-                      Alert.alert('削除', `「${st}」を削除しますか？`, [
-                        { text: 'キャンセル', style: 'cancel' },
-                        { text: '削除', style: 'destructive', onPress: () => saveStatusOptions(statusOptions.filter(s => s !== st)) },
-                      ]);
-                    }}>
-                      <Text style={{ color: '#e74c3c', fontSize: 12 }}>削除</Text>
-                    </TouchableOpacity>
-                  )}
-                </View>
+                  <View style={[styles.genreColorDot, { backgroundColor: sc }]} />
+                  <Text style={[styles.settingLabel, { flex: 1, color: C.text }]}>{st}</Text>
+                  <Text style={{ color: '#ccc' }}>›</Text>
+                </TouchableOpacity>
               );
             })}
             {statusOptions.length > 5 && (
@@ -1533,7 +1513,7 @@ export default function App() {
             )}
 
             <View style={[styles.aboutBox, { backgroundColor: C.bg2, marginTop: 24 }]}>
-              <Text style={[styles.aboutText, { color: C.text2 }]}>就活管理リマインダー v4.0</Text>
+              <Text style={[styles.aboutText, { color: C.text2 }]}>就活管理リマインダー v1.1.0</Text>
             </View>
           </ScrollView>
         )}
