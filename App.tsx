@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { initConnection, endConnection, requestPurchase, getProducts, finishTransaction, purchaseErrorListener, purchaseUpdatedListener, getAvailablePurchases } from 'expo-iap';
+import RNIap, { initConnection, endConnection, getProducts, requestPurchase, finishTransaction, purchaseErrorListener, purchaseUpdatedListener, getAvailablePurchases } from 'react-native-iap';
 import { useColorScheme } from 'react-native';
 import { useFonts, CormorantGaramond_300Light, CormorantGaramond_400Regular, CormorantGaramond_300Light_Italic } from '@expo-google-fonts/cormorant-garamond';
 
@@ -423,18 +423,23 @@ export default function App() {
     showAppOpenAd();
   };
 
-  // 広告削除購入（expo-iap本番実装）
+  // 広告削除購入（react-native-iap本番実装）
   const purchaseAdFree = async () => {
     try {
-      const products = await getProducts([IAP_PRODUCT_ID]);
-      if (!products || products.length === 0) { Alert.alert('エラー', '商品情報を取得できませんでした。'); return; }
-      await requestPurchase({ sku: IAP_PRODUCT_ID });
+      const products = await getProducts({ skus: [IAP_PRODUCT_ID] });
+      if (!products || products.length === 0) {
+        Alert.alert('エラー', '商品情報を取得できませんでした。');
+        return;
+      }
+      await requestPurchase({ sku: IAP_PRODUCT_ID, andDangerouslyFinishTransactionAutomaticallyIOS: false });
     } catch (err: any) {
-      if (err?.code !== 'E_USER_CANCELLED') Alert.alert('購入エラー', '購入処理に失敗しました。もう一度お試しください。');
+      if (err?.code !== 'E_USER_CANCELLED') {
+        Alert.alert('購入エラー', '購入処理に失敗しました。もう一度お試しください。');
+      }
     }
   };
 
-  // 購入復元（expo-iap本番実装）
+  // 購入復元（react-native-iap本番実装）
   const restorePurchase = async () => {
     try {
       const purchases = await getAvailablePurchases();

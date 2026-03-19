@@ -49,7 +49,8 @@
           "color": "#003366",
           "defaultChannel": "default"
         }
-      ]
+      ],
+      "react-native-iap"
     ]
   }
 }
