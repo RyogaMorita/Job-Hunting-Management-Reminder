@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import RNIap, { initConnection, endConnection, getProducts, requestPurchase, finishTransaction, purchaseErrorListener, purchaseUpdatedListener, getAvailablePurchases } from 'react-native-iap';
+// import RNIap, { initConnection, endConnection, getProducts, requestPurchase, finishTransaction, purchaseErrorListener, purchaseUpdatedListener, getAvailablePurchases } from 'react-native-iap'; // 近日公開
 import { useColorScheme } from 'react-native';
 import { useFonts, CormorantGaramond_300Light, CormorantGaramond_400Regular, CormorantGaramond_300Light_Italic } from '@expo-google-fonts/cormorant-garamond';
 
@@ -29,7 +29,7 @@ Notifications.setNotificationHandler({
 
 // ─── 定数 ─────────────────────────────────────────────────────────
 // ─── 広告ID ──────────────────────────────────────────────────────
-const IAP_PRODUCT_ID = 'com.moritaryoga.shukatsukanri.adfree';
+// const IAP_PRODUCT_ID = 'com.moritaryoga.shukatsukanri.adfree'; // 近日公開
 const AD_UNIT_ID = __DEV__ ? TestIds.BANNER : 'ca-app-pub-7090599455468315/1730004001';
 const APP_OPEN_ID = __DEV__ ? TestIds.APP_OPEN : 'ca-app-pub-7090599455468315/3637103731';
 const REWARDED_ID = __DEV__ ? TestIds.REWARDED : 'ca-app-pub-7090599455468315/8667464364';
@@ -369,29 +369,29 @@ export default function App() {
 
   useEffect(() => { loadAll(); }, []);
 
-  // ─── IAP初期化（initConnectionが必須） ───────────────────────
-  useEffect(() => {
-    let purchaseUpdate: any;
-    let purchaseError: any;
-    initConnection().then(() => {
-      purchaseUpdate = purchaseUpdatedListener(async (purchase: any) => {
-        if (purchase.productId === IAP_PRODUCT_ID) {
-          await finishTransaction({ purchase, isConsumable: false });
-          await AsyncStorage.setItem('@ad_free', 'true');
-          setAdFree(true);
-          Alert.alert('ありがとうございます！', '広告が削除されました🎉');
-        }
-      });
-      purchaseError = purchaseErrorListener((error: any) => {
-        if (error?.code !== 'E_USER_CANCELLED') console.log('IAP error:', error);
-      });
-    }).catch((err: any) => console.log('IAP init error:', err));
-    return () => {
-      purchaseUpdate?.remove();
-      purchaseError?.remove();
-      endConnection();
-    };
-  }, []);
+  // ─── IAP初期化（近日公開のためコメントアウト中） ────────────
+  // useEffect(() => {
+  //   let purchaseUpdate: any;
+  //   let purchaseError: any;
+  //   initConnection().then(() => {
+  //     purchaseUpdate = purchaseUpdatedListener(async (purchase: any) => {
+  //       if (purchase.productId === IAP_PRODUCT_ID) {
+  //         await finishTransaction({ purchase, isConsumable: false });
+  //         await AsyncStorage.setItem('@ad_free', 'true');
+  //         setAdFree(true);
+  //         Alert.alert('ありがとうございます！', '広告が削除されました🎉');
+  //       }
+  //     });
+  //     purchaseError = purchaseErrorListener((error: any) => {
+  //       if (error?.code !== 'E_USER_CANCELLED') console.log('IAP error:', error);
+  //     });
+  //   }).catch((err: any) => console.log('IAP init error:', err));
+  //   return () => {
+  //     purchaseUpdate?.remove();
+  //     purchaseError?.remove();
+  //     endConnection();
+  //   };
+  // }, []);
 
   // ─── 広告初期化 ──────────────────────────────────────────────
   useEffect(() => {
@@ -423,31 +423,31 @@ export default function App() {
     showAppOpenAd();
   };
 
-  // 広告削除購入（react-native-iap本番実装）
-  const purchaseAdFree = async () => {
-    try {
-      const products = await getProducts({ skus: [IAP_PRODUCT_ID] });
-      if (!products || products.length === 0) {
-        Alert.alert('エラー', '商品情報を取得できませんでした。');
-        return;
-      }
-      await requestPurchase({ sku: IAP_PRODUCT_ID, andDangerouslyFinishTransactionAutomaticallyIOS: false });
-    } catch (err: any) {
-      if (err?.code !== 'E_USER_CANCELLED') {
-        Alert.alert('購入エラー', '購入処理に失敗しました。もう一度お試しください。');
-      }
-    }
-  };
+  // 広告削除購入（近日公開のためコメントアウト中）
+  // const purchaseAdFree = async () => {
+  //   try {
+  //     const products = await getProducts({ skus: [IAP_PRODUCT_ID] });
+  //     if (!products || products.length === 0) {
+  //       Alert.alert('エラー', '商品情報を取得できませんでした。');
+  //       return;
+  //     }
+  //     await requestPurchase({ sku: IAP_PRODUCT_ID, andDangerouslyFinishTransactionAutomaticallyIOS: false });
+  //   } catch (err: any) {
+  //     if (err?.code !== 'E_USER_CANCELLED') {
+  //       Alert.alert('購入エラー', '購入処理に失敗しました。もう一度お試しください。');
+  //     }
+  //   }
+  // };
 
-  // 購入復元（react-native-iap本番実装）
-  const restorePurchase = async () => {
-    try {
-      const purchases = await getAvailablePurchases();
-      const found = purchases.some((p: any) => p.productId === IAP_PRODUCT_ID);
-      if (found) { await AsyncStorage.setItem('@ad_free', 'true'); setAdFree(true); Alert.alert('復元完了', '広告削除が復元されました🎉'); }
-      else Alert.alert('復元できませんでした', '購入履歴が見つかりません。');
-    } catch { Alert.alert('エラー', '復元処理に失敗しました。'); }
-  };
+  // 購入復元（近日公開のためコメントアウト中）
+  // const restorePurchase = async () => {
+  //   try {
+  //     const purchases = await getAvailablePurchases();
+  //     const found = purchases.some((p: any) => p.productId === IAP_PRODUCT_ID);
+  //     if (found) { await AsyncStorage.setItem('@ad_free', 'true'); setAdFree(true); Alert.alert('復元完了', '広告削除が復元されました🎉'); }
+  //     else Alert.alert('復元できませんでした', '購入履歴が見つかりません。');
+  //   } catch { Alert.alert('エラー', '復元処理に失敗しました。'); }
+  // };
 
   // リワード広告を表示してTipsを解放
   const showRewardedAd = () => {
@@ -1532,42 +1532,25 @@ export default function App() {
 
             {/* 開発者を支援 */}
             <Text style={[styles.settingSection, { marginTop: 24 }]}>開発者を支援する</Text>
-            {!adFree ? (
-              <>
-                <TouchableOpacity
-                  style={[styles.supportBtn, { backgroundColor: isDark ? '#1c2333' : '#e8f0fe', borderColor: isDark ? '#6ea8fe' : TDU_BLUE }]}
-                  onPress={showRewardedAd}
-                >
-                  <Text style={{ fontSize: 20 }}>🎬</Text>
-                  <View style={{ flex: 1, marginLeft: 12 }}>
-                    <Text style={[styles.supportBtnTitle, { color: isDark ? '#6ea8fe' : TDU_BLUE }]}>30秒広告を見て応援する</Text>
-                    <Text style={[styles.supportBtnSub, { color: C.text2 }]}>就活Tipsをランダムで1つプレゼント🎁</Text>
-                  </View>
-                  <Text style={{ fontSize: 18 }}>▶</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.supportBtn, { backgroundColor: isDark ? '#1c2333' : '#fff8e1', borderColor: '#f59e0b', marginTop: 10 }]}
-                  onPress={purchaseAdFree}
-                >
-                  <Text style={{ fontSize: 20 }}>✨</Text>
-                  <View style={{ flex: 1, marginLeft: 12 }}>
-                    <Text style={[styles.supportBtnTitle, { color: '#b45309' }]}>広告を削除する　¥120</Text>
-                    <Text style={[styles.supportBtnSub, { color: C.text2 }]}>すべての広告を完全に非表示にします</Text>
-                  </View>
-                </TouchableOpacity>
-                <TouchableOpacity onPress={restorePurchase} style={{ alignItems: 'center', marginTop: 8 }}>
-                  <Text style={{ color: C.text2, fontSize: 12 }}>購入を復元する</Text>
-                </TouchableOpacity>
-              </>
-            ) : (
-              <View style={[styles.supportBtn, { backgroundColor: isDark ? '#1c2333' : '#f0fdf4', borderColor: '#22c55e' }]}>
-                <Text style={{ fontSize: 20 }}>✅</Text>
-                <View style={{ flex: 1, marginLeft: 12 }}>
-                  <Text style={[styles.supportBtnTitle, { color: '#16a34a' }]}>広告削除済み</Text>
-                  <Text style={[styles.supportBtnSub, { color: C.text2 }]}>ご支援ありがとうございます🙏</Text>
-                </View>
+            <TouchableOpacity
+              style={[styles.supportBtn, { backgroundColor: isDark ? '#1c2333' : '#e8f0fe', borderColor: isDark ? '#6ea8fe' : TDU_BLUE }]}
+              onPress={showRewardedAd}
+            >
+              <Text style={{ fontSize: 20 }}>🎬</Text>
+              <View style={{ flex: 1, marginLeft: 12 }}>
+                <Text style={[styles.supportBtnTitle, { color: isDark ? '#6ea8fe' : TDU_BLUE }]}>30秒広告を見て応援する</Text>
+                <Text style={[styles.supportBtnSub, { color: C.text2 }]}>就活Tipsをランダムで1つプレゼント🎁</Text>
               </View>
-            )}
+              <Text style={{ fontSize: 18 }}>▶</Text>
+            </TouchableOpacity>
+            {/* 広告削除購入 近日公開 */}
+            <View style={[styles.supportBtn, { backgroundColor: isDark ? '#1c2333' : '#f5f5f5', borderColor: isDark ? '#444' : '#ccc', marginTop: 10, opacity: 0.6 }]}>
+              <Text style={{ fontSize: 20 }}>✨</Text>
+              <View style={{ flex: 1, marginLeft: 12 }}>
+                <Text style={[styles.supportBtnTitle, { color: C.text2 }]}>広告を削除する</Text>
+                <Text style={[styles.supportBtnSub, { color: C.text2 }]}>近日公開</Text>
+              </View>
+            </View>
 
             <View style={[styles.aboutBox, { backgroundColor: C.bg2, marginTop: 24 }]}>
               <Text style={[styles.aboutText, { color: C.text2 }]}>就活管理リマインダー v1.1.0</Text>
