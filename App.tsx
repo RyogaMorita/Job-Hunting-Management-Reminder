@@ -14,11 +14,12 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
 import * as StoreReview from 'expo-store-review';
 import { SafeAreaProvider, SafeAreaView as SafeAreaViewContext } from 'react-native-safe-area-context';
-import {
-  BannerAd, BannerAdSize, TestIds,
-  AppOpenAd, AdEventType,
-  RewardedAd, RewardedAdEventType,
-} from 'react-native-google-mobile-ads';
+// [AD] import {
+// [AD]   BannerAd, BannerAdSize, TestIds,
+// [AD]   AppOpenAd, AdEventType,
+// [AD]   RewardedAd, RewardedAdEventType,
+// [AD] } from 'react-native-google-mobile-ads';
+import { LISTED_COMPANIES, CompanyEntry } from './companies_v2';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -30,9 +31,9 @@ Notifications.setNotificationHandler({
 // ─── 定数 ─────────────────────────────────────────────────────────
 // ─── 広告ID ──────────────────────────────────────────────────────
 // const IAP_PRODUCT_ID = 'com.moritaryoga.shukatsukanri.adfree'; // 近日公開
-const AD_UNIT_ID = __DEV__ ? TestIds.BANNER : 'ca-app-pub-7090599455468315/1730004001';
-const APP_OPEN_ID = __DEV__ ? TestIds.APP_OPEN : 'ca-app-pub-7090599455468315/3637103731';
-const REWARDED_ID = __DEV__ ? TestIds.REWARDED : 'ca-app-pub-7090599455468315/8667464364';
+// [AD] const AD_UNIT_ID = __DEV__ ? TestIds.BANNER : 'ca-app-pub-7090599455468315/1730004001';
+// [AD] const APP_OPEN_ID = __DEV__ ? TestIds.APP_OPEN : 'ca-app-pub-7090599455468315/3637103731';
+// [AD] const REWARDED_ID = __DEV__ ? TestIds.REWARDED : 'ca-app-pub-7090599455468315/8667464364';
 const REVIEW_KEY = '@review_requested';
 
 // ─── 就活Tips（リワード解放コンテンツ）────────────────────────────
@@ -74,6 +75,21 @@ const STATUS_TO_CHECKS: Record<string, string[]> = {
   '検討中': [],
 };
 const CHECKLIST_STEPS = ['ES提出', '1次面接', '2次面接', '最終面接', '内定'];
+// ─── アイコン画像 ────────────────────────────────────────────
+const ICONS = {
+  bell:         require('./assets/bell.png'),
+  upload:       require('./assets/upload.png'),
+  memo:         require('./assets/memo.png'),
+  calendar:     require('./assets/calendar.png'),
+  company:      require('./assets/company.png'),
+  settings:     require('./assets/settings.png'),
+  trash:        require('./assets/trash.png'),
+  externalLink: require('./assets/external_link.png'),
+  checklist:    require('./assets/checklist.png'),
+  search:       require('./assets/search.png'),
+  reload:       require('./assets/reload.png'),
+};
+
 const RANK_OPTIONS = ['S', 'A', 'B', 'C'];
 const SORT_OPTIONS = ['登録順', '直近順', '五十音', '志望度', 'ステータス', 'ジャンル'];
 const HOURS = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0'));
@@ -174,7 +190,8 @@ function SwipeableRow({ children, onDelete }: { children: React.ReactNode; onDel
       {/* 削除背景 */}
       <View style={styles.swipeDeleteBg}>
         <TouchableOpacity onPress={() => { reset(); onDelete(); }} style={styles.swipeDeleteBtn}>
-          <Text style={styles.swipeDeleteText}>🗑️{'\n'}削除</Text>
+          <Image source={ICONS.trash} style={{ width: 18, height: 18, tintColor: '#fff' }} />
+          <Text style={styles.swipeDeleteText}>削除</Text>
         </TouchableOpacity>
       </View>
       <Animated.View style={{ transform: [{ translateX }] }} {...panResponder.panHandlers}>
@@ -255,6 +272,18 @@ function WeekdayHeader({ C, weekStart }: { C: typeof LIGHT; weekStart: number })
   );
 }
 
+/** カタカナ → ひらがな変換 */
+function kataToHira(str: string): string {
+  return str.replace(/[\u30A1-\u30F6]/g, c =>
+    String.fromCharCode(c.charCodeAt(0) - 0x60)
+  );
+}
+
+/** 入力文字列を検索用に正規化（ひらがな・小文字） */
+function normalizeQuery(str: string): string {
+  return kataToHira(str).toLowerCase();
+}
+
 export default function App() {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
@@ -278,8 +307,10 @@ export default function App() {
   const [actionCount, setActionCount] = useState(0);
   const [bannerKey, setBannerKey] = useState(0);
   const [pendingInternalCompany, setPendingInternalCompany] = useState<string>(''); // 内定企業名
-  const appOpenRef = useRef<AppOpenAd | null>(null);
-  const rewardedRef = useRef<RewardedAd | null>(null);
+  // [AD] const appOpenRef = useRef<AppOpenAd | null>(null);
+  // [AD] const rewardedRef = useRef<RewardedAd | null>(null);
+  const appOpenRef = useRef<any>(null);
+  const rewardedRef = useRef<any>(null);
   const [genres, setGenres] = useState<Genre[]>(DEFAULT_GENRES);
   const [statusColors, setStatusColors] = useState<StatusColors>(DEFAULT_STATUS_COLORS);
   const [statusOptions, setStatusOptions] = useState<string[]>([...DEFAULT_STATUS_OPTIONS]);
@@ -308,11 +339,16 @@ export default function App() {
   const [sortAsc, setSortAsc] = useState(true);
   const [filterPanelVisible, setFilterPanelVisible] = useState(false);
 
+  const modalScrollRef = useRef<ScrollView>(null);
+  const scrollToMemo = () => setTimeout(() => modalScrollRef.current?.scrollToEnd({ animated: true }), 300);
+
   // 登録/編集モーダル
   const [isModalVisible, setModalVisible] = useState(false);
   const [isDetailVisible, setDetailVisible] = useState(false);
   const [selectedItem, setSelectedItem] = useState<Schedule | null>(null);
   const [companyName, setCompanyName] = useState('');
+  const [suggestions, setSuggestions] = useState<CompanyEntry[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
   const [selStatus, setSelStatus] = useState('検討中');
   const [selDate, setSelDate] = useState(new Date().toISOString().split('T')[0]);
   const [selHour, setSelHour] = useState('');
@@ -369,6 +405,7 @@ export default function App() {
 
   useEffect(() => { loadAll(); }, []);
 
+
   // ─── IAP初期化（近日公開のためコメントアウト中） ────────────
   // useEffect(() => {
   //   let purchaseUpdate: any;
@@ -394,21 +431,22 @@ export default function App() {
   // }, []);
 
   // ─── 広告初期化 ──────────────────────────────────────────────
-  useEffect(() => {
-    const appOpen = AppOpenAd.createForAdRequest(APP_OPEN_ID, { requestNonPersonalizedAdsOnly: true });
-    appOpenRef.current = appOpen;
-    appOpen.load();
-    const rewarded = RewardedAd.createForAdRequest(REWARDED_ID, { requestNonPersonalizedAdsOnly: true });
-    rewardedRef.current = rewarded;
-    rewarded.load();
-  }, []);
+  // [AD] useEffect(() => {
+  // [AD]   const appOpen = AppOpenAd.createForAdRequest(APP_OPEN_ID, { requestNonPersonalizedAdsOnly: true });
+  // [AD]   appOpenRef.current = appOpen;
+  // [AD]   appOpen.load();
+  // [AD]   const rewarded = RewardedAd.createForAdRequest(REWARDED_ID, { requestNonPersonalizedAdsOnly: true });
+  // [AD]   rewardedRef.current = rewarded;
+  // [AD]   rewarded.load();
+  // [AD] }, []);
 
-  const showAppOpenAd = () => {
-    if (adFree) return;
-    const appOpen = AppOpenAd.createForAdRequest(APP_OPEN_ID, { requestNonPersonalizedAdsOnly: true });
-    appOpen.addAdEventListener(AdEventType.LOADED, () => { appOpen.show(); });
-    appOpen.load();
-  };
+  const showAppOpenAd = () => { /* [AD] disabled */ };
+  // [AD] const showAppOpenAd = () => {
+  // [AD]   if (adFree) return;
+  // [AD]   const appOpen = AppOpenAd.createForAdRequest(APP_OPEN_ID, { requestNonPersonalizedAdsOnly: true });
+  // [AD]   appOpen.addAdEventListener(AdEventType.LOADED, () => { appOpen.show(); });
+  // [AD]   appOpen.load();
+  // [AD] };
 
   // 4回起動ごとに1回App Open広告表示
   const countAction = async () => {
@@ -450,18 +488,19 @@ export default function App() {
   // };
 
   // リワード広告を表示してTipsを解放
-  const showRewardedAd = () => {
-    if (!rewardedRef.current?.loaded) {
-      Alert.alert('広告の準備中', 'しばらくしてからもう一度お試しください。');
-      return;
-    }
-    const tip = SHUKATSU_TIPS[Math.floor(Math.random() * SHUKATSU_TIPS.length)];
-    rewardedRef.current.addAdEventListener(RewardedAdEventType.EARNED_REWARD, () => {
-      setRewardedTip(tip);
-      setTimeout(() => rewardedRef.current?.load(), 1000);
-    });
-    rewardedRef.current.show();
-  };
+  const showRewardedAd = () => { /* [AD] disabled */ };
+  // [AD] const showRewardedAd = () => {
+  // [AD]   if (!rewardedRef.current?.loaded) {
+  // [AD]     Alert.alert('広告の準備中', 'しばらくしてからもう一度お試しください。');
+  // [AD]     return;
+  // [AD]   }
+  // [AD]   const tip = SHUKATSU_TIPS[Math.floor(Math.random() * SHUKATSU_TIPS.length)];
+  // [AD]   rewardedRef.current.addAdEventListener(RewardedAdEventType.EARNED_REWARD, () => {
+  // [AD]     setRewardedTip(tip);
+  // [AD]     setTimeout(() => rewardedRef.current?.load(), 1000);
+  // [AD]   });
+  // [AD]   rewardedRef.current.show();
+  // [AD] };
 
   const loadAll = async () => {
     try {
@@ -697,6 +736,26 @@ export default function App() {
   // 企業名入力時に同名企業のデータを自動継承（新規登録時のみ）
   const handleCompanyNameChange = (text: string) => {
     setCompanyName(text);
+    const q = text.trim();
+    if (q.length >= 1) {
+      const normalizedQ = normalizeQuery(q);
+      const match = (c: CompanyEntry) => {
+        if (c.n.includes(q)) return true;
+        const reading = (c as any).r ?? normalizeQuery(c.n);
+        return reading.includes(normalizedQ);
+      };
+      const startsWith = LISTED_COMPANIES.filter(c => {
+        const reading = (c as any).r ?? normalizeQuery(c.n);
+        return c.n.startsWith(q) || reading.startsWith(normalizedQ);
+      });
+      const partial = LISTED_COMPANIES.filter(c => !startsWith.includes(c) && match(c));
+      const filtered = [...startsWith, ...partial].slice(0, 8);
+      setSuggestions(filtered);
+      setShowSuggestions(filtered.length > 0);
+    } else {
+      setSuggestions([]);
+      setShowSuggestions(false);
+    }
     if (selectedItem) return; // 編集モードは継承しない
     const match = schedules.find(s => s.company.trim() === text.trim() && text.trim() !== '');
     if (!match) return;
@@ -768,7 +827,7 @@ export default function App() {
         await Notifications.scheduleNotificationAsync({
           identifier: notifId,
           content: {
-            title: `📋 ${item.company}`,
+            title: `${item.company}`,
             body: `${item.status}の予定が${day === '0' ? '今日' : day + '日後'}です（${item.date}${item.hour ? ' ' + item.hour + ':' + item.minute : ''}）`,
             sound: true,
           },
@@ -935,7 +994,7 @@ export default function App() {
             </View>
           </View>
           {/* 2行目：広告（課金済みなら非表示→カレンダーが自動で上に移動） */}
-          {!adFree && (
+          {/* [AD] {!adFree && (
             <View style={{ width: '100%', height: 60, alignItems: 'center', justifyContent: 'center' }}>
               <BannerAd
                 key={bannerKey}
@@ -944,7 +1003,7 @@ export default function App() {
                 requestOptions={{ requestNonPersonalizedAdsOnly: true }}
               />
             </View>
-          )}
+          )} */}
         </View>
 
         {/* ── カレンダータブ ── */}
@@ -1141,7 +1200,7 @@ export default function App() {
           <View style={{ flex: 1 }}>
             {/* 検索バー */}
             <View style={[styles.searchBar, { backgroundColor: C.searchBg }]}>
-              <Text style={styles.searchIcon}>🔍</Text>
+              <Image source={ICONS.search} style={{ width: 14, height: 14, tintColor: C.text3, marginRight: 6 }} />
               <TextInput style={[styles.searchInput, { color: C.text }]} placeholder="企業名で検索..."
                 value={searchQuery} onChangeText={setSearchQuery} clearButtonMode="while-editing" />
             </View>
@@ -1230,7 +1289,7 @@ export default function App() {
                             <View style={[styles.rankBadge, { backgroundColor: rankColor(item.rank) }]}>
                               <Text style={styles.rankText}>{item.rank}</Text>
                             </View>
-                            <Text style={[styles.itemTitle, { color: isInactive ? '#888' : C.text }]}>
+                            <Text style={[styles.itemTitle, { color: isInactive ? '#888' : C.text, flex: 1 }]} numberOfLines={1}>
                               {item.company}{isInternal ? ' 🌸' : ''}
                             </Text>
                             {cdLabel && <View style={{ backgroundColor: cdLabel === '今日' ? '#e74c3c' : '#f39c12', borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2 }}>
@@ -1256,7 +1315,10 @@ export default function App() {
                             <TouchableOpacity
                               style={styles.urlChip}
                               onPress={() => Linking.openURL(item.url.startsWith('http') ? item.url : 'https://' + item.url)}>
-                              <Text style={styles.urlChipText} numberOfLines={1}>🔗 開く</Text>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                                <Image source={ICONS.externalLink} style={{ width: 11, height: 11, tintColor: ACCENT }} />
+                                <Text style={styles.urlChipText}>開く</Text>
+                              </View>
                             </TouchableOpacity>
                           ) : null}
                           {item.note ? <Text style={styles.notePreview} numberOfLines={1}>📝 {item.note}</Text> : null}
@@ -1386,7 +1448,7 @@ export default function App() {
                     await Notifications.scheduleNotificationAsync({
                       identifier: 'test_notif_' + Date.now(),
                       content: {
-                        title: '📋 テスト通知',
+                        title: 'テスト通知',
                         body: '就活管理アプリからのリマインド通知が正常に届いています',
                         sound: true,
                       },
@@ -1419,7 +1481,10 @@ export default function App() {
               Clipboard.setString(header + rows);
               Alert.alert('コピー完了', `${schedules.length}社のデータをクリップボードにコピーしました。\nスプレッドシートに貼り付けてください。`);
             }}>
-              <Text style={styles.outlineButtonText}>📋 CSVをクリップボードにコピー</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <Image source={ICONS.checklist} style={{ width: 14, height: 14, tintColor: TDU_BLUE }} />
+                <Text style={styles.outlineButtonText}>CSVをクリップボードにコピー</Text>
+              </View>
             </TouchableOpacity>
             <TouchableOpacity style={styles.dangerButton} onPress={() => {
               Alert.alert('全データ削除', '全ての企業データを削除しますか？', [
@@ -1433,7 +1498,8 @@ export default function App() {
             <Text style={[styles.settingSection, { marginTop: 28 }]}>ヘルプ・使い方</Text>
             {([
               {
-                title: '🗓️ カレンダーの使い方',
+                icon: ICONS.calendar,
+                title: 'カレンダーの使い方',
                 body: [
                   '• 日付をタップ → その日の予定を表示',
                   '• 日付をダブルタップ → その日付で新規登録',
@@ -1443,7 +1509,8 @@ export default function App() {
                 ],
               },
               {
-                title: '🏢 企業の登録・編集',
+                icon: ICONS.company,
+                title: '企業の登録・編集',
                 body: [
                   '• 画面右下の「＋」ボタンで新規登録',
                   '• 企業名・ステータス・日程・志望度などを入力',
@@ -1453,7 +1520,8 @@ export default function App() {
                 ],
               },
               {
-                title: '📋 持ち駒欄の使い方',
+                icon: ICONS.checklist,
+                title: '持ち駒欄の使い方',
                 body: [
                   '• 同名企業は最高ステータスの1件だけ表示されます',
                   '• 「→」ボタンでステータスを次のステップに進められます',
@@ -1463,7 +1531,8 @@ export default function App() {
                 ],
               },
               {
-                title: '🔔 通知設定',
+                icon: ICONS.bell,
+                title: '通知設定',
                 body: [
                   '• 設定タブ → 通知設定でリマインダーのON/OFFを切り替え',
                   '• 企業の詳細編集 → 通知設定で個別に何日前に通知するか指定できます',
@@ -1472,7 +1541,8 @@ export default function App() {
                 ],
               },
               {
-                title: '🔄 企業の重複と同名登録',
+                icon: ICONS.reload,
+                title: '企業の重複と同名登録',
                 body: [
                   '• 同じ企業名・同じステータスで新規登録 → 古いエントリが自動削除（置換）',
                   '• 同じ企業名・異なるステータスで新規登録 → カレンダーに両方表示',
@@ -1481,7 +1551,8 @@ export default function App() {
                 ],
               },
               {
-                title: '📝 メモ機能',
+                icon: ICONS.memo,
+                title: 'メモ機能',
                 body: [
                   '• 企業詳細のメモタブに4種類のメモを記録できます',
                   '　全般：面接内容・感想など',
@@ -1492,7 +1563,8 @@ export default function App() {
                 ],
               },
               {
-                title: '📤 データ管理',
+                icon: ICONS.upload,
+                title: 'データ管理',
                 body: [
                   '• 設定 → データ管理 →「CSVをクリップボードにコピー」でデータをエクスポート',
                   '• CSVはスプレッドシート（Excel / Google スプレッドシート）に貼り付けられます',
@@ -1500,12 +1572,13 @@ export default function App() {
                   '• 「全データを削除する」は元に戻せないので注意してください',
                 ],
               },
-            ] as { title: string; body: string[] }[]).map((item, i) => (
+            ] as { icon: any; title: string; body: string[] }[]).map((item, i) => (
               <View key={i} style={{ borderBottomWidth: 0.5, borderBottomColor: C.border2 }}>
                 <TouchableOpacity
                   style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 14 }}
                   onPress={() => setOpenHelpItem(openHelpItem === i ? null : i)}
                   activeOpacity={0.7}>
+                  <Image source={item.icon} style={{ width: 16, height: 16, tintColor: C.text3, marginRight: 8 }} />
                   <Text style={{ fontSize: 13, fontWeight: '500', color: C.text, flex: 1 }}>{item.title}</Text>
                   <Text style={{ fontSize: 12, color: C.text3, marginLeft: 8 }}>{openHelpItem === i ? '▲' : '▼'}</Text>
                 </TouchableOpacity>
@@ -1520,7 +1593,7 @@ export default function App() {
             ))}
 
             {/* 設定タブバナー広告 */}
-            {!adFree && (
+            {/* [AD] {!adFree && (
               <View style={{ alignItems: 'center', marginTop: 20 }}>
                 <BannerAd
                   unitId={AD_UNIT_ID}
@@ -1528,7 +1601,7 @@ export default function App() {
                   requestOptions={{ requestNonPersonalizedAdsOnly: true }}
                 />
               </View>
-            )}
+            )} */}
 
             {/* 開発者を支援 */}
             <Text style={[styles.settingSection, { marginTop: 24 }]}>開発者を支援する</Text>
@@ -1568,7 +1641,10 @@ export default function App() {
               <View style={{ gap: 8 }}>
                 <Text style={{ fontSize: 13, color: C.text2, lineHeight: 20 }}>📅 <Text style={{ fontWeight: 'bold', color: C.text }}>カレンダータブ</Text>{'\n'}日付をタップして企業を登録。ダブルタップで素早く追加できます。</Text>
                 <Text style={{ fontSize: 13, color: C.text2, lineHeight: 20 }}>👥 <Text style={{ fontWeight: 'bold', color: C.text }}>持ち駒タブ</Text>{'\n'}登録した企業の選考状況を一覧管理。「→」で次のステップへ進めます。</Text>
-                <Text style={{ fontSize: 13, color: C.text2, lineHeight: 20 }}>⚙️ <Text style={{ fontWeight: 'bold', color: C.text }}>設定タブ</Text>{'\n'}詳しい使い方は設定タブ下部の「ヘルプ・使い方」をご覧ください。</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 6 }}>
+                  <Image source={ICONS.settings} style={{ width: 14, height: 14, tintColor: C.text3, marginTop: 2 }} />
+                  <Text style={{ fontSize: 13, color: C.text2, lineHeight: 20, flex: 1 }}><Text style={{ fontWeight: 'bold', color: C.text }}>設定タブ</Text>{'\n'}詳しい使い方は設定タブ下部の「ヘルプ・使い方」をご覧ください。</Text>
+                </View>
               </View>
               <TouchableOpacity
                 style={{ backgroundColor: isDark ? '#1c2333' : TDU_BLUE, borderRadius: 12, paddingVertical: 12, alignItems: 'center', marginTop: 4 }}
@@ -1732,7 +1808,7 @@ export default function App() {
           <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
             <TouchableOpacity style={StyleSheet.absoluteFillObject} onPress={() => closeModal()} activeOpacity={1} />
             <View style={[styles.modalContent, { backgroundColor: C.bg }]}>
-              <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+              <ScrollView ref={modalScrollRef} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
                 <View style={styles.modalHeader}>
                   <Text style={[styles.modalTitle, { color: C.text }]}>{isDetailVisible ? '詳細・編集' : '新規企業登録'}</Text>
                   {isDetailVisible && (
@@ -1743,7 +1819,35 @@ export default function App() {
                 </View>
 
                 <Text style={[styles.label, { color: C.text3 }]}>企業名 *</Text>
-                <TextInput style={[styles.input, { backgroundColor: C.inputBg, color: C.text }]} placeholder="例：株式会社〇〇" value={companyName} onChangeText={handleCompanyNameChange} returnKeyType="done" />
+                <View style={{ position: 'relative', zIndex: 10 }}>
+                  <TextInput
+                    style={[styles.input, { backgroundColor: C.inputBg, color: C.text }]}
+                    placeholder="例：株式会社〇〇"
+                    value={companyName}
+                    onChangeText={handleCompanyNameChange}
+                    returnKeyType="done"
+                    onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
+                  />
+                  {showSuggestions && (
+                    <View style={{ position: 'absolute', top: '100%', left: 0, right: 0, backgroundColor: C.inputBg, borderWidth: 1, borderColor: C.text3, borderRadius: 6, zIndex: 20, maxHeight: 200, overflow: 'hidden' }}>
+                      <ScrollView keyboardShouldPersistTaps="always" nestedScrollEnabled>
+                        {suggestions.map((item, idx) => (
+                          <TouchableOpacity
+                            key={idx}
+                            style={{ paddingVertical: 10, paddingHorizontal: 12, borderBottomWidth: idx < suggestions.length - 1 ? 1 : 0, borderBottomColor: C.text3 + '40' }}
+                            onPress={() => {
+                              setCompanyName(item.n);
+                              setSuggestions([]);
+                              setShowSuggestions(false);
+                            }}
+                          >
+                            <Text style={{ color: C.text }}>{item.n}</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </ScrollView>
+                    </View>
+                  )}
+                </View>
 
                 <Text style={[styles.label, { color: C.text3 }]}>ジャンル</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false}>
@@ -1925,21 +2029,21 @@ export default function App() {
                 <View style={styles.copyRow}>
                   <TextInput style={[styles.input, { flex: 1, marginBottom: 0, backgroundColor: C.inputBg, color: C.text }]} placeholder="https://..." value={url} onChangeText={setUrl} autoCapitalize="none" keyboardType="url" />
                   {url ? <TouchableOpacity style={styles.copyBtn} onPress={() => { Clipboard.setString(url); Alert.alert('コピーしました', 'URLをコピーしました'); }}>
-                    <Text style={styles.copyBtnText}>📋</Text></TouchableOpacity> : null}
+                    <Image source={ICONS.checklist} style={{ width: 16, height: 16, tintColor: TDU_BLUE }} /></TouchableOpacity> : null}
                 </View>
 
                 <Text style={[styles.label, { color: C.text3 }]}>ユーザーID</Text>
                 <View style={styles.copyRow}>
                   <TextInput style={[styles.input, { flex: 1, marginBottom: 0, backgroundColor: C.inputBg, color: C.text }]} placeholder="ログインID・メールアドレス等" value={userId} onChangeText={setUserId} autoCapitalize="none" />
                   {userId ? <TouchableOpacity style={styles.copyBtn} onPress={() => { Clipboard.setString(userId); Alert.alert('コピーしました', 'ユーザーIDをコピーしました'); }}>
-                    <Text style={styles.copyBtnText}>📋</Text></TouchableOpacity> : null}
+                    <Image source={ICONS.checklist} style={{ width: 16, height: 16, tintColor: TDU_BLUE }} /></TouchableOpacity> : null}
                 </View>
 
                 <Text style={[styles.label, { color: C.text3 }]}>パスワード</Text>
                 <View style={styles.copyRow}>
                   <TextInput style={[styles.input, { flex: 1, marginBottom: 0, backgroundColor: C.inputBg, color: C.text }]} placeholder="パスワード" value={password} onChangeText={setPassword} autoCapitalize="none" secureTextEntry />
                   {password ? <TouchableOpacity style={styles.copyBtn} onPress={() => { Clipboard.setString(password); Alert.alert('コピーしました', 'パスワードをコピーしました'); }}>
-                    <Text style={styles.copyBtnText}>📋</Text></TouchableOpacity> : null}
+                    <Image source={ICONS.checklist} style={{ width: 16, height: 16, tintColor: TDU_BLUE }} /></TouchableOpacity> : null}
                 </View>
 
                 {/* ── 通知設定 ── */}
@@ -2081,10 +2185,10 @@ export default function App() {
                     </TouchableOpacity>
                   ))}
                 </View>
-                {activeMemoTab === 0 && <TextInput style={[styles.input, styles.textArea, { backgroundColor: C.inputBg, color: C.text }]} multiline placeholder="面接内容・感想など..." value={note} onChangeText={setNote} />}
-                {activeMemoTab === 1 && <TextInput style={[styles.input, styles.textArea, { backgroundColor: C.inputBg, color: C.text }]} multiline placeholder="事業内容・強み・競合など..." value={memoResearch} onChangeText={setMemoResearch} />}
-                {activeMemoTab === 2 && <TextInput style={[styles.input, styles.textArea, { backgroundColor: C.inputBg, color: C.text }]} multiline placeholder="ガクチカ・志望動機・強み弱みなど..." value={memoPR} onChangeText={setMemoPR} />}
-                {activeMemoTab === 3 && <TextInput style={[styles.input, styles.textArea, { backgroundColor: C.inputBg, color: C.text }]} multiline placeholder="面接で聞くこと・逆質問リストなど..." value={memoQuestions} onChangeText={setMemoQuestions} />}
+                {activeMemoTab === 0 && <TextInput style={[styles.input, styles.textArea, { backgroundColor: C.inputBg, color: C.text }]} multiline placeholder="面接内容・感想など..." value={note} onChangeText={setNote} onFocus={scrollToMemo} />}
+                {activeMemoTab === 1 && <TextInput style={[styles.input, styles.textArea, { backgroundColor: C.inputBg, color: C.text }]} multiline placeholder="事業内容・強み・競合など..." value={memoResearch} onChangeText={setMemoResearch} onFocus={scrollToMemo} />}
+                {activeMemoTab === 2 && <TextInput style={[styles.input, styles.textArea, { backgroundColor: C.inputBg, color: C.text }]} multiline placeholder="ガクチカ・志望動機・強み弱みなど..." value={memoPR} onChangeText={setMemoPR} onFocus={scrollToMemo} />}
+                {activeMemoTab === 3 && <TextInput style={[styles.input, styles.textArea, { backgroundColor: C.inputBg, color: C.text }]} multiline placeholder="面接で聞くこと・逆質問リストなど..." value={memoQuestions} onChangeText={setMemoQuestions} onFocus={scrollToMemo} />}
 
                 {/* ⑬ ステータス変更履歴 */}
                 {selectedItem?.statusHistory && selectedItem.statusHistory.length > 0 && (

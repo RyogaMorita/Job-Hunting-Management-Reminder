@@ -50,7 +50,8 @@
           "defaultChannel": "default"
         }
       ],
-      "react-native-iap"
+      "react-native-iap",
+      "expo-tracking-transparency"
     ]
   }
 }
