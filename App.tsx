@@ -14,11 +14,11 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
 import * as StoreReview from 'expo-store-review';
 import { SafeAreaProvider, SafeAreaView as SafeAreaViewContext } from 'react-native-safe-area-context';
-// [AD] import {
-// [AD]   BannerAd, BannerAdSize, TestIds,
-// [AD]   AppOpenAd, AdEventType,
-// [AD]   RewardedAd, RewardedAdEventType,
-// [AD] } from 'react-native-google-mobile-ads';
+import {
+  BannerAd, BannerAdSize, TestIds,
+  AppOpenAd, AdEventType,
+  RewardedAd, RewardedAdEventType,
+} from 'react-native-google-mobile-ads';
 import { LISTED_COMPANIES, CompanyEntry } from './companies_v2';
 
 Notifications.setNotificationHandler({
@@ -31,9 +31,9 @@ Notifications.setNotificationHandler({
 // ─── 定数 ─────────────────────────────────────────────────────────
 // ─── 広告ID ──────────────────────────────────────────────────────
 // const IAP_PRODUCT_ID = 'com.moritaryoga.shukatsukanri.adfree'; // 近日公開
-// [AD] const AD_UNIT_ID = __DEV__ ? TestIds.BANNER : 'ca-app-pub-7090599455468315/1730004001';
-// [AD] const APP_OPEN_ID = __DEV__ ? TestIds.APP_OPEN : 'ca-app-pub-7090599455468315/3637103731';
-// [AD] const REWARDED_ID = __DEV__ ? TestIds.REWARDED : 'ca-app-pub-7090599455468315/8667464364';
+const AD_UNIT_ID = __DEV__ ? TestIds.BANNER : 'ca-app-pub-7090599455468315/1730004001';
+const APP_OPEN_ID = __DEV__ ? TestIds.APP_OPEN : 'ca-app-pub-7090599455468315/3637103731';
+const REWARDED_ID = __DEV__ ? TestIds.REWARDED : 'ca-app-pub-7090599455468315/8667464364';
 const REVIEW_KEY = '@review_requested';
 
 // ─── 就活Tips（リワード解放コンテンツ）────────────────────────────
@@ -288,6 +288,7 @@ export default function App() {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const C = isDark ? DARK : LIGHT;
+  const ACCENT = isDark ? '#6ea8fe' : TDU_BLUE;
   const [currentCalDate, setCurrentCalDate] = useState(new Date());
 
   const [fontsLoaded] = useFonts({
@@ -307,10 +308,8 @@ export default function App() {
   const [actionCount, setActionCount] = useState(0);
   const [bannerKey, setBannerKey] = useState(0);
   const [pendingInternalCompany, setPendingInternalCompany] = useState<string>(''); // 内定企業名
-  // [AD] const appOpenRef = useRef<AppOpenAd | null>(null);
-  // [AD] const rewardedRef = useRef<RewardedAd | null>(null);
-  const appOpenRef = useRef<any>(null);
-  const rewardedRef = useRef<any>(null);
+  const appOpenRef = useRef<AppOpenAd | null>(null);
+  const rewardedRef = useRef<RewardedAd | null>(null);
   const [genres, setGenres] = useState<Genre[]>(DEFAULT_GENRES);
   const [statusColors, setStatusColors] = useState<StatusColors>(DEFAULT_STATUS_COLORS);
   const [statusOptions, setStatusOptions] = useState<string[]>([...DEFAULT_STATUS_OPTIONS]);
@@ -431,22 +430,21 @@ export default function App() {
   // }, []);
 
   // ─── 広告初期化 ──────────────────────────────────────────────
-  // [AD] useEffect(() => {
-  // [AD]   const appOpen = AppOpenAd.createForAdRequest(APP_OPEN_ID, { requestNonPersonalizedAdsOnly: true });
-  // [AD]   appOpenRef.current = appOpen;
-  // [AD]   appOpen.load();
-  // [AD]   const rewarded = RewardedAd.createForAdRequest(REWARDED_ID, { requestNonPersonalizedAdsOnly: true });
-  // [AD]   rewardedRef.current = rewarded;
-  // [AD]   rewarded.load();
-  // [AD] }, []);
+  useEffect(() => {
+    const appOpen = AppOpenAd.createForAdRequest(APP_OPEN_ID, { requestNonPersonalizedAdsOnly: true });
+    appOpenRef.current = appOpen;
+    appOpen.load();
+    const rewarded = RewardedAd.createForAdRequest(REWARDED_ID, { requestNonPersonalizedAdsOnly: true });
+    rewardedRef.current = rewarded;
+    rewarded.load();
+  }, []);
 
-  const showAppOpenAd = () => { /* [AD] disabled */ };
-  // [AD] const showAppOpenAd = () => {
-  // [AD]   if (adFree) return;
-  // [AD]   const appOpen = AppOpenAd.createForAdRequest(APP_OPEN_ID, { requestNonPersonalizedAdsOnly: true });
-  // [AD]   appOpen.addAdEventListener(AdEventType.LOADED, () => { appOpen.show(); });
-  // [AD]   appOpen.load();
-  // [AD] };
+  const showAppOpenAd = () => {
+    if (adFree) return;
+    const appOpen = AppOpenAd.createForAdRequest(APP_OPEN_ID, { requestNonPersonalizedAdsOnly: true });
+    appOpen.addAdEventListener(AdEventType.LOADED, () => { appOpen.show(); });
+    appOpen.load();
+  };
 
   // 4回起動ごとに1回App Open広告表示
   const countAction = async () => {
@@ -488,19 +486,18 @@ export default function App() {
   // };
 
   // リワード広告を表示してTipsを解放
-  const showRewardedAd = () => { /* [AD] disabled */ };
-  // [AD] const showRewardedAd = () => {
-  // [AD]   if (!rewardedRef.current?.loaded) {
-  // [AD]     Alert.alert('広告の準備中', 'しばらくしてからもう一度お試しください。');
-  // [AD]     return;
-  // [AD]   }
-  // [AD]   const tip = SHUKATSU_TIPS[Math.floor(Math.random() * SHUKATSU_TIPS.length)];
-  // [AD]   rewardedRef.current.addAdEventListener(RewardedAdEventType.EARNED_REWARD, () => {
-  // [AD]     setRewardedTip(tip);
-  // [AD]     setTimeout(() => rewardedRef.current?.load(), 1000);
-  // [AD]   });
-  // [AD]   rewardedRef.current.show();
-  // [AD] };
+  const showRewardedAd = () => {
+    if (!rewardedRef.current?.loaded) {
+      Alert.alert('広告の準備中', 'しばらくしてからもう一度お試しください。');
+      return;
+    }
+    const tip = SHUKATSU_TIPS[Math.floor(Math.random() * SHUKATSU_TIPS.length)];
+    rewardedRef.current.addAdEventListener(RewardedAdEventType.EARNED_REWARD, () => {
+      setRewardedTip(tip);
+      setTimeout(() => rewardedRef.current?.load(), 1000);
+    });
+    rewardedRef.current.show();
+  };
 
   const loadAll = async () => {
     try {
@@ -987,14 +984,14 @@ export default function App() {
               <Text style={[styles.statNum, { color: isDark ? '#6ea8fe' : TDU_BLUE }]}>{activeCount}</Text>
               <Text style={[styles.statLabel, { color: isDark ? '#6ea8fe' : TDU_BLUE }]}>持駒</Text>
             </View>
-            <Text style={[styles.headerTitle, { flex: 1, textAlign: 'center' }]}>就活管理リマインダー</Text>
+            <Text style={[styles.headerTitle, { flex: 1, textAlign: 'center', color: ACCENT }]}>就活管理リマインダー</Text>
             <View style={[styles.statChip, { backgroundColor: isDark ? '#2d2007' : '#fff3cd' }]}>
               <Text style={[styles.statNum, { color: '#856404' }]}>{internalCount}</Text>
               <Text style={[styles.statLabel, { color: '#856404' }]}>内定</Text>
             </View>
           </View>
           {/* 2行目：広告（課金済みなら非表示→カレンダーが自動で上に移動） */}
-          {/* [AD] {!adFree && (
+          {!adFree && (
             <View style={{ width: '100%', height: 60, alignItems: 'center', justifyContent: 'center' }}>
               <BannerAd
                 key={bannerKey}
@@ -1003,7 +1000,7 @@ export default function App() {
                 requestOptions={{ requestNonPersonalizedAdsOnly: true }}
               />
             </View>
-          )} */}
+          )}
         </View>
 
         {/* ── カレンダータブ ── */}
@@ -1374,13 +1371,13 @@ export default function App() {
             ))}
             {genres.length > 5 && (
               <TouchableOpacity onPress={() => setShowAllGenres(v => !v)} style={{ paddingVertical: 8, alignItems: 'center' }}>
-                <Text style={{ color: TDU_BLUE, fontSize: 13 }}>
+                <Text style={{ color: ACCENT, fontSize: 13 }}>
                   {showAllGenres ? '▲ 閉じる' : `▼ もっと見る（残り${genres.length - 5}件）`}
                 </Text>
               </TouchableOpacity>
             )}
-            <TouchableOpacity style={styles.outlineButton} onPress={() => openAddGenre()}>
-              <Text style={styles.outlineButtonText}>+ ジャンルを追加</Text>
+            <TouchableOpacity style={[styles.outlineButton, { borderColor: ACCENT }]} onPress={() => openAddGenre()}>
+              <Text style={[styles.outlineButtonText, { color: ACCENT }]}>+ ジャンルを追加</Text>
             </TouchableOpacity>
 
             <Text style={[styles.settingSection, { marginTop: 28 }]}>ステータス管理</Text>
@@ -1411,14 +1408,14 @@ export default function App() {
             })}
             {statusOptions.length > 5 && (
               <TouchableOpacity onPress={() => setShowAllStatuses(v => !v)} style={{ paddingVertical: 8, alignItems: 'center' }}>
-                <Text style={{ color: TDU_BLUE, fontSize: 13 }}>
+                <Text style={{ color: ACCENT, fontSize: 13 }}>
                   {showAllStatuses ? '▲ 閉じる' : `▼ もっと見る（残り${statusOptions.length - 5}件）`}
                 </Text>
               </TouchableOpacity>
             )}
-            <TouchableOpacity style={[styles.outlineButton, { marginTop: 8 }]}
+            <TouchableOpacity style={[styles.outlineButton, { marginTop: 8, borderColor: ACCENT }]}
               onPress={() => { setNewStatusName(''); setAddStatusModal(true); }}>
-              <Text style={styles.outlineButtonText}>+ ステータスを追加</Text>
+              <Text style={[styles.outlineButtonText, { color: ACCENT }]}>+ ステータスを追加</Text>
             </TouchableOpacity>
 
 
@@ -1428,7 +1425,7 @@ export default function App() {
               <View style={{ flexDirection: 'row', gap: 8 }}>
                 {[{ label: '日曜', v: 0 }, { label: '月曜', v: 1 }].map(opt => (
                   <TouchableOpacity key={opt.v}
-                    style={[styles.sortChip, { backgroundColor: C.bg2 }, weekStart === opt.v && styles.sortChipActive]}
+                    style={[styles.sortChip, { backgroundColor: C.bg2 }, weekStart === opt.v && { backgroundColor: ACCENT }]}
                     onPress={async () => { setWeekStart(opt.v); await AsyncStorage.setItem('@week_start', JSON.stringify(opt.v)); }}>
                     <Text style={[styles.sortChipText, weekStart === opt.v && { color: '#fff' }]}>{opt.label}</Text>
                   </TouchableOpacity>
@@ -1440,7 +1437,7 @@ export default function App() {
             <View style={[styles.settingRow, { borderColor: C.border2, flexDirection: 'column', alignItems: 'flex-start', gap: 8 }]}>
               <Text style={{ color: C.text2, fontSize: 13 }}>5秒後にテスト通知を送信します</Text>
               <TouchableOpacity
-                style={[styles.outlineButton, { marginTop: 0, alignSelf: 'flex-start', paddingHorizontal: 20 }]}
+                style={[styles.outlineButton, { marginTop: 0, alignSelf: 'flex-start', paddingHorizontal: 20, borderColor: ACCENT }]}
                 onPress={async () => {
                   try {
                     const { status } = await Notifications.requestPermissionsAsync();
@@ -1457,13 +1454,13 @@ export default function App() {
                     Alert.alert('送信完了', '5秒後に通知が届きます。アプリをバックグラウンドにしてお待ちください。');
                   } catch (e) { Alert.alert('エラー', '通知の送信に失敗しました: ' + String(e)); }
                 }}>
-                <Text style={styles.outlineButtonText}>テスト通知を送る</Text>
+                <Text style={[styles.outlineButtonText, { color: ACCENT }]}>テスト通知を送る</Text>
               </TouchableOpacity>
             </View>
 
             <Text style={[styles.settingSection, { marginTop: 28 }]}>データ管理</Text>
             {/* ⑭ CSV エクスポート */}
-            <TouchableOpacity style={[styles.outlineButton, { marginBottom: 12 }]} onPress={() => {
+            <TouchableOpacity style={[styles.outlineButton, { marginBottom: 12, borderColor: ACCENT }]} onPress={() => {
               const escape = (v: string) => `"${(v ?? '').replace(/"/g, '""')}"`;
               const header = '企業名,ステータス,日付,時間,志望度,ジャンル,メモ\n';
               const rows = schedules.map(s => {
@@ -1482,8 +1479,8 @@ export default function App() {
               Alert.alert('コピー完了', `${schedules.length}社のデータをクリップボードにコピーしました。\nスプレッドシートに貼り付けてください。`);
             }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                <Image source={ICONS.checklist} style={{ width: 14, height: 14, tintColor: TDU_BLUE }} />
-                <Text style={styles.outlineButtonText}>CSVをクリップボードにコピー</Text>
+                <Image source={ICONS.checklist} style={{ width: 14, height: 14, tintColor: ACCENT }} resizeMode="contain" />
+                <Text style={[styles.outlineButtonText, { color: ACCENT }]}>CSVをクリップボードにコピー</Text>
               </View>
             </TouchableOpacity>
             <TouchableOpacity style={styles.dangerButton} onPress={() => {
@@ -1578,7 +1575,7 @@ export default function App() {
                   style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 14 }}
                   onPress={() => setOpenHelpItem(openHelpItem === i ? null : i)}
                   activeOpacity={0.7}>
-                  <Image source={item.icon} style={{ width: 16, height: 16, tintColor: C.text3, marginRight: 8 }} />
+                  <Image source={item.icon} style={{ width: 16, height: 16, tintColor: C.text3, marginRight: 8 }} resizeMode="contain" />
                   <Text style={{ fontSize: 13, fontWeight: '500', color: C.text, flex: 1 }}>{item.title}</Text>
                   <Text style={{ fontSize: 12, color: C.text3, marginLeft: 8 }}>{openHelpItem === i ? '▲' : '▼'}</Text>
                 </TouchableOpacity>
@@ -1593,7 +1590,7 @@ export default function App() {
             ))}
 
             {/* 設定タブバナー広告 */}
-            {/* [AD] {!adFree && (
+            {!adFree && (
               <View style={{ alignItems: 'center', marginTop: 20 }}>
                 <BannerAd
                   unitId={AD_UNIT_ID}
@@ -1601,7 +1598,7 @@ export default function App() {
                   requestOptions={{ requestNonPersonalizedAdsOnly: true }}
                 />
               </View>
-            )} */}
+            )}
 
             {/* 開発者を支援 */}
             <Text style={[styles.settingSection, { marginTop: 24 }]}>開発者を支援する</Text>
@@ -1626,7 +1623,7 @@ export default function App() {
             </View>
 
             <View style={[styles.aboutBox, { backgroundColor: C.bg2, marginTop: 24 }]}>
-              <Text style={[styles.aboutText, { color: C.text2 }]}>就活管理リマインダー v1.1.0</Text>
+              <Text style={[styles.aboutText, { color: C.text2 }]}>就活管理リマインダー v1.2.0</Text>
             </View>
           </ScrollView>
         )}
@@ -1980,7 +1977,7 @@ export default function App() {
                     <View style={{ flexDirection: 'row', gap: 4, alignItems: 'flex-start' }}>
                       {/* 時インラインドロップダウン */}
                       <View style={{ flex: 1 }}>
-                        <TouchableOpacity style={[styles.input, { justifyContent: 'center', paddingVertical: 13 }]}
+                        <TouchableOpacity style={[styles.input, { justifyContent: 'center', paddingVertical: 13, backgroundColor: C.inputBg }]}
                           onPress={() => { setShowHourPicker(v => !v); setShowMinutePicker(false); }}>
                           <Text style={{ fontSize: 14, color: selHour ? C.text : '#aaa' }}>{selHour || '時'}</Text>
                         </TouchableOpacity>
@@ -2003,7 +2000,7 @@ export default function App() {
                       <Text style={{ alignSelf: 'center', color: C.text, paddingTop: 13 }}>:</Text>
                       {/* 分インラインドロップダウン */}
                       <View style={{ flex: 1 }}>
-                        <TouchableOpacity style={[styles.input, { justifyContent: 'center', paddingVertical: 13 }]}
+                        <TouchableOpacity style={[styles.input, { justifyContent: 'center', paddingVertical: 13, backgroundColor: C.inputBg }]}
                           onPress={() => { setShowMinutePicker(v => !v); setShowHourPicker(false); }}>
                           <Text style={{ fontSize: 14, color: selMinute ? C.text : '#aaa' }}>{selMinute || '分'}</Text>
                         </TouchableOpacity>
@@ -2029,21 +2026,21 @@ export default function App() {
                 <View style={styles.copyRow}>
                   <TextInput style={[styles.input, { flex: 1, marginBottom: 0, backgroundColor: C.inputBg, color: C.text }]} placeholder="https://..." value={url} onChangeText={setUrl} autoCapitalize="none" keyboardType="url" />
                   {url ? <TouchableOpacity style={styles.copyBtn} onPress={() => { Clipboard.setString(url); Alert.alert('コピーしました', 'URLをコピーしました'); }}>
-                    <Image source={ICONS.checklist} style={{ width: 16, height: 16, tintColor: TDU_BLUE }} /></TouchableOpacity> : null}
+                    <Image source={ICONS.checklist} style={{ width: 16, height: 16, tintColor: TDU_BLUE }} resizeMode="contain" /></TouchableOpacity> : null}
                 </View>
 
                 <Text style={[styles.label, { color: C.text3 }]}>ユーザーID</Text>
                 <View style={styles.copyRow}>
                   <TextInput style={[styles.input, { flex: 1, marginBottom: 0, backgroundColor: C.inputBg, color: C.text }]} placeholder="ログインID・メールアドレス等" value={userId} onChangeText={setUserId} autoCapitalize="none" />
                   {userId ? <TouchableOpacity style={styles.copyBtn} onPress={() => { Clipboard.setString(userId); Alert.alert('コピーしました', 'ユーザーIDをコピーしました'); }}>
-                    <Image source={ICONS.checklist} style={{ width: 16, height: 16, tintColor: TDU_BLUE }} /></TouchableOpacity> : null}
+                    <Image source={ICONS.checklist} style={{ width: 16, height: 16, tintColor: TDU_BLUE }} resizeMode="contain" /></TouchableOpacity> : null}
                 </View>
 
                 <Text style={[styles.label, { color: C.text3 }]}>パスワード</Text>
                 <View style={styles.copyRow}>
                   <TextInput style={[styles.input, { flex: 1, marginBottom: 0, backgroundColor: C.inputBg, color: C.text }]} placeholder="パスワード" value={password} onChangeText={setPassword} autoCapitalize="none" secureTextEntry />
                   {password ? <TouchableOpacity style={styles.copyBtn} onPress={() => { Clipboard.setString(password); Alert.alert('コピーしました', 'パスワードをコピーしました'); }}>
-                    <Image source={ICONS.checklist} style={{ width: 16, height: 16, tintColor: TDU_BLUE }} /></TouchableOpacity> : null}
+                    <Image source={ICONS.checklist} style={{ width: 16, height: 16, tintColor: TDU_BLUE }} resizeMode="contain" /></TouchableOpacity> : null}
                 </View>
 
                 {/* ── 通知設定 ── */}
