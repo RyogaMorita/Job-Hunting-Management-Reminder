@@ -11,6 +11,7 @@ import {
 import { Calendar } from 'react-native-calendars';
 import { StatusBar } from 'expo-status-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import SharedGroupPreferences from 'react-native-shared-group-preferences';
 import * as Notifications from 'expo-notifications';
 import * as StoreReview from 'expo-store-review';
 import { SafeAreaProvider, SafeAreaView as SafeAreaViewContext } from 'react-native-safe-area-context';
@@ -538,9 +539,30 @@ export default function App() {
     } catch (e) { Alert.alert('エラー', '読み込み失敗'); }
   };
 
+  const syncWidgetData = async (data: Schedule[]) => {
+    if (Platform.OS !== 'ios') return;
+    try {
+      const widgetData = data.map(s => ({
+        id: s.id,
+        company: s.company,
+        date: s.date,
+        hour: s.hour,
+        minute: s.minute,
+        status: s.status,
+        calendarColor: s.calendarColor ?? null,
+      }));
+      await SharedGroupPreferences.setItem(
+        'widget_schedules_v1',
+        JSON.stringify(widgetData),
+        'group.com.moritaryoga.shukatsukanri'
+      );
+    } catch (_) {}
+  };
+
   const saveSchedules = async (data: Schedule[]) => {
     setSchedules(data);
     await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    await syncWidgetData(data);
   };
   const saveGenres = async (data: Genre[]) => {
     setGenres(data);
