@@ -36,3 +36,5 @@
 - **macOSのバージョンアップは不可**（これ以上上げられない）
 - macOSバージョンに依存する解決策（Xcode最新版へのアップデートなど）は提案しないこと
 - iOSビルドが必要な場合はEAS Build（クラウド）を使う前提で考えること
+- **EASの無料枠が切れた場合は新しいEASアカウントを作成して対応する**
+  - `eas logout` → `eas login`（新アカウント）→ `git checkout -- app.json` → `eas init`
