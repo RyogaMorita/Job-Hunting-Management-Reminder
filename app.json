@@ -2,7 +2,7 @@
   "expo": {
     "name": "就活管理リマインダー",
     "slug": "shukatsu-kanri-reminder",
-    "version": "1.2.0",
+    "version": "1.2.1",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
     "icon": "./assets/icon.png",
