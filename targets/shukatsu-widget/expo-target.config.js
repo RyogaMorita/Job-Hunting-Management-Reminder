@@ -3,7 +3,7 @@ module.exports = {
   type: "widget",
   name: "ShukatsuWidget",
   displayName: "就活管理",
-  deploymentTarget: "16.0",
+  deploymentTarget: "17.0",
   bundleIdentifier: ".shukatsuwidget",
   frameworks: ["SwiftUI", "WidgetKit"],
   colors: {
