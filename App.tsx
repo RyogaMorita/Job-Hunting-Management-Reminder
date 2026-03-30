@@ -55,12 +55,12 @@ const STATUS_OPTIONS_KEY = '@status_options_v1';
 const TDU_BLUE = '#003366';
 const ACCENT = '#1a6bcc';
 
-const DEFAULT_STATUS_OPTIONS = ['検討中', '説明会', 'ES締切', 'ES提出済', 'GD', '1次面接', '2次面接', '最終面接', '内定', '内定辞退', '不合格'];
+const DEFAULT_STATUS_OPTIONS = ['検討中', '説明会', 'ES締切', 'ES提出済', 'GD', '1次面接', '2次面接', '最終面接', '内定', '内定辞退', '不合格', '完了'];
 const STATUS_OPTIONS = DEFAULT_STATUS_OPTIONS; // 後方互換用
 const STATUS_PRIORITY: Record<string, number> = {
-  '内定': 8, '最終面接': 7, '2次面接': 6, '1次面接': 5, 'GD': 4, 'ES提出済': 3, 'ES締切': 2, '説明会': 1, '検討中': 0, '内定辞退': -1, '不合格': -2,
+  '内定': 8, '最終面接': 7, '2次面接': 6, '1次面接': 5, 'GD': 4, 'ES提出済': 3, 'ES締切': 2, '説明会': 1, '検討中': 0, '内定辞退': -1, '不合格': -2, '完了': -3,
 };
-const STATUS_SORT_ORDER = ['内定', '最終面接', '2次面接', '1次面接', 'GD', 'ES提出済', 'ES締切', '説明会', '検討中', '内定辞退', '不合格'];
+const STATUS_SORT_ORDER = ['内定', '最終面接', '2次面接', '1次面接', 'GD', 'ES提出済', 'ES締切', '説明会', '検討中', '内定辞退', '不合格', '完了'];
 // ステータスに対応するチェックリスト自動チェック
 const STATUS_TO_CHECKS: Record<string, string[]> = {
   '説明会': [],
@@ -95,7 +95,7 @@ const RANK_OPTIONS = ['S', 'A', 'B', 'C'];
 const SORT_OPTIONS = ['登録順', '直近順', '五十音', '志望度', 'ステータス', 'ジャンル'];
 const HOURS = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0'));
 const MINUTES = ['00', '15', '30', '45'];
-const INACTIVE = ['内定辞退', '不合格'];
+const INACTIVE = ['内定辞退', '不合格', '完了'];
 
 const statusCardColor = (s: string) =>
   s === '内定' ? '#fff0f0' : INACTIVE.includes(s) ? '#f0f0f0' : '#ffffff';
@@ -157,6 +157,7 @@ const DEFAULT_STATUS_COLORS: StatusColors = {
   '内定': '#E91E8C',
   '内定辞退': '#7F8C8D',
   '不合格': '#BDC3C7',
+  '完了': '#95A5A6',
 };
 
 const COLOR_PALETTE = [
@@ -342,6 +343,22 @@ export default function App() {
   const modalScrollRef = useRef<ScrollView>(null);
   const scrollToMemo = () => setTimeout(() => modalScrollRef.current?.scrollToEnd({ animated: true }), 300);
 
+  const modalTranslateY = useRef(new Animated.Value(0)).current;
+  const modalPanResponder = useRef(PanResponder.create({
+    onMoveShouldSetPanResponder: (_, g) => g.dy > 8 && Math.abs(g.dy) > Math.abs(g.dx),
+    onPanResponderMove: (_, g) => { if (g.dy > 0) modalTranslateY.setValue(g.dy); },
+    onPanResponderRelease: (_, g) => {
+      if (g.dy > 120) {
+        Animated.timing(modalTranslateY, { toValue: 800, duration: 200, useNativeDriver: true }).start(() => {
+          modalTranslateY.setValue(0);
+          closeModal();
+        });
+      } else {
+        Animated.spring(modalTranslateY, { toValue: 0, useNativeDriver: true }).start();
+      }
+    },
+  })).current;
+
   // 登録/編集モーダル
   const [isModalVisible, setModalVisible] = useState(false);
   const [isDetailVisible, setDetailVisible] = useState(false);
@@ -504,9 +521,21 @@ export default function App() {
     try {
       const s = await AsyncStorage.getItem(STORAGE_KEY);
       if (s) {
-        const parsed = JSON.parse(s);
-        setSchedules(parsed);
-        await syncWidgetData(parsed);
+        const parsed: Schedule[] = JSON.parse(s);
+        // 説明会・GDで日付が昨日以前のものを自動完了
+        const today = new Date().toISOString().split('T')[0];
+        const autoCompleted = parsed.map(item =>
+          (['説明会', 'GD'].includes(item.status) && item.date && item.date < today)
+            ? { ...item, status: '完了', calendarColor: item.calendarColor ?? '#95A5A6' }
+            : item
+        );
+        const hasChanged = autoCompleted.some((item, i) => item.status !== parsed[i].status);
+        if (hasChanged) {
+          await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(autoCompleted));
+          await syncWidgetData(autoCompleted);
+        }
+        setSchedules(autoCompleted);
+        if (!hasChanged) await syncWidgetData(autoCompleted);
       }
       const g = await AsyncStorage.getItem(GENRES_KEY);
       if (g) setGenres(JSON.parse(g));
@@ -927,6 +956,14 @@ export default function App() {
     if (idx === -1 || idx >= PROGRESS_FLOW.length - 1) return null;
     return PROGRESS_FLOW[idx + 1];
   };
+  const completeStatus = async (item: Schedule) => {
+    const updated = schedules.map(s => s.id !== item.id ? s : {
+      ...s, status: '完了',
+      calendarColor: s.calendarColor ?? statusColors[s.status] ?? '#95A5A6',
+    });
+    await saveSchedules(updated);
+  };
+
   const advanceStatus = async (item: Schedule) => {
     const ns = nextStatus(item.status);
     if (!ns) return;
@@ -1368,6 +1405,13 @@ export default function App() {
                               style={[styles.nextStatusBtn, { borderColor: sc }]}
                               onPress={() => advanceStatus(item)}>
                               <Text style={[styles.nextStatusBtnText, { color: sc }]} numberOfLines={1}>{ns} →</Text>
+                            </TouchableOpacity>
+                          ) : null}
+                          {['説明会', 'GD'].includes(item.status) && !isInactive ? (
+                            <TouchableOpacity
+                              style={[styles.nextStatusBtn, { borderColor: '#95A5A6' }]}
+                              onPress={() => completeStatus(item)}>
+                              <Text style={[styles.nextStatusBtnText, { color: '#95A5A6' }]}>完了 →</Text>
                             </TouchableOpacity>
                           ) : null}
                         </View>
@@ -1830,7 +1874,10 @@ export default function App() {
         <Modal visible={isModalVisible || isDetailVisible} animationType="slide" transparent onRequestClose={closeModal}>
           <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
             <TouchableOpacity style={StyleSheet.absoluteFillObject} onPress={() => closeModal()} activeOpacity={1} />
-            <View style={[styles.modalContent, { backgroundColor: C.bg }]}>
+            <Animated.View style={[styles.modalContent, { backgroundColor: C.bg, transform: [{ translateY: modalTranslateY }] }]}>
+              <View style={styles.dragHandleContainer} {...modalPanResponder.panHandlers}>
+                <View style={styles.dragHandleBar} />
+              </View>
               <ScrollView ref={modalScrollRef} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
                 <View style={styles.modalHeader}>
                   <Text style={[styles.modalTitle, { color: C.text }]}>{isDetailVisible ? '詳細・編集' : '新規企業登録'}</Text>
@@ -2242,7 +2289,7 @@ export default function App() {
                 </View>
                 <View style={{ height: 20 }} />
               </ScrollView>
-            </View>
+            </Animated.View>
           </KeyboardAvoidingView>
         </Modal>
 
@@ -2455,6 +2502,8 @@ const styles = StyleSheet.create({
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
   modalContent: { backgroundColor: '#fff', borderTopLeftRadius: 25, borderTopRightRadius: 25, padding: 24, maxHeight: '92%' },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
+  dragHandleContainer: { alignItems: 'center', paddingVertical: 8, marginTop: -8, marginHorizontal: -24 },
+  dragHandleBar: { width: 40, height: 4, borderRadius: 2, backgroundColor: '#ccc' },
   modalTitle: { fontSize: 17, fontWeight: 'bold', marginBottom: 4 },
   deleteText: { color: '#e74c3c', fontSize: 13 },
   label: { fontSize: 11, color: '#888', marginBottom: 6, marginTop: 12 },
