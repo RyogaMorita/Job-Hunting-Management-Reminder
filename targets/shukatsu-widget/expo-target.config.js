@@ -10,4 +10,7 @@ module.exports = {
     $widgetBackground: { color: "#031659", darkColor: "#031659" },
     $widgetAccent: { color: "#4A90D9", darkColor: "#4A90D9" },
   },
+  images: {
+    calendarIcon: "../../assets/calendar.png",
+  },
 };

@@ -49,11 +49,15 @@ struct CalendarWidgetView: View {
         let month = cal.component(.month, from: now)
         let year = cal.component(.year, from: now)
         return HStack {
-            Text("\(year)年\(month)月")
+            Image("calendarIcon")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 14, height: 14)
+            Text(String(format: "%d年%d月", year, month))
                 .font(.system(size: 13, weight: .bold))
                 .foregroundColor(.white)
             Spacer()
-            Text("📅 就活管理")
+            Text("就活管理")
                 .font(.system(size: 10))
                 .foregroundColor(.white.opacity(0.6))
         }
@@ -72,11 +76,22 @@ struct CalendarWidgetView: View {
         let weekday = (cal.component(.weekday, from: firstDay) + 5) % 7 // Mon=0
         let range = cal.range(of: .day, in: .month, for: now)!
         let totalDays = range.count
+        let year = cal.component(.year, from: now)
+        let month = cal.component(.month, from: now)
+
+        // 先月の末日を計算
+        let prevMonthLastDay: Int
+        if let prevMonth = cal.date(byAdding: .month, value: -1, to: firstDay) {
+            prevMonthLastDay = cal.range(of: .day, in: .month, for: prevMonth)!.count
+        } else {
+            prevMonthLastDay = 30
+        }
 
         let weekLabels = ["月", "火", "水", "木", "金", "土", "日"]
+        let rows = Int(ceil(Double(weekday + totalDays) / 7.0))
 
         return VStack(spacing: 2) {
-            // Week labels
+            // 曜日ラベル
             HStack(spacing: 0) {
                 ForEach(weekLabels, id: \.self) { label in
                     Text(label)
@@ -86,20 +101,31 @@ struct CalendarWidgetView: View {
                 }
             }
 
-            // Day cells
-            let cells = weekday + totalDays
-            let rows = Int(ceil(Double(cells) / 7.0))
+            // 日付セル
             ForEach(0..<rows, id: \.self) { row in
                 HStack(spacing: 0) {
                     ForEach(0..<7, id: \.self) { col in
                         let idx = row * 7 + col
                         let day = idx - weekday + 1
-                        if day < 1 || day > totalDays {
-                            Color.clear.frame(maxWidth: .infinity, minHeight: 18)
+
+                        if day < 1 {
+                            // 先月の日
+                            let prevDay = prevMonthLastDay + day
+                            Text(String(format: "%d", prevDay))
+                                .font(.system(size: 10))
+                                .foregroundColor(.white.opacity(0.2))
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 20)
+                        } else if day > totalDays {
+                            // 来月の日
+                            let nextDay = day - totalDays
+                            Text(String(format: "%d", nextDay))
+                                .font(.system(size: 10))
+                                .foregroundColor(.white.opacity(0.2))
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 20)
                         } else {
-                            let isoDate = isoDate(year: cal.component(.year, from: now),
-                                                  month: cal.component(.month, from: now),
-                                                  day: day)
+                            let isoDate = String(format: "%04d-%02d-%02d", year, month, day)
                             let isToday = isoDate == today
                             let hasEvent = datesWithSchedules.contains(isoDate)
                             let isSat = col == 5
@@ -111,7 +137,7 @@ struct CalendarWidgetView: View {
                                         .fill(Color(hex: "#4A90D9"))
                                         .frame(width: 18, height: 18)
                                 }
-                                Text("\(day)")
+                                Text(String(format: "%d", day))
                                     .font(.system(size: 10, weight: isToday ? .bold : .regular))
                                     .foregroundColor(
                                         isToday ? .white :
@@ -126,7 +152,8 @@ struct CalendarWidgetView: View {
                                         .offset(y: 7)
                                 }
                             }
-                            .frame(maxWidth: .infinity, minHeight: 18)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 20)
                         }
                     }
                 }
@@ -160,10 +187,6 @@ struct CalendarWidgetView: View {
                     .foregroundColor(.white.opacity(0.5))
             }
         }
-    }
-
-    private func isoDate(year: Int, month: Int, day: Int) -> String {
-        String(format: "%04d-%02d-%02d", year, month, day)
     }
 }
 
