@@ -17,7 +17,7 @@ struct UpcomingProvider: TimelineProvider {
     }
     func getTimeline(in context: Context, completion: @escaping (Timeline<UpcomingEntry>) -> Void) {
         let entry = UpcomingEntry(date: Date(), schedules: AppGroupHelper.upcomingSchedules)
-        let nextUpdate = Calendar.current.startOfDay(for: Calendar.current.date(byAdding: .day, value: 1, to: Date())!)
+        let nextUpdate = Calendar.current.date(byAdding: .minute, value: 30, to: Date())!
         completion(Timeline(entries: [entry], policy: .after(nextUpdate)))
     }
 }

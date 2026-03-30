@@ -5,6 +5,7 @@ import SwiftUI
 struct ShukatsuWidgetBundle: WidgetBundle {
     var body: some Widget {
         CalendarWidget()
+        WeekWidget()
         UpcomingWidget()
         ListWidget()
     }

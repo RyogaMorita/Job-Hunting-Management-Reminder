@@ -345,10 +345,11 @@ export default function App() {
 
   const modalTranslateY = useRef(new Animated.Value(0)).current;
   const modalPanResponder = useRef(PanResponder.create({
-    onMoveShouldSetPanResponder: (_, g) => g.dy > 8 && Math.abs(g.dy) > Math.abs(g.dx),
+    onStartShouldSetPanResponder: () => true,
+    onMoveShouldSetPanResponder: (_, g) => g.dy > 5 && Math.abs(g.dy) > Math.abs(g.dx),
     onPanResponderMove: (_, g) => { if (g.dy > 0) modalTranslateY.setValue(g.dy); },
     onPanResponderRelease: (_, g) => {
-      if (g.dy > 120) {
+      if (g.dy > 80 || g.vy > 0.8) {
         Animated.timing(modalTranslateY, { toValue: 800, duration: 200, useNativeDriver: true }).start(() => {
           modalTranslateY.setValue(0);
           closeModal();
@@ -1115,6 +1116,7 @@ export default function App() {
                         firstDay={weekStart}
                         markedDates={markedDates}
                         hideArrows={true}
+                        showSixWeeks={true}
                         theme={{
                           todayTextColor: ACCENT,
                           selectedDayBackgroundColor: TDU_BLUE,
