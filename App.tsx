@@ -7,6 +7,7 @@ import {
   StyleSheet, Text, View, TouchableOpacity, ScrollView,
   SafeAreaView, Modal, TextInput, Alert, KeyboardAvoidingView,
   Platform, Switch, Animated, PanResponder, Linking, Clipboard, Image, Dimensions,
+  NativeModules, AppState,
 } from 'react-native';
 import { Calendar } from 'react-native-calendars';
 import { StatusBar } from 'expo-status-bar';
@@ -423,6 +424,17 @@ export default function App() {
 
   useEffect(() => { loadAll(); }, []);
 
+  // フォアグラウンド復帰時にウィジェットデータを再同期
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active') {
+        AsyncStorage.getItem(STORAGE_KEY).then(s => {
+          if (s) syncWidgetData(JSON.parse(s));
+        }).catch(() => {});
+      }
+    });
+    return () => sub.remove();
+  }, []);
 
   // ─── IAP初期化（近日公開のためコメントアウト中） ────────────
   // useEffect(() => {
@@ -590,7 +602,11 @@ export default function App() {
         JSON.stringify(widgetData),
         'group.com.moritaryoga.shukatsukanri'
       );
-    } catch (_) {}
+      // ウィジェットのタイムラインを即時リロード
+      NativeModules.WidgetKitModule?.reloadAllTimelines?.();
+    } catch (e) {
+      console.warn('[WidgetSync] failed:', e);
+    }
   };
 
   const saveSchedules = async (data: Schedule[]) => {

@@ -58,7 +58,8 @@
       ],
       "react-native-iap",
       "expo-tracking-transparency",
-      "@bacons/apple-targets"
+      "@bacons/apple-targets",
+      "./plugins/withWidgetKitReload"
     ]
   }
 }
