@@ -503,7 +503,11 @@ export default function App() {
   const loadAll = async () => {
     try {
       const s = await AsyncStorage.getItem(STORAGE_KEY);
-      if (s) setSchedules(JSON.parse(s));
+      if (s) {
+        const parsed = JSON.parse(s);
+        setSchedules(parsed);
+        await syncWidgetData(parsed);
+      }
       const g = await AsyncStorage.getItem(GENRES_KEY);
       if (g) setGenres(JSON.parse(g));
       const sort = await AsyncStorage.getItem('@sort_type');
