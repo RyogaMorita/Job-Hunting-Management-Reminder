@@ -19,8 +19,19 @@ struct AppGroupHelper {
     static let schedulesKey = "widget_schedules_v1"
 
     static func loadSchedules() -> [WidgetSchedule] {
-        guard let defaults = UserDefaults(suiteName: suiteName),
-              let data = defaults.data(forKey: schedulesKey),
+        guard let defaults = UserDefaults(suiteName: suiteName) else { return [] }
+        // react-native-shared-group-preferences はStringとして保存する
+        let jsonString: String?
+        if let s = defaults.string(forKey: schedulesKey) {
+            jsonString = s
+        } else if let d = defaults.data(forKey: schedulesKey),
+                  let s = String(data: d, encoding: .utf8) {
+            jsonString = s
+        } else {
+            return []
+        }
+        guard let str = jsonString,
+              let data = str.data(using: .utf8),
               let schedules = try? JSONDecoder().decode([WidgetSchedule].self, from: data)
         else { return [] }
         return schedules
