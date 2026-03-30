@@ -6,6 +6,9 @@ module.exports = {
   deploymentTarget: "17.0",
   bundleIdentifier: ".shukatsuwidget",
   frameworks: ["SwiftUI", "WidgetKit"],
+  entitlements: {
+    "com.apple.security.application-groups": ["group.com.moritaryoga.shukatsukanri"],
+  },
   colors: {
     $widgetBackground: { color: "#031659", darkColor: "#031659" },
     $widgetAccent: { color: "#4A90D9", darkColor: "#4A90D9" },

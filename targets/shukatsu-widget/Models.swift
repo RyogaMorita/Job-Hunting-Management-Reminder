@@ -46,7 +46,7 @@ struct AppGroupHelper {
     }
 
     static var activeSchedules: [WidgetSchedule] {
-        let inactive = ["内定辞退", "不合格"]
+        let inactive = ["内定", "内定辞退", "不合格"]
         return loadSchedules()
             .filter { !inactive.contains($0.status) }
             .sorted { $0.company < $1.company }
@@ -89,6 +89,7 @@ let statusColors: [String: String] = [
     "内定": "#E91E8C",
     "内定辞退": "#7F8C8D",
     "不合格": "#BDC3C7",
+    "完了": "#95A5A6",
 ]
 
 func colorForStatus(_ status: String, override hex: String? = nil) -> Color {

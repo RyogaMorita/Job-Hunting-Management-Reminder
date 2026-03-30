@@ -602,8 +602,14 @@ export default function App() {
         JSON.stringify(widgetData),
         'group.com.moritaryoga.shukatsukanri'
       );
+      console.log('[WidgetSync] App Group write OK, items:', widgetData.length);
       // ウィジェットのタイムラインを即時リロード
-      NativeModules.WidgetKitModule?.reloadAllTimelines?.();
+      if (NativeModules.WidgetKitModule) {
+        NativeModules.WidgetKitModule.reloadAllTimelines();
+        console.log('[WidgetSync] reloadAllTimelines called');
+      } else {
+        console.warn('[WidgetSync] WidgetKitModule not found (native module not registered)');
+      }
     } catch (e) {
       console.warn('[WidgetSync] failed:', e);
     }
