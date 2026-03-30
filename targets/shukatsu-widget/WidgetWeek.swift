@@ -140,18 +140,26 @@ struct WeekWidgetView: View {
                     }
                     .frame(width: 20, height: 20)
 
-                    // 予定ドット（最大3件）
-                    VStack(spacing: 1) {
-                        ForEach(Array(items.prefix(3).enumerated()), id: \.offset) { _, s in
-                            Circle()
-                                .fill(colorForStatus(s.status, override: s.calendarColor))
-                                .frame(width: 5, height: 5)
+                    // 企業名ラベル（最大2件）
+                    VStack(spacing: 2) {
+                        ForEach(Array(items.prefix(2).enumerated()), id: \.offset) { _, s in
+                            Text(s.company)
+                                .font(.system(size: 7, weight: .medium))
+                                .foregroundColor(colorForStatus(s.status, override: s.calendarColor))
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                                .padding(.horizontal, 3)
+                                .padding(.vertical, 1)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 2)
+                                        .fill(colorForStatus(s.status, override: s.calendarColor).opacity(0.2))
+                                )
                         }
                         if items.isEmpty {
-                            Color.clear.frame(width: 5, height: 5)
+                            Color.clear.frame(height: 14)
                         }
                     }
-                    .frame(height: 21)
+                    .frame(maxWidth: .infinity)
                 }
                 .frame(maxWidth: .infinity)
             }

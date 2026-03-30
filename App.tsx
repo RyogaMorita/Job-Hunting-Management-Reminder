@@ -346,17 +346,16 @@ export default function App() {
 
   const modalTranslateY = useRef(new Animated.Value(0)).current;
   const modalPanResponder = useRef(PanResponder.create({
-    onStartShouldSetPanResponder: () => true,
-    onMoveShouldSetPanResponder: (_, g) => g.dy > 5 && Math.abs(g.dy) > Math.abs(g.dx),
+    onMoveShouldSetPanResponder: (_, g) => g.dy > 3 && Math.abs(g.dy) > Math.abs(g.dx),
     onPanResponderMove: (_, g) => { if (g.dy > 0) modalTranslateY.setValue(g.dy); },
     onPanResponderRelease: (_, g) => {
-      if (g.dy > 80 || g.vy > 0.8) {
+      if (g.dy > 80 || g.vy > 0.5) {
         Animated.timing(modalTranslateY, { toValue: 800, duration: 200, useNativeDriver: true }).start(() => {
           modalTranslateY.setValue(0);
           closeModal();
         });
       } else {
-        Animated.spring(modalTranslateY, { toValue: 0, useNativeDriver: true }).start();
+        modalTranslateY.setValue(0);
       }
     },
   })).current;
@@ -707,6 +706,20 @@ export default function App() {
   }, [deduplicatedSchedules, searchQuery, filterGenreIds, filterStatuses, sortType, sortAsc]); // ② 正しい依存配列
 
   const filteredByDate = useMemo(() => schedules.filter(s => s.date && s.date === selectedDate), [schedules, selectedDate]);
+
+  // カレンダーの行数を計算（前月・当月・翌月の最大行数でペイン高さを統一）
+  const maxCalRows = useMemo(() => {
+    const calcRows = (year: number, month: number) => {
+      const firstDay = new Date(year, month, 1).getDay();
+      const adjusted = (firstDay - weekStart + 7) % 7;
+      const daysInMonth = new Date(year, month + 1, 0).getDate();
+      return Math.ceil((adjusted + daysInMonth) / 7);
+    };
+    return Math.max(...[-1, 0, 1].map(offset => {
+      const d = new Date(currentCalDate.getFullYear(), currentCalDate.getMonth() + offset, 1);
+      return calcRows(d.getFullYear(), d.getMonth());
+    }));
+  }, [currentCalDate, weekStart]);
 
   // ─── 保存ロジック ──────────────────────────────────────────────
   const handleSave = async () => {
@@ -1123,7 +1136,7 @@ export default function App() {
                   }
                 }}
                 contentOffset={{ x: screenWidth, y: 0 }}
-                style={{ flexGrow: 0 }}
+                style={{ flexGrow: 0, height: maxCalRows * 44 }}
               >
                 {[-1, 0, 1].map(offset => {
                   const d = new Date(currentCalDate.getFullYear(), currentCalDate.getMonth() + offset, 1);
@@ -1138,7 +1151,6 @@ export default function App() {
                         firstDay={weekStart}
                         markedDates={markedDates}
                         hideArrows={true}
-                        showSixWeeks={true}
                         theme={{
                           todayTextColor: ACCENT,
                           selectedDayBackgroundColor: TDU_BLUE,
