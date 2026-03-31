@@ -347,7 +347,8 @@ export default function App() {
   const modalTranslateY = useRef(new Animated.Value(0)).current;
   const modalScrollY = useRef(0);
   const modalPanResponder = useRef(PanResponder.create({
-    onMoveShouldSetPanResponderCapture: (_, g) => g.dy > 10 && Math.abs(g.dy) > Math.abs(g.dx) && modalScrollY.current <= 0,
+    onStartShouldSetPanResponder: () => true,
+    onMoveShouldSetPanResponder: (_, g) => g.dy > 3 && Math.abs(g.dy) > Math.abs(g.dx),
     onPanResponderMove: (_, g) => { if (g.dy > 0) modalTranslateY.setValue(g.dy); },
     onPanResponderRelease: (_, g) => {
       if (g.dy > 80 || g.vy > 0.5) {
@@ -1927,8 +1928,8 @@ export default function App() {
         <Modal visible={isModalVisible || isDetailVisible} animationType="slide" transparent onRequestClose={closeModal} onShow={() => { modalScrollY.current = 0; }}>
           <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
             <TouchableOpacity style={StyleSheet.absoluteFillObject} onPress={() => closeModal()} activeOpacity={1} />
-            <Animated.View style={[styles.modalContent, { backgroundColor: C.bg, transform: [{ translateY: modalTranslateY }] }]} {...modalPanResponder.panHandlers}>
-              <View style={styles.dragHandleContainer}>
+            <Animated.View style={[styles.modalContent, { backgroundColor: C.bg, transform: [{ translateY: modalTranslateY }] }]}>
+              <View style={styles.dragHandleContainer} {...modalPanResponder.panHandlers}>
                 <View style={styles.dragHandleBar} />
               </View>
               <ScrollView ref={modalScrollRef} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" onScroll={(e) => { modalScrollY.current = e.nativeEvent.contentOffset.y; }} scrollEventThrottle={16}>

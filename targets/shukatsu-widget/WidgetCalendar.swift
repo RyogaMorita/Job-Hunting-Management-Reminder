@@ -70,6 +70,12 @@ struct CalendarWidgetView: View {
         let now = Date()
         let today = AppGroupHelper.isoToday()
         let datesWithSchedules = Set(entry.schedules.map { $0.date })
+        var firstSchedulePerDate: [String: WidgetSchedule] = [:]
+        for s in entry.schedules {
+            if firstSchedulePerDate[s.date] == nil {
+                firstSchedulePerDate[s.date] = s
+            }
+        }
 
         let comps = cal.dateComponents([.year, .month], from: now)
         let firstDay = cal.date(from: comps)!
@@ -145,9 +151,9 @@ struct CalendarWidgetView: View {
                                         isSun ? Color(hex: "#E74C3C") :
                                         .white
                                     )
-                                if hasEvent && !isToday {
+                                if hasEvent && !isToday, let s = firstSchedulePerDate[isoDate] {
                                     Circle()
-                                        .fill(Color(hex: "#E91E8C"))
+                                        .fill(colorForStatus(s.status, override: s.calendarColor))
                                         .frame(width: 4, height: 4)
                                         .offset(y: 7)
                                 }
