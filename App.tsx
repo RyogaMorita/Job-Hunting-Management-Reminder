@@ -345,8 +345,9 @@ export default function App() {
   const scrollToMemo = () => setTimeout(() => modalScrollRef.current?.scrollToEnd({ animated: true }), 300);
 
   const modalTranslateY = useRef(new Animated.Value(0)).current;
+  const modalScrollY = useRef(0);
   const modalPanResponder = useRef(PanResponder.create({
-    onMoveShouldSetPanResponder: (_, g) => g.dy > 3 && Math.abs(g.dy) > Math.abs(g.dx),
+    onMoveShouldSetPanResponder: (_, g) => g.dy > 5 && Math.abs(g.dy) > Math.abs(g.dx) && modalScrollY.current <= 0,
     onPanResponderMove: (_, g) => { if (g.dy > 0) modalTranslateY.setValue(g.dy); },
     onPanResponderRelease: (_, g) => {
       if (g.dy > 80 || g.vy > 0.5) {
@@ -594,7 +595,7 @@ export default function App() {
         hour: s.hour,
         minute: s.minute,
         status: s.status,
-        calendarColor: s.calendarColor ?? null,
+        calendarColor: s.calendarColor ?? statusColors[s.status] ?? null,
       }));
       await SharedGroupPreferences.setItem(
         'widget_schedules_v1',
@@ -690,7 +691,17 @@ export default function App() {
 
     const ro: Record<string, number> = { S: 0, A: 1, B: 2, C: 3 };
     switch (sortType) {
-      case '直近順': list.sort((a, b) => a.date.localeCompare(b.date)); break;
+      case '直近順': {
+        const today = new Date().toISOString().slice(0, 10);
+        list.sort((a, b) => {
+          const aPast = a.date < today;
+          const bPast = b.date < today;
+          if (aPast !== bPast) return aPast ? 1 : -1;
+          if (aPast) return b.date.localeCompare(a.date);
+          return a.date.localeCompare(b.date);
+        });
+        break;
+      }
       case '五十音': list.sort((a, b) => a.company.localeCompare(b.company, 'ja')); break;
       case '志望度': list.sort((a, b) => (ro[a.rank] ?? 3) - (ro[b.rank] ?? 3)); break;
       case 'ステータス':
@@ -701,7 +712,7 @@ export default function App() {
         }); break;
       case 'ジャンル': list.sort((a, b) => a.genreId.localeCompare(b.genreId)); break;
     }
-    if (!sortAsc) list.reverse();
+    if (!sortAsc && sortType !== '直近順') list.reverse();
     return list;
   }, [deduplicatedSchedules, searchQuery, filterGenreIds, filterStatuses, sortType, sortAsc]); // ② 正しい依存配列
 
@@ -1136,7 +1147,7 @@ export default function App() {
                   }
                 }}
                 contentOffset={{ x: screenWidth, y: 0 }}
-                style={{ flexGrow: 0, height: maxCalRows * 44 }}
+                style={{ flexGrow: 0, height: maxCalRows * 52 }}
               >
                 {[-1, 0, 1].map(offset => {
                   const d = new Date(currentCalDate.getFullYear(), currentCalDate.getMonth() + offset, 1);
@@ -1910,11 +1921,11 @@ export default function App() {
         <Modal visible={isModalVisible || isDetailVisible} animationType="slide" transparent onRequestClose={closeModal}>
           <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
             <TouchableOpacity style={StyleSheet.absoluteFillObject} onPress={() => closeModal()} activeOpacity={1} />
-            <Animated.View style={[styles.modalContent, { backgroundColor: C.bg, transform: [{ translateY: modalTranslateY }] }]}>
-              <View style={styles.dragHandleContainer} {...modalPanResponder.panHandlers}>
+            <Animated.View style={[styles.modalContent, { backgroundColor: C.bg, transform: [{ translateY: modalTranslateY }] }]} {...modalPanResponder.panHandlers}>
+              <View style={styles.dragHandleContainer}>
                 <View style={styles.dragHandleBar} />
               </View>
-              <ScrollView ref={modalScrollRef} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+              <ScrollView ref={modalScrollRef} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" onScroll={(e) => { modalScrollY.current = e.nativeEvent.contentOffset.y; }} scrollEventThrottle={16}>
                 <View style={styles.modalHeader}>
                   <Text style={[styles.modalTitle, { color: C.text }]}>{isDetailVisible ? '詳細・編集' : '新規企業登録'}</Text>
                   {isDetailVisible && (
