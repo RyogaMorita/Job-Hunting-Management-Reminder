@@ -347,7 +347,7 @@ export default function App() {
   const modalTranslateY = useRef(new Animated.Value(0)).current;
   const modalScrollY = useRef(0);
   const modalPanResponder = useRef(PanResponder.create({
-    onMoveShouldSetPanResponder: (_, g) => g.dy > 5 && Math.abs(g.dy) > Math.abs(g.dx) && modalScrollY.current <= 0,
+    onMoveShouldSetPanResponderCapture: (_, g) => g.dy > 10 && Math.abs(g.dy) > Math.abs(g.dx) && modalScrollY.current <= 0,
     onPanResponderMove: (_, g) => { if (g.dy > 0) modalTranslateY.setValue(g.dy); },
     onPanResponderRelease: (_, g) => {
       if (g.dy > 80 || g.vy > 0.5) {
@@ -532,6 +532,13 @@ export default function App() {
 
   const loadAll = async () => {
     try {
+      // statusColorsを先に読み込んでsyncWidgetDataに渡せるようにする
+      const sc = await AsyncStorage.getItem(STATUS_COLORS_KEY);
+      const loadedColors: StatusColors = sc
+        ? { ...DEFAULT_STATUS_COLORS, ...JSON.parse(sc) }
+        : { ...DEFAULT_STATUS_COLORS };
+      if (sc) setStatusColors(loadedColors);
+
       const s = await AsyncStorage.getItem(STORAGE_KEY);
       if (s) {
         const parsed: Schedule[] = JSON.parse(s);
@@ -545,10 +552,10 @@ export default function App() {
         const hasChanged = autoCompleted.some((item, i) => item.status !== parsed[i].status);
         if (hasChanged) {
           await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(autoCompleted));
-          await syncWidgetData(autoCompleted);
+          await syncWidgetData(autoCompleted, loadedColors);
         }
         setSchedules(autoCompleted);
-        if (!hasChanged) await syncWidgetData(autoCompleted);
+        if (!hasChanged) await syncWidgetData(autoCompleted, loadedColors);
       }
       const g = await AsyncStorage.getItem(GENRES_KEY);
       if (g) setGenres(JSON.parse(g));
@@ -560,8 +567,6 @@ export default function App() {
       if (nd) setNotifyDays(nd);
       const ws = await AsyncStorage.getItem('@week_start');
       if (ws !== null) setWeekStart(JSON.parse(ws));
-      const sc = await AsyncStorage.getItem(STATUS_COLORS_KEY);
-      if (sc) setStatusColors({ ...DEFAULT_STATUS_COLORS, ...JSON.parse(sc) });
       const so = await AsyncStorage.getItem(STATUS_OPTIONS_KEY);
       if (so) { setStatusOptions(JSON.parse(so)); }
 
@@ -585,9 +590,10 @@ export default function App() {
     } catch (e) { Alert.alert('エラー', '読み込み失敗'); }
   };
 
-  const syncWidgetData = async (data: Schedule[]) => {
+  const syncWidgetData = async (data: Schedule[], overrideColors?: StatusColors) => {
     if (Platform.OS !== 'ios') return;
     try {
+      const colors = overrideColors ?? statusColors;
       const widgetData = data.map(s => ({
         id: s.id,
         company: s.company,
@@ -595,7 +601,7 @@ export default function App() {
         hour: s.hour,
         minute: s.minute,
         status: s.status,
-        calendarColor: s.calendarColor ?? statusColors[s.status] ?? null,
+        calendarColor: s.calendarColor ?? colors[s.status] ?? null,
       }));
       await SharedGroupPreferences.setItem(
         'widget_schedules_v1',
