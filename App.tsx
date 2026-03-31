@@ -1918,7 +1918,7 @@ export default function App() {
         </View>
 
         {/* ── 企業登録/編集モーダル ── */}
-        <Modal visible={isModalVisible || isDetailVisible} animationType="slide" transparent onRequestClose={closeModal}>
+        <Modal visible={isModalVisible || isDetailVisible} animationType="slide" transparent onRequestClose={closeModal} onShow={() => { modalScrollY.current = 0; }}>
           <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
             <TouchableOpacity style={StyleSheet.absoluteFillObject} onPress={() => closeModal()} activeOpacity={1} />
             <Animated.View style={[styles.modalContent, { backgroundColor: C.bg, transform: [{ translateY: modalTranslateY }] }]} {...modalPanResponder.panHandlers}>
