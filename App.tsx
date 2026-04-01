@@ -344,7 +344,10 @@ export default function App() {
   const modalScrollRef = useRef<ScrollView>(null);
   const scrollToMemo = () => setTimeout(() => modalScrollRef.current?.scrollToEnd({ animated: true }), 300);
 
-  const modalTranslateY = useRef(new Animated.Value(0)).current;
+  // ─── アニメーション値 ────────────────────────────────────────
+  const tabIndicatorX = useRef(new Animated.Value(0)).current;
+  const fabScale = useRef(new Animated.Value(1)).current;
+  const modalTranslateY = useRef(new Animated.Value(600)).current;
   const modalScrollY = useRef(0);
   const modalPanResponder = useRef(PanResponder.create({
     onStartShouldSetPanResponder: () => true,
@@ -424,6 +427,22 @@ export default function App() {
   const [wheelDay, setWheelDay] = useState(new Date().getDate());
 
   useEffect(() => { loadAll(); }, []);
+
+  // タブ切り替えインジケーターアニメーション
+  useEffect(() => {
+    const idx = ['calendar', 'list', 'settings'].indexOf(activeTab);
+    Animated.spring(tabIndicatorX, {
+      toValue: idx,
+      tension: 80, friction: 12, useNativeDriver: true,
+    }).start();
+  }, [activeTab]);
+
+  // リストフェードイン（フィルター/ソート変更時）
+  const listFadeAnim = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    listFadeAnim.setValue(0);
+    Animated.timing(listFadeAnim, { toValue: 1, duration: 220, useNativeDriver: true }).start();
+  }, [filteredSorted]);
 
   // フォアグラウンド復帰時にウィジェットデータを再同期
   useEffect(() => {
@@ -547,16 +566,21 @@ export default function App() {
         const today = new Date().toISOString().split('T')[0];
         const autoCompleted = parsed.map(item =>
           (['説明会', 'GD'].includes(item.status) && item.date && item.date < today)
-            ? { ...item, status: '完了', calendarColor: item.calendarColor ?? '#95A5A6' }
+            ? { ...item, status: '完了', calendarColor: loadedColors['完了'] ?? '#95A5A6' }
             : item
         );
-        const hasChanged = autoCompleted.some((item, i) => item.status !== parsed[i].status);
+        // calendarColorを現在のステータス色に合わせてマイグレーション（古いデータ対応）
+        const migrated = autoCompleted.map(item => ({
+          ...item,
+          calendarColor: loadedColors[item.status] ?? item.calendarColor ?? '#95A5A6',
+        }));
+        const hasChanged = migrated.some((item, i) => item.status !== parsed[i].status || item.calendarColor !== parsed[i].calendarColor);
         if (hasChanged) {
-          await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(autoCompleted));
-          await syncWidgetData(autoCompleted, loadedColors);
+          await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(migrated));
+          await syncWidgetData(migrated, loadedColors);
         }
-        setSchedules(autoCompleted);
-        if (!hasChanged) await syncWidgetData(autoCompleted, loadedColors);
+        setSchedules(migrated);
+        if (!hasChanged) await syncWidgetData(migrated, loadedColors);
       }
       const g = await AsyncStorage.getItem(GENRES_KEY);
       if (g) setGenres(JSON.parse(g));
@@ -1013,7 +1037,7 @@ export default function App() {
   const completeStatus = async (item: Schedule) => {
     const updated = schedules.map(s => s.id !== item.id ? s : {
       ...s, status: '完了',
-      calendarColor: s.calendarColor ?? statusColors[s.status] ?? '#95A5A6',
+      calendarColor: statusColors['完了'] ?? '#95A5A6',
     });
     await saveSchedules(updated);
   };
@@ -1024,11 +1048,9 @@ export default function App() {
     const autoChecks = STATUS_TO_CHECKS[ns] ?? [];
     const initCL: Record<string, boolean> = { ...(item.checklist ?? {}) };
     CHECKLIST_STEPS.forEach(step => { if (autoChecks.includes(step)) initCL[step] = true; });
-    // 常に同一エントリのstatusだけ更新（新エントリ作成しない → 古いデータが残らない）
-    // calendarColorが未設定の場合は現在のステータス色で固定（以降変わらない）
     const updated = schedules.map(s => s.id !== item.id ? s : {
       ...s, status: ns, checklist: initCL,
-      calendarColor: s.calendarColor ?? statusColors[s.status] ?? '#95A5A6',
+      calendarColor: statusColors[ns] ?? '#95A5A6',
     });
     await saveSchedules(updated);
   };
@@ -1304,8 +1326,13 @@ export default function App() {
               )}
             </View>
             {/* カレンダータブのFAB */}
-            <TouchableOpacity style={styles.fab} onPress={() => { openAdd(); countAction(); }}>
-              <Text style={styles.fabText}>＋</Text>
+            <TouchableOpacity
+              style={styles.fab}
+              onPress={() => { openAdd(); countAction(); }}
+              onPressIn={() => Animated.spring(fabScale, { toValue: 0.85, useNativeDriver: true, tension: 300, friction: 10 }).start()}
+              onPressOut={() => Animated.spring(fabScale, { toValue: 1, useNativeDriver: true, tension: 300, friction: 10 }).start()}
+              activeOpacity={1}>
+              <Animated.Text style={[styles.fabText, { transform: [{ scale: fabScale }] }]}>＋</Animated.Text>
             </TouchableOpacity>
           </View>
         )}
@@ -1378,7 +1405,7 @@ export default function App() {
 
             <Text style={{ paddingHorizontal: 16, fontSize: 11, color: '#999', marginBottom: 4 }}>{filteredSorted.length}社</Text>
 
-            <ScrollView style={{ flex: 1, paddingHorizontal: 16 }}>
+            <Animated.ScrollView style={{ flex: 1, paddingHorizontal: 16, opacity: listFadeAnim }}>
               {filteredSorted.length === 0
                 ? <Text style={[styles.emptyText, { color: C.text3 }]}>該当する企業がありません</Text>
                 : filteredSorted.map(item => {
@@ -1475,9 +1502,14 @@ export default function App() {
                 })
               }
               <View style={{ height: 80 }} />
-            </ScrollView>
-            <TouchableOpacity style={styles.fab} onPress={() => { openAdd(); countAction(); }}>
-              <Text style={styles.fabText}>＋</Text>
+            </Animated.ScrollView>
+            <TouchableOpacity
+              style={styles.fab}
+              onPress={() => { openAdd(); countAction(); }}
+              onPressIn={() => Animated.spring(fabScale, { toValue: 0.85, useNativeDriver: true, tension: 300, friction: 10 }).start()}
+              onPressOut={() => Animated.spring(fabScale, { toValue: 1, useNativeDriver: true, tension: 300, friction: 10 }).start()}
+              activeOpacity={1}>
+              <Animated.Text style={[styles.fabText, { transform: [{ scale: fabScale }] }]}>＋</Animated.Text>
             </TouchableOpacity>
           </View>
         )}
@@ -1898,7 +1930,23 @@ export default function App() {
         </Modal>
 
         {/* タブバー */}
-        <View style={[styles.tabBar, { backgroundColor: C.tabBar, borderTopColor: C.border }]}>
+        <View style={[styles.tabBar, { backgroundColor: C.tabBar, borderTopColor: C.border }]}
+          onLayout={(e) => {
+            const w = e.nativeEvent.layout.width;
+            tabIndicatorX.setValue(['calendar', 'list', 'settings'].indexOf(activeTab) * (w / 3));
+          }}>
+          {/* スライドインジケーター */}
+          {screenWidth > 0 && (() => {
+            const activeColor = isDark ? '#6ea8fe' : TDU_BLUE;
+            const tabW = screenWidth / 3;
+            return (
+              <Animated.View style={{
+                position: 'absolute', top: 0, left: 0,
+                width: tabW, height: 2, backgroundColor: activeColor,
+                transform: [{ translateX: tabIndicatorX.interpolate({ inputRange: [0, 1, 2], outputRange: [0, tabW, tabW * 2] }) }],
+              }} />
+            );
+          })()}
           {(['calendar', 'list', 'settings'] as TabType[]).map((tab, i) => {
             const imgSrcs = [
               require('./assets/tab_calendar.png'),
@@ -1925,7 +1973,11 @@ export default function App() {
         </View>
 
         {/* ── 企業登録/編集モーダル ── */}
-        <Modal visible={isModalVisible || isDetailVisible} animationType="slide" transparent onRequestClose={closeModal} onShow={() => { modalScrollY.current = 0; }}>
+        <Modal visible={isModalVisible || isDetailVisible} animationType="none" transparent onRequestClose={closeModal} onShow={() => {
+          modalScrollY.current = 0;
+          modalTranslateY.setValue(600);
+          Animated.spring(modalTranslateY, { toValue: 0, tension: 65, friction: 11, useNativeDriver: true }).start();
+        }}>
           <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
             <TouchableOpacity style={StyleSheet.absoluteFillObject} onPress={() => closeModal()} activeOpacity={1} />
             <Animated.View style={[styles.modalContent, { backgroundColor: C.bg, transform: [{ translateY: modalTranslateY }] }]}>
