@@ -749,18 +749,12 @@ export default function App() {
 
   const filteredByDate = useMemo(() => schedules.filter(s => s.date && s.date === selectedDate), [schedules, selectedDate]);
 
-  // カレンダーの行数を計算（前月・当月・翌月の最大行数でペイン高さを統一）
+  // カレンダーの行数を計算（現在月のみ）
   const maxCalRows = useMemo(() => {
-    const calcRows = (year: number, month: number) => {
-      const firstDay = new Date(year, month, 1).getDay();
-      const adjusted = (firstDay - weekStart + 7) % 7;
-      const daysInMonth = new Date(year, month + 1, 0).getDate();
-      return Math.ceil((adjusted + daysInMonth) / 7);
-    };
-    return Math.max(...[-1, 0, 1].map(offset => {
-      const d = new Date(currentCalDate.getFullYear(), currentCalDate.getMonth() + offset, 1);
-      return calcRows(d.getFullYear(), d.getMonth());
-    }));
+    const firstDay = new Date(currentCalDate.getFullYear(), currentCalDate.getMonth(), 1).getDay();
+    const adjusted = (firstDay - weekStart + 7) % 7;
+    const daysInMonth = new Date(currentCalDate.getFullYear(), currentCalDate.getMonth() + 1, 0).getDate();
+    return Math.ceil((adjusted + daysInMonth) / 7);
   }, [currentCalDate, weekStart]);
 
   // ─── 保存ロジック ──────────────────────────────────────────────
