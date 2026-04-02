@@ -204,6 +204,94 @@ function SwipeableRow({ children, onDelete }: { children: React.ReactNode; onDel
   );
 }
 
+// ─── ステータスステッパー ──────────────────────────────────────────
+
+const STEPPER_STAGES = ['検討中', 'ES締切', '1次面接', '最終面接', '内定'];
+const STATUS_TO_STAGE: Record<string, number> = {
+  '検討中': 0, '説明会': 0, 'GD': 0,
+  'ES締切': 1, 'ES提出済': 1,
+  '1次面接': 2,
+  '2次面接': 3, '最終面接': 3,
+  '内定': 4,
+};
+
+function StatusStepper({ status, statusColors, isDark }: { status: string; statusColors: Record<string, string>; isDark: boolean }) {
+  const currentStage = STATUS_TO_STAGE[status] ?? 0;
+  const dotScales = useRef(STEPPER_STAGES.map(() => new Animated.Value(0))).current;
+  const barAnims = useRef([0, 1, 2, 3].map(() => new Animated.Value(0))).current;
+  const labelOpacities = useRef(STEPPER_STAGES.map(() => new Animated.Value(0))).current;
+  const labelTranslates = useRef(STEPPER_STAGES.map(() => new Animated.Value(8))).current;
+
+  useEffect(() => {
+    dotScales.forEach(d => d.setValue(0));
+    barAnims.forEach(b => b.setValue(0));
+    labelOpacities.forEach(l => l.setValue(0));
+    labelTranslates.forEach(l => l.setValue(8));
+
+    const seq: Animated.CompositeAnimation[] = [];
+    for (let i = 0; i <= Math.min(currentStage, STEPPER_STAGES.length - 1); i++) {
+      const isActive = i === currentStage;
+      seq.push(Animated.parallel([
+        isActive
+          ? Animated.sequence([
+              Animated.timing(dotScales[i], { toValue: 1.4, duration: 120, useNativeDriver: true }),
+              Animated.spring(dotScales[i], { toValue: 1, tension: 400, friction: 10, useNativeDriver: true }),
+            ])
+          : Animated.spring(dotScales[i], { toValue: 1, tension: 200, friction: 8, useNativeDriver: true }),
+        Animated.timing(labelOpacities[i], { toValue: 1, duration: 200, useNativeDriver: true }),
+        Animated.timing(labelTranslates[i], { toValue: 0, duration: 200, useNativeDriver: true }),
+      ]));
+      if (i < currentStage && i < 4) {
+        seq.push(Animated.timing(barAnims[i], { toValue: 1, duration: 320, useNativeDriver: false }));
+      }
+    }
+    Animated.sequence(seq).start();
+  }, [status]);
+
+  const stageColor = (i: number) => statusColors[STEPPER_STAGES[i]] ?? '#95A5A6';
+  const inactiveColor = isDark ? '#444' : '#ddd';
+
+  return (
+    <View style={{ marginTop: 4, marginBottom: 16 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+        {STEPPER_STAGES.map((stage, i) => {
+          const done = i < currentStage;
+          const active = i === currentStage;
+          const color = done || active ? stageColor(i) : inactiveColor;
+          return (
+            <React.Fragment key={stage}>
+              <View style={{ alignItems: 'center' }}>
+                <Animated.View style={{
+                  width: 11, height: 11, borderRadius: 6,
+                  backgroundColor: done || active ? color : 'transparent',
+                  borderWidth: 1.5, borderColor: color,
+                  transform: [{ scale: dotScales[i] }],
+                }} />
+                <Animated.Text style={{
+                  fontSize: 8, marginTop: 4, width: 42, textAlign: 'center',
+                  color: done || active ? color : inactiveColor,
+                  opacity: labelOpacities[i],
+                  transform: [{ translateY: labelTranslates[i] }],
+                }}>
+                  {stage}
+                </Animated.Text>
+              </View>
+              {i < 4 && (
+                <View style={{ flex: 1, height: 2, backgroundColor: inactiveColor, marginBottom: 18 }}>
+                  <Animated.View style={{
+                    height: 2, backgroundColor: stageColor(i),
+                    width: barAnims[i].interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] }),
+                  }} />
+                </View>
+              )}
+            </React.Fragment>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
+
 // ─── メインコンポーネント ─────────────────────────────────────────
 
 // Dark mode colors
@@ -1987,6 +2075,10 @@ export default function App() {
                     </TouchableOpacity>
                   )}
                 </View>
+
+                {isDetailVisible && (
+                  <StatusStepper status={selStatus} statusColors={statusColors} isDark={isDark} />
+                )}
 
                 <Text style={[styles.label, { color: C.text3 }]}>企業名 *</Text>
                 <View style={{ position: 'relative', zIndex: 10 }}>

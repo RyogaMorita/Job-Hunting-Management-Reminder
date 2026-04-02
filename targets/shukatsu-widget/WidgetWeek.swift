@@ -28,8 +28,7 @@ struct WeekWidgetView: View {
     let entry: WeekEntry
     @Environment(\.widgetFamily) var family
 
-    // systemMedium: 1週間(7日), systemLarge: 2週間(14日)
-    private var dayCount: Int { family == .systemLarge ? 14 : 7 }
+    private var dayCount: Int { 7 }
 
     private var days: [Date] {
         let cal = Calendar.current
@@ -52,10 +51,6 @@ struct WeekWidgetView: View {
                 header
                 weekGrid
                 Spacer(minLength: 0)
-                if family == .systemLarge {
-                    Divider().background(Color.white.opacity(0.2)).padding(.horizontal, 4)
-                    upcomingList
-                }
             }
             .padding(12)
         }
@@ -220,7 +215,7 @@ struct WeekWidget: Widget {
                 .containerBackground(Color(hex: "#031659"), for: .widget)
         }
         .configurationDisplayName("週間スケジュール")
-        .description("今後1〜2週間の就活予定をコンパクトに表示")
-        .supportedFamilies([.systemMedium, .systemLarge])
+        .description("今後1週間の就活予定をコンパクトに表示")
+        .supportedFamilies([.systemMedium])
     }
 }
