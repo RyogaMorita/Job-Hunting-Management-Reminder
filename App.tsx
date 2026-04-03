@@ -37,6 +37,7 @@ const AD_UNIT_ID = __DEV__ ? TestIds.BANNER : 'ca-app-pub-7090599455468315/17300
 const APP_OPEN_ID = __DEV__ ? TestIds.APP_OPEN : 'ca-app-pub-7090599455468315/3637103731';
 const REWARDED_ID = __DEV__ ? TestIds.REWARDED : 'ca-app-pub-7090599455468315/8667464364';
 const REVIEW_KEY = '@review_requested';
+const REVIEW_3COMPANIES_KEY = '@review_3companies';
 
 // ─── 就活Tips（リワード解放コンテンツ）────────────────────────────
 const SHUKATSU_TIPS = [
@@ -904,6 +905,19 @@ export default function App() {
     const updated = selectedItem ? base.map(s => s.id === selectedItem.id ? newSchedule : s) : [...base, newSchedule];
     await saveSchedules(updated);
     await scheduleNotification(newSchedule);
+
+    // 企業登録3社目でレビュー依頼
+    if (!selectedItem) {
+      const uniqueCompanies = new Set(updated.map(s => s.company.trim())).size;
+      if (uniqueCompanies >= 3) {
+        const done = await AsyncStorage.getItem(REVIEW_3COMPANIES_KEY);
+        if (!done && await StoreReview.hasAction()) {
+          await StoreReview.requestReview();
+          await AsyncStorage.setItem(REVIEW_3COMPANIES_KEY, 'true');
+        }
+      }
+    }
+
     closeModal();
   };
 
