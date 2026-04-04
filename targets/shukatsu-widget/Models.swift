@@ -38,7 +38,7 @@ struct AppGroupHelper {
     }
 
     static var upcomingSchedules: [WidgetSchedule] {
-        let inactive = ["内定辞退", "不合格"]
+        let inactive = ["内定辞退", "不合格", "完了", "内定"]
         let today = isoToday()
         return loadSchedules()
             .filter { !inactive.contains($0.status) && $0.date >= today }
@@ -87,6 +87,9 @@ let statusColors: [String: String] = [
     "2次面接": "#E67E22",
     "最終面接": "#E74C3C",
     "内定": "#E91E8C",
+    "インターンES締切": "#F59E0B",
+    "インターン面接": "#EF6C00",
+    "🌸インターン確定": "#EC407A",
     "内定辞退": "#7F8C8D",
     "不合格": "#BDC3C7",
     "完了": "#95A5A6",

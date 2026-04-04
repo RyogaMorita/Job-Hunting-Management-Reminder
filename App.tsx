@@ -352,7 +352,7 @@ function StatusStepper({ status, statusColors, isDark }: { status: string; statu
                   transform: [{ scale: dotScales[i] }],
                 }} />
                 <Animated.Text style={{
-                  fontSize: 8, marginTop: 4, width: 42, textAlign: 'center',
+                  fontSize: 8, marginTop: 4, width: 36, textAlign: 'center',
                   color: done || active ? color : inactiveColor,
                   opacity: labelOpacities[i],
                   transform: [{ translateY: labelTranslates[i] }],
@@ -1444,8 +1444,8 @@ export default function App() {
                           const isSel = ds === selectedDate, isToday = ds === today;
                           const internBars = internshipPeriodsMap[ds] || [];
                           const dow = new Date(ds + 'T12:00:00').getDay(); // 0=Sun, 6=Sat
-                          const isWeekRowStart = dow === 0;
-                          const isWeekRowEnd = dow === 6;
+                          const isWeekRowStart = weekStart === 1 ? dow === 1 : dow === 0;
+                          const isWeekRowEnd = weekStart === 1 ? dow === 0 : dow === 6;
                           return (
                             <TouchableOpacity
                               onPress={() => {
