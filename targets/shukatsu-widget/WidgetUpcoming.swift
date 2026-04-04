@@ -47,7 +47,7 @@ struct UpcomingHomeView: View {
     let entry: UpcomingEntry
     @Environment(\.widgetFamily) var family
 
-    private var limit: Int { family == .systemSmall ? 3 : 5 }
+    private var limit: Int { family == .systemSmall ? 2 : 3 }
 
     var body: some View {
         ZStack {
@@ -70,10 +70,11 @@ struct UpcomingHomeView: View {
                                 .padding(.vertical, 2)
                         }
                     }
-                    Spacer()
+                    Spacer(minLength: 0)
                 }
             }
             .padding(12)
+            .clipped()
         }
     }
 

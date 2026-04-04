@@ -207,6 +207,34 @@ function SwipeableRow({ children, onDelete }: { children: React.ReactNode; onDel
   );
 }
 
+// ─── ミニステッパー（カード内用・ドットのみ）────────────────────────
+function MiniStepper({ status, statusColors, isDark }: { status: string; statusColors: Record<string, string>; isDark: boolean }) {
+  const currentStage = STATUS_TO_STAGE[status] ?? -1;
+  if (currentStage < 0) return null;
+  const inactiveColor = isDark ? '#444' : '#e0e0e0';
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 6, height: 8 }}>
+      {STEPPER_STAGES.map((stage, i) => {
+        const done = i < currentStage;
+        const active = i === currentStage;
+        const color = (done || active) ? (statusColors[STEPPER_STAGES[i]] ?? '#95A5A6') : inactiveColor;
+        return (
+          <React.Fragment key={stage}>
+            <View style={{
+              width: active ? 8 : 6, height: active ? 8 : 6, borderRadius: 4,
+              backgroundColor: done || active ? color : 'transparent',
+              borderWidth: 1.5, borderColor: color,
+            }} />
+            {i < 4 && (
+              <View style={{ flex: 1, height: 2, backgroundColor: done ? (statusColors[STEPPER_STAGES[i]] ?? '#95A5A6') : inactiveColor }} />
+            )}
+          </React.Fragment>
+        );
+      })}
+    </View>
+  );
+}
+
 // ─── ステータスステッパー ──────────────────────────────────────────
 
 const STEPPER_STAGES = ['検討中', 'ES締切', '1次面接', '最終面接', '内定'];
@@ -757,7 +785,8 @@ export default function App() {
   };
 
   // ─── 統計 ──────────────────────────────────────────────────────
-  const activeCount = useMemo(() => schedules.filter(s => !['内定', '内定辞退', '不合格'].includes(s.status)).length, [schedules]);
+  const EXCLUDE_FROM_COUNT = ['内定', '内定辞退', '不合格', '完了', '説明会', 'GD'];
+  const activeCount = useMemo(() => schedules.filter(s => !EXCLUDE_FROM_COUNT.includes(s.status)).length, [schedules]);
   const internalCount = useMemo(() => schedules.filter(s => s.status === '内定').length, [schedules]);
 
   const upcomingSchedules = useMemo(() => {
@@ -817,11 +846,18 @@ export default function App() {
       case '直近順': {
         const today = new Date().toISOString().slice(0, 10);
         list.sort((a, b) => {
+          const aTerminal = INACTIVE.includes(a.status);
+          const bTerminal = INACTIVE.includes(b.status);
+          if (aTerminal !== bTerminal) return aTerminal ? 1 : -1;
+          if (aTerminal && bTerminal) return 0;
+          if (!a.date && !b.date) return 0;
+          if (!a.date) return 1;
+          if (!b.date) return -1;
           const aPast = a.date < today;
           const bPast = b.date < today;
           if (aPast !== bPast) return aPast ? 1 : -1;
-          if (aPast) return b.date.localeCompare(a.date);
-          return a.date.localeCompare(b.date);
+          const cmp = a.date.localeCompare(b.date);
+          return sortAsc ? cmp : -cmp;
         });
         break;
       }
@@ -872,9 +908,17 @@ export default function App() {
     const initCL: Record<string, boolean> = {};
     CHECKLIST_STEPS.forEach(step => { initCL[step] = autoChecks.includes(step); });
     // 既存のチェックと合成（既にチェック済みのものは保持）
+    // ただしステータスが下がった場合は、新ステータスより上のステージのチェックをリセット
     const existingCL = selectedItem?.checklist ?? {};
-    CHECKLIST_STEPS.forEach(step => {
-      initCL[step] = initCL[step] || (existingCL[step] ?? false);
+    const newStage = STATUS_TO_STAGE[selStatus] ?? 0;
+    const oldStage = STATUS_TO_STAGE[selectedItem?.status ?? selStatus] ?? 0;
+    const statusLowered = selectedItem && newStage < oldStage;
+    CHECKLIST_STEPS.forEach((step, i) => {
+      if (statusLowered && i >= newStage) {
+        initCL[step] = autoChecks.includes(step); // 上位ステージはリセット
+      } else {
+        initCL[step] = initCL[step] || (existingCL[step] ?? false);
+      }
     });
 
     // ⑬ ステータス変更履歴を更新
@@ -1562,18 +1606,8 @@ export default function App() {
                             </TouchableOpacity>
                           ) : null}
                           {item.note ? <Text style={styles.notePreview} numberOfLines={1}>📝 {item.note}</Text> : null}
-                          {/* ⑩ 選考進捗バー */}
-                          {!isInactive && (() => {
-                            const steps = CHECKLIST_STEPS;
-                            const done = steps.filter(s => item.checklist?.[s]).length;
-                            return (
-                              <View style={{ flexDirection: 'row', gap: 2, marginTop: 4 }}>
-                                {steps.map((s, i) => (
-                                  <View key={s} style={{ flex: 1, height: 3, borderRadius: 2, backgroundColor: i < done ? sc : isDark ? '#333' : '#e0e0e0' }} />
-                                ))}
-                              </View>
-                            );
-                          })()}
+                          {/* ⑩ 選考ステッパー */}
+                          {!isInactive && <MiniStepper status={item.status} statusColors={statusColors} isDark={isDark} />}
                         </View>
                         <View style={{ alignItems: 'flex-end', gap: 6 }}>
                           <View style={[styles.statusBadge, { backgroundColor: sc },
