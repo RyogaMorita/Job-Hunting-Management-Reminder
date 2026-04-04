@@ -267,7 +267,7 @@ function MiniStepper({ status, statusColors, isDark, animTrigger }: {
                 borderWidth: 1.5, borderColor: color,
               }} />
             )}
-            {i < 4 && (
+            {i < 5 && (
               isNewBar ? (
                 <View style={{ flex: 1, height: 2, backgroundColor: inactiveColor, overflow: 'hidden' }}>
                   <Animated.View style={{
@@ -289,19 +289,20 @@ function MiniStepper({ status, statusColors, isDark, animTrigger }: {
 
 // ─── ステータスステッパー ──────────────────────────────────────────
 
-const STEPPER_STAGES = ['検討中', 'ES締切', '1次面接', '最終面接', '内定'];
+const STEPPER_STAGES = ['検討中', 'ES締切', '1次面接', '2次面接', '最終面接', '内定'];
 const STATUS_TO_STAGE: Record<string, number> = {
   '検討中': 0, '説明会': 0, 'GD': 0,
   'ES締切': 1, 'ES提出済': 1,
   '1次面接': 2,
-  '2次面接': 3, '最終面接': 3,
-  '内定': 4,
+  '2次面接': 3,
+  '最終面接': 4,
+  '内定': 5,
 };
 
 function StatusStepper({ status, statusColors, isDark }: { status: string; statusColors: Record<string, string>; isDark: boolean }) {
   const currentStage = STATUS_TO_STAGE[status] ?? 0;
   const dotScales = useRef(STEPPER_STAGES.map(() => new Animated.Value(0))).current;
-  const barAnims = useRef([0, 1, 2, 3].map(() => new Animated.Value(0))).current;
+  const barAnims = useRef([0, 1, 2, 3, 4].map(() => new Animated.Value(0))).current;
   const labelOpacities = useRef(STEPPER_STAGES.map(() => new Animated.Value(0))).current;
   const labelTranslates = useRef(STEPPER_STAGES.map(() => new Animated.Value(8))).current;
 
@@ -324,7 +325,7 @@ function StatusStepper({ status, statusColors, isDark }: { status: string; statu
         Animated.timing(labelOpacities[i], { toValue: 1, duration: 200, useNativeDriver: true }),
         Animated.timing(labelTranslates[i], { toValue: 0, duration: 200, useNativeDriver: true }),
       ]));
-      if (i < currentStage && i < 4) {
+      if (i < currentStage && i < 5) {
         seq.push(Animated.timing(barAnims[i], { toValue: 1, duration: 320, useNativeDriver: false }));
       }
     }
@@ -359,7 +360,7 @@ function StatusStepper({ status, statusColors, isDark }: { status: string; statu
                   {stage}
                 </Animated.Text>
               </View>
-              {i < 4 && (
+              {i < 5 && (
                 <View style={{ flex: 1, height: 2, backgroundColor: inactiveColor, marginBottom: 18 }}>
                   <Animated.View style={{
                     height: 2, backgroundColor: stageColor(i),
@@ -1723,8 +1724,8 @@ export default function App() {
                               style={[styles.nextStatusBtn, { borderColor: sc }]}
                               onPress={() => advanceStatus(item)}>
                               <Text style={[styles.nextStatusBtnText, { color: sc }]} numberOfLines={1}>{
-                                ns === 'インターン面接' ? '面接⇨' :
-                                ns === '🌸インターン確定' ? '参加確定⇨' :
+                                ns === 'インターン面接' ? '面接→' :
+                                ns === '🌸インターン確定' ? '参加確定→' :
                                 ns + ' →'
                               }</Text>
                             </TouchableOpacity>
