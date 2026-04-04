@@ -55,8 +55,8 @@ const STORAGE_KEY = '@schedules_v11';
 const GENRES_KEY = '@genres_v11';
 const STATUS_COLORS_KEY = '@status_colors_v2';
 const STATUS_OPTIONS_KEY = '@status_options_v1';
-const TDU_BLUE = '#6366F1';
-const ACCENT = '#6366F1';
+const TDU_BLUE = '#F43F5E';
+const ACCENT = '#F43F5E';
 
 const DEFAULT_STATUS_OPTIONS = ['検討中', '説明会', 'ES締切', 'ES提出済', 'GD', '1次面接', '2次面接', '最終面接', '内定', '内定辞退', '不合格', '完了'];
 const STATUS_OPTIONS = DEFAULT_STATUS_OPTIONS; // 後方互換用
@@ -298,12 +298,12 @@ function StatusStepper({ status, statusColors, isDark }: { status: string; statu
 
 // Dark mode colors
 const LIGHT = {
-  bg: '#F8F8FC', bg2: '#EEEEF6', bg3: '#EEF2FF', card: '#FFFFFF',
-  border: '#E8E8F0', border2: '#EFEFFA',
-  text: '#1A1A2E', text2: '#666680', text3: '#9999B0',
-  calBg: '#F8F8FC', calText: '#1A1A2E',
-  tabBar: '#FFFFFF', inputBg: '#F0F0F8', searchBg: '#EFEFFA',
-  filterBg: '#F4F4FF', statChip: '#EEF2FF', headerBorder: '#E8E8F0',
+  bg: '#F5F5F7', bg2: '#EFEFEF', bg3: '#FFF0F3', card: '#FFFFFF',
+  border: '#E8E8E8', border2: '#F0F0F0',
+  text: '#1A1A1A', text2: '#666666', text3: '#999999',
+  calBg: '#F5F5F7', calText: '#1A1A1A',
+  tabBar: '#FFFFFF', inputBg: '#F5F5F7', searchBg: '#EFEFEF',
+  filterBg: '#FFF0F3', statChip: '#FFF0F3', headerBorder: '#E8E8E8',
 };
 const DARK = {
   bg: '#0d1117', bg2: '#161b22', bg3: '#1c2333', card: '#161b22',
@@ -381,7 +381,7 @@ export default function App() {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const C = isDark ? DARK : LIGHT;
-  const ACCENT = isDark ? '#818CF8' : TDU_BLUE;
+  const ACCENT = isDark ? '#FB7185' : TDU_BLUE;
   const [currentCalDate, setCurrentCalDate] = useState(new Date());
 
   const [fontsLoaded] = useFonts({
@@ -2725,7 +2725,7 @@ const styles = StyleSheet.create({
   genreChipText: { fontSize: 11, color: '#666' },
   modalButtons: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 24 },
   cancelText: { color: '#999', fontSize: 15 },
-  saveButton: { backgroundColor: TDU_BLUE, paddingVertical: 14, paddingHorizontal: 44, borderRadius: 16, minHeight: 48, justifyContent: 'center', shadowColor: TDU_BLUE, shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.30, shadowRadius: 8, elevation: 4 },
+  saveButton: { backgroundColor: TDU_BLUE, paddingVertical: 14, paddingHorizontal: 44, borderRadius: 16, minHeight: 48, justifyContent: 'center', shadowColor: '#F43F5E', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.30, shadowRadius: 8, elevation: 4 },
   saveButtonDisabled: { backgroundColor: '#aaa', shadowOpacity: 0 },
   saveButtonText: { color: '#fff', fontWeight: 'bold', fontSize: 15, fontFamily: 'MPLUSRounded1c_700Bold' },
 
