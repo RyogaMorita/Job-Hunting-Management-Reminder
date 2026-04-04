@@ -59,12 +59,22 @@ const STATUS_OPTIONS_KEY = '@status_options_v1';
 const TDU_BLUE = '#003366';
 const ACCENT = '#1a6bcc';
 
-const DEFAULT_STATUS_OPTIONS = ['検討中', '説明会', 'ES締切', 'ES提出済', 'GD', '1次面接', '2次面接', '最終面接', '内定', '内定辞退', '不合格', '完了'];
+const INTERN_STATUSES = ['インターンES締切', 'インターン面接', '🌸インターン確定'];
+const SEPARATE_STATUSES = ['説明会', 'GD', ...INTERN_STATUSES]; // 本選考と別トラック
+const DEFAULT_STATUS_OPTIONS = ['検討中', '説明会', 'ES締切', 'ES提出済', 'GD', '1次面接', '2次面接', '最終面接', '内定', 'インターンES締切', 'インターン面接', '🌸インターン確定', '内定辞退', '不合格', '完了'];
 const STATUS_OPTIONS = DEFAULT_STATUS_OPTIONS; // 後方互換用
 const STATUS_PRIORITY: Record<string, number> = {
-  '内定': 8, '最終面接': 7, '2次面接': 6, '1次面接': 5, 'GD': 4, 'ES提出済': 3, 'ES締切': 2, '説明会': 1, '検討中': 0, '内定辞退': -1, '不合格': -2, '完了': -3,
+  '内定': 8, '最終面接': 7, '2次面接': 6, '1次面接': 5, 'GD': 4, 'ES提出済': 3, 'ES締切': 2, '説明会': 1, '検討中': 0,
+  '🌸インターン確定': 0.3, 'インターン面接': 0.2, 'インターンES締切': 0.1,
+  '内定辞退': -1, '不合格': -2, '完了': -3,
 };
-const STATUS_SORT_ORDER = ['内定', '最終面接', '2次面接', '1次面接', 'GD', 'ES提出済', 'ES締切', '説明会', '検討中', '内定辞退', '不合格', '完了'];
+const STATUS_SORT_ORDER = ['内定', '最終面接', '2次面接', '1次面接', 'GD', 'ES提出済', 'ES締切', '説明会', '検討中', '🌸インターン確定', 'インターン面接', 'インターンES締切', '内定辞退', '不合格', '完了'];
+// 持ち駒トラックグループ（同名企業でも別トラックは別行表示）
+const trackGroup = (status: string): string => {
+  if (['説明会', 'GD'].includes(status)) return '説明会GD';
+  if (INTERN_STATUSES.includes(status)) return 'インターン';
+  return '本選考';
+};
 // ステータスに対応するチェックリスト自動チェック
 const STATUS_TO_CHECKS: Record<string, string[]> = {
   '説明会': [],
@@ -120,6 +130,8 @@ interface Schedule {
   notifySettings?: NotifySetting;
   statusHistory?: { status: string; changedAt: string }[];
   offerDeadline?: string;
+  internshipStart?: string;
+  internshipEnd?: string;
   memoResearch?: string;
   memoPR?: string;
   memoQuestions?: string;
@@ -159,6 +171,9 @@ const DEFAULT_STATUS_COLORS: StatusColors = {
   '2次面接': '#E67E22',
   '最終面接': '#E74C3C',
   '内定': '#E91E8C',
+  'インターンES締切': '#F59E0B',
+  'インターン面接': '#EF6C00',
+  '🌸インターン確定': '#EC407A',
   '内定辞退': '#7F8C8D',
   '不合格': '#BDC3C7',
   '完了': '#95A5A6',
@@ -515,6 +530,10 @@ export default function App() {
   const [memoQuestions, setMemoQuestions] = useState('');
   const [activeMemoTab, setActiveMemoTab] = useState(0); // 0=研究, 1=PR, 2=質問
   const [showOfferDeadlinePicker, setShowOfferDeadlinePicker] = useState(false);
+  const [internshipStart, setInternshipStart] = useState('');
+  const [internshipEnd, setInternshipEnd] = useState('');
+  const [showInternStartPicker, setShowInternStartPicker] = useState(false);
+  const [showInternEndPicker, setShowInternEndPicker] = useState(false);
   const [showAllGenres, setShowAllGenres] = useState(false);
   const [showAllStatuses, setShowAllStatuses] = useState(false);
   const [openHelpItem, setOpenHelpItem] = useState<number | null>(null);
@@ -785,7 +804,7 @@ export default function App() {
   };
 
   // ─── 統計 ──────────────────────────────────────────────────────
-  const EXCLUDE_FROM_COUNT = ['内定', '内定辞退', '不合格', '完了', '説明会', 'GD'];
+  const EXCLUDE_FROM_COUNT = ['内定', '内定辞退', '不合格', '完了', '説明会', 'GD', ...INTERN_STATUSES];
   const activeCount = useMemo(() => schedules.filter(s => !EXCLUDE_FROM_COUNT.includes(s.status)).length, [schedules]);
   const internalCount = useMemo(() => schedules.filter(s => s.status === '内定').length, [schedules]);
 
@@ -809,6 +828,23 @@ export default function App() {
     return marks;
   }, [schedules, selectedDate, statusColors]);
 
+  // インターン期間マップ（日付→スパン情報）
+  const internshipPeriodsMap = useMemo(() => {
+    const map: Record<string, { company: string; color: string; isStart: boolean; isEnd: boolean }[]> = {};
+    schedules.forEach(s => {
+      if (!s.internshipStart || !s.internshipEnd) return;
+      const color = s.calendarColor ?? statusColors[s.status] ?? '#EC407A';
+      let cur = s.internshipStart;
+      while (cur <= s.internshipEnd) {
+        if (!map[cur]) map[cur] = [];
+        map[cur].push({ company: s.company, color, isStart: cur === s.internshipStart, isEnd: cur === s.internshipEnd });
+        const d = new Date(cur); d.setDate(d.getDate() + 1);
+        cur = d.toISOString().slice(0, 10);
+      }
+    });
+    return map;
+  }, [schedules, statusColors]);
+
   const dateCompanyMap = useMemo(() => {
     const map: Record<string, Schedule[]> = {};
     schedules.forEach(s => { if (!s.date) return; if (!map[s.date]) map[s.date] = []; map[s.date].push(s); });
@@ -819,11 +855,11 @@ export default function App() {
   }, [schedules]);
 
   // ─── フィルタ・ソート ──────────────────────────────────────────
-  // 持ち駒: 同名企業は最高ステータスのみ表示
+  // 持ち駒: 説明会/GD/インターンは本選考と別トラックで同時表示
   const deduplicatedSchedules = useMemo(() => {
     const map = new Map<string, Schedule>();
     schedules.forEach(s => {
-      const key = s.company.trim();
+      const key = `${s.company.trim()}__${trackGroup(s.status)}`;
       const cur = map.get(key);
       if (!cur || (STATUS_PRIORITY[s.status] ?? 0) > (STATUS_PRIORITY[cur.status] ?? 0)) {
         map.set(key, s);
@@ -941,6 +977,8 @@ export default function App() {
       notifySettings: { daysBeforeList: notifyDaysList, hourStr: notifyHour, minuteStr: notifyMinute },
       statusHistory: newHistory,
       offerDeadline: offerDeadline || undefined,
+      internshipStart: internshipStart || undefined,
+      internshipEnd: internshipEnd || undefined,
       memoResearch: memoResearch || undefined,
       memoPR: memoPR || undefined,
       memoQuestions: memoQuestions || undefined,
@@ -976,6 +1014,7 @@ export default function App() {
     setShowHourPicker(false); setShowMinutePicker(false); setShowDateWheelPicker(false);
     setItemNotifyEnabled(true); setNotifyDaysList(['1']); setNotifyHour('09'); setNotifyMinute('00');
     setOfferDeadline(''); setMemoResearch(''); setMemoPR(''); setMemoQuestions(''); setActiveMemoTab(0); setShowOfferDeadlinePicker(false);
+    setInternshipStart(''); setInternshipEnd(''); setShowInternStartPicker(false); setShowInternEndPicker(false);
   };
 
   const openAdd = (dateStr?: string) => {
@@ -1057,6 +1096,8 @@ export default function App() {
     setNotifyHour(item.notifySettings?.hourStr ?? '09');
     setNotifyMinute(item.notifySettings?.minuteStr ?? '00');
     setOfferDeadline(item.offerDeadline ?? '');
+    setInternshipStart(item.internshipStart ?? '');
+    setInternshipEnd(item.internshipEnd ?? '');
     setMemoResearch(item.memoResearch ?? '');
     setMemoPR(item.memoPR ?? '');
     setMemoQuestions(item.memoQuestions ?? '');
@@ -1172,10 +1213,13 @@ export default function App() {
 
   // 次のステータスを返す（最終は変更なし）
   const PROGRESS_FLOW = ['検討中', 'ES締切', 'ES提出済', '1次面接', '2次面接', '最終面接', '内定'];
+  const INTERN_FLOW = ['インターンES締切', 'インターン面接', '🌸インターン確定'];
   const nextStatus = (current: string): string | null => {
     const idx = PROGRESS_FLOW.indexOf(current);
-    if (idx === -1 || idx >= PROGRESS_FLOW.length - 1) return null;
-    return PROGRESS_FLOW[idx + 1];
+    if (idx !== -1 && idx < PROGRESS_FLOW.length - 1) return PROGRESS_FLOW[idx + 1];
+    const iIdx = INTERN_FLOW.indexOf(current);
+    if (iIdx !== -1 && iIdx < INTERN_FLOW.length - 1) return INTERN_FLOW[iIdx + 1];
+    return null;
   };
   const completeStatus = async (item: Schedule) => {
     const updated = schedules.map(s => s.id !== item.id ? s : {
@@ -1358,6 +1402,7 @@ export default function App() {
                           const ds = date.dateString;
                           const items = dateCompanyMap[ds] || [];
                           const isSel = ds === selectedDate, isToday = ds === today;
+                          const internBars = internshipPeriodsMap[ds] || [];
                           return (
                             <TouchableOpacity
                               onPress={() => {
@@ -1373,7 +1418,7 @@ export default function App() {
                                   lastTapRef.current = { ds, time: now };
                                 }
                               }}
-                              style={{ alignItems: 'center', width: 46, minHeight: 44 }}>
+                              style={{ alignItems: 'center', width: 46, minHeight: 44, position: 'relative' }}>
                               <View style={[
                                 { width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
                                 isSel && { backgroundColor: TDU_BLUE },
@@ -1391,6 +1436,19 @@ export default function App() {
                                 })(),
                                 ]}>{date.day}</Text>
                               </View>
+                              {/* インターン期間スパンバー */}
+                              {internBars.slice(0, 1).map((bar, bi) => (
+                                <View key={bi} style={{
+                                  position: 'absolute', top: 28, height: 5,
+                                  left: bar.isStart ? 23 : 0,
+                                  right: bar.isEnd ? 23 : 0,
+                                  backgroundColor: bar.color + 'CC',
+                                  borderTopLeftRadius: bar.isStart ? 3 : 0,
+                                  borderBottomLeftRadius: bar.isStart ? 3 : 0,
+                                  borderTopRightRadius: bar.isEnd ? 3 : 0,
+                                  borderBottomRightRadius: bar.isEnd ? 3 : 0,
+                                }} />
+                              ))}
                               {items.slice(0, 2).map((item: Schedule, i: number) => {
                                 const sc = item.calendarColor ?? statusColorOf(item.status);
                                 return (
@@ -2484,6 +2542,77 @@ export default function App() {
                         </TouchableOpacity>
                       </View>
                     )}
+                  </>
+                )}
+
+                {/* インターン期間設定 */}
+                {(selStatus === '🌸インターン確定' || internshipStart || internshipEnd) && (
+                  <>
+                    <Text style={[styles.label, { color: C.text3 }]}>インターン期間</Text>
+                    {(['開始日', '終了日'] as const).map(label => {
+                      const val = label === '開始日' ? internshipStart : internshipEnd;
+                      const setVal = label === '開始日' ? setInternshipStart : setInternshipEnd;
+                      const showPicker = label === '開始日' ? showInternStartPicker : showInternEndPicker;
+                      const setShowPicker = label === '開始日' ? setShowInternStartPicker : setShowInternEndPicker;
+                      return (
+                        <View key={label} style={{ marginBottom: 6 }}>
+                          <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
+                            <Text style={{ fontSize: 12, color: C.text3, width: 36 }}>{label}</Text>
+                            <TouchableOpacity style={[styles.input, { flex: 1, backgroundColor: C.inputBg, justifyContent: 'center' }]}
+                              onPress={() => setShowPicker(v => !v)}>
+                              <Text style={{ fontSize: 15, color: val ? C.text : '#aaa' }}>{val || '日付を設定'}</Text>
+                            </TouchableOpacity>
+                            {val && <TouchableOpacity onPress={() => setVal('')} style={{ paddingHorizontal: 8, paddingVertical: 10 }}>
+                              <Text style={{ color: '#aaa', fontSize: 16 }}>✕</Text>
+                            </TouchableOpacity>}
+                          </View>
+                          {showPicker && (
+                            <View style={{ backgroundColor: C.bg2, borderRadius: 12, borderWidth: 1, borderColor: C.border, marginTop: 4, padding: 8 }}>
+                              <View style={{ flexDirection: 'row', gap: 4 }}>
+                                <ScrollView style={{ flex: 3, height: 120 }} showsVerticalScrollIndicator={false} nestedScrollEnabled>
+                                  {Array.from({ length: 6 }, (_, i) => new Date().getFullYear() - 1 + i).map(yr => (
+                                    <TouchableOpacity key={yr} style={{ paddingVertical: 7, alignItems: 'center', borderRadius: 6, backgroundColor: val?.startsWith(String(yr)) ? TDU_BLUE : 'transparent' }}
+                                      onPress={() => { const [, m, d] = (val || `${yr}-01-01`).split('-'); setVal(`${yr}-${m || '01'}-${d || '01'}`); }}>
+                                      <Text style={{ fontSize: 13, color: val?.startsWith(String(yr)) ? '#fff' : C.text }}>{yr}</Text>
+                                    </TouchableOpacity>
+                                  ))}
+                                </ScrollView>
+                                <ScrollView style={{ flex: 2, height: 120 }} showsVerticalScrollIndicator={false} nestedScrollEnabled>
+                                  {Array.from({ length: 12 }, (_, i) => i + 1).map(mn => {
+                                    const ms = String(mn).padStart(2, '0');
+                                    const [yr, , d] = (val || '').split('-');
+                                    const active = val?.split('-')[1] === ms;
+                                    return (
+                                      <TouchableOpacity key={mn} style={{ paddingVertical: 7, alignItems: 'center', borderRadius: 6, backgroundColor: active ? TDU_BLUE : 'transparent' }}
+                                        onPress={() => setVal(`${yr || new Date().getFullYear()}-${ms}-${d || '01'}`)}>
+                                        <Text style={{ fontSize: 13, color: active ? '#fff' : C.text }}>{mn}月</Text>
+                                      </TouchableOpacity>
+                                    );
+                                  })}
+                                </ScrollView>
+                                <ScrollView style={{ flex: 2, height: 120 }} showsVerticalScrollIndicator={false} nestedScrollEnabled>
+                                  {Array.from({ length: 31 }, (_, i) => i + 1).map(dy => {
+                                    const ds2 = String(dy).padStart(2, '0');
+                                    const [yr2, mn2] = (val || '').split('-');
+                                    const active = val?.split('-')[2] === ds2;
+                                    return (
+                                      <TouchableOpacity key={dy} style={{ paddingVertical: 7, alignItems: 'center', borderRadius: 6, backgroundColor: active ? TDU_BLUE : 'transparent' }}
+                                        onPress={() => setVal(`${yr2 || new Date().getFullYear()}-${mn2 || '01'}-${ds2}`)}>
+                                        <Text style={{ fontSize: 13, color: active ? '#fff' : C.text }}>{dy}日</Text>
+                                      </TouchableOpacity>
+                                    );
+                                  })}
+                                </ScrollView>
+                              </View>
+                              <TouchableOpacity style={{ marginTop: 6, backgroundColor: TDU_BLUE, borderRadius: 8, padding: 8, alignItems: 'center' }}
+                                onPress={() => setShowPicker(false)}>
+                                <Text style={{ color: '#fff', fontWeight: 'bold' }}>決定</Text>
+                              </TouchableOpacity>
+                            </View>
+                          )}
+                        </View>
+                      );
+                    })}
                   </>
                 )}
 
