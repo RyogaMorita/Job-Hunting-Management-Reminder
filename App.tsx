@@ -55,8 +55,8 @@ const STORAGE_KEY = '@schedules_v11';
 const GENRES_KEY = '@genres_v11';
 const STATUS_COLORS_KEY = '@status_colors_v2';
 const STATUS_OPTIONS_KEY = '@status_options_v1';
-const TDU_BLUE = '#003366';
-const ACCENT = '#1a6bcc';
+const TDU_BLUE = '#6366F1';
+const ACCENT = '#6366F1';
 
 const DEFAULT_STATUS_OPTIONS = ['検討中', '説明会', 'ES締切', 'ES提出済', 'GD', '1次面接', '2次面接', '最終面接', '内定', '内定辞退', '不合格', '完了'];
 const STATUS_OPTIONS = DEFAULT_STATUS_OPTIONS; // 後方互換用
@@ -298,12 +298,12 @@ function StatusStepper({ status, statusColors, isDark }: { status: string; statu
 
 // Dark mode colors
 const LIGHT = {
-  bg: '#ffffff', bg2: '#f8f9fa', bg3: '#f0f4ff', card: '#ffffff',
-  border: '#eeeeee', border2: '#f0f0f0',
-  text: '#222222', text2: '#666666', text3: '#999999',
-  calBg: '#ffffff', calText: '#222222',
-  tabBar: '#ffffff', inputBg: '#f8f9fa', searchBg: '#f5f5f5',
-  filterBg: '#f8faff', statChip: '#e8f0fe', headerBorder: '#f0f0f0',
+  bg: '#F8F8FC', bg2: '#EEEEF6', bg3: '#EEF2FF', card: '#FFFFFF',
+  border: '#E8E8F0', border2: '#EFEFFA',
+  text: '#1A1A2E', text2: '#666680', text3: '#9999B0',
+  calBg: '#F8F8FC', calText: '#1A1A2E',
+  tabBar: '#FFFFFF', inputBg: '#F0F0F8', searchBg: '#EFEFFA',
+  filterBg: '#F4F4FF', statChip: '#EEF2FF', headerBorder: '#E8E8F0',
 };
 const DARK = {
   bg: '#0d1117', bg2: '#161b22', bg3: '#1c2333', card: '#161b22',
@@ -381,7 +381,7 @@ export default function App() {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const C = isDark ? DARK : LIGHT;
-  const ACCENT = isDark ? '#6ea8fe' : TDU_BLUE;
+  const ACCENT = isDark ? '#818CF8' : TDU_BLUE;
   const [currentCalDate, setCurrentCalDate] = useState(new Date());
 
   const [fontsLoaded] = useFonts({
@@ -2623,10 +2623,10 @@ const styles = StyleSheet.create({
 
   topNav: { paddingVertical: 10, borderBottomWidth: 1 },
   headerStats: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20 },
-  headerTitle: { fontSize: 17, fontWeight: 'bold', color: TDU_BLUE },
-  statChip: { borderRadius: 10, paddingHorizontal: 12, paddingVertical: 6, alignItems: 'center' },
-  statNum: { fontSize: 18, fontWeight: 'bold', color: TDU_BLUE },
-  statLabel: { fontSize: 9, color: TDU_BLUE },
+  headerTitle: { fontSize: 18, fontWeight: 'bold', color: TDU_BLUE, fontFamily: 'MPLUSRounded1c_900Black', letterSpacing: -0.3 },
+  statChip: { borderRadius: 12, paddingHorizontal: 12, paddingVertical: 6, alignItems: 'center' },
+  statNum: { fontSize: 18, fontWeight: 'bold', fontFamily: 'MPLUSRounded1c_900Black' },
+  statLabel: { fontSize: 9, fontFamily: 'MPLUSRounded1c_400Regular' },
 
   calLabel: { borderLeftWidth: 2, borderRadius: 3, paddingHorizontal: 2, marginTop: 1, width: 44 },
   calLabelText: { fontSize: 7, fontWeight: 'bold' },
@@ -2635,14 +2635,14 @@ const styles = StyleSheet.create({
   upcomingCard: { flexDirection: 'row', alignItems: 'center', padding: 12, borderRadius: 10, marginBottom: 8 },
   todoArea: { flex: 1, paddingHorizontal: 16, paddingTop: 14, overflow: 'hidden' },
   sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  subTitle: { fontSize: 15, fontWeight: 'bold', marginBottom: 10 },
+  subTitle: { fontSize: 15, fontWeight: 'bold', marginBottom: 10, fontFamily: 'MPLUSRounded1c_700Bold' },
   addButton: { backgroundColor: TDU_BLUE, paddingVertical: 6, paddingHorizontal: 12, borderRadius: 20 },
   addButtonText: { color: '#fff', fontSize: 11, fontWeight: 'bold' },
   itemCard: { paddingVertical: 13, paddingHorizontal: 6, borderBottomWidth: 1, borderColor: '#f0f0f0', flexDirection: 'row', alignItems: 'center', gap: 8 },
   itemTitle: { fontSize: 15, fontWeight: 'bold', fontFamily: 'MPLUSRounded1c_700Bold' },
   itemStatus: { fontSize: 11, marginTop: 3 },
   itemArrow: { color: '#ccc', fontSize: 16 },
-  emptyText: { textAlign: 'center', marginTop: 24, fontSize: 13 },
+  emptyText: { textAlign: 'center', marginTop: 32, fontSize: 14, fontFamily: 'MPLUSRounded1c_400Regular', lineHeight: 22 },
 
   searchBar: { flexDirection: 'row', alignItems: 'center', margin: 12, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8 },
   searchIcon: { fontSize: 14, marginRight: 6 },
@@ -2670,8 +2670,8 @@ const styles = StyleSheet.create({
   listCard: { padding: 14, borderRadius: 16, flexDirection: 'row', alignItems: 'center', borderWidth: 0, elevation: 4, overflow: 'hidden', shadowColor: '#000', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.10, shadowRadius: 12 },
   genreBand: { width: 4, borderRadius: 4, alignSelf: 'stretch' },
   dateText: { fontSize: 11, color: '#999', marginTop: 4, fontFamily: 'MPLUSRounded1c_400Regular' },
-  notePreview: { fontSize: 10, color: '#aaa', marginTop: 2 },
-  statusBadge: { backgroundColor: TDU_BLUE, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 10 },
+  notePreview: { fontSize: 10, color: '#aaa', marginTop: 2, fontFamily: 'MPLUSRounded1c_400Regular' },
+  statusBadge: { backgroundColor: TDU_BLUE, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20 },
   statusBadgeText: { color: '#fff', fontSize: 9, fontWeight: 'bold', fontFamily: 'MPLUSRounded1c_700Bold' },
   rankBadge: { width: 22, height: 22, borderRadius: 6, alignItems: 'center', justifyContent: 'center' },
   rankText: { color: '#fff', fontSize: 10, fontWeight: 'bold', fontFamily: 'MPLUSRounded1c_700Bold' },
@@ -2686,10 +2686,10 @@ const styles = StyleSheet.create({
   settingLabel: { fontSize: 14, flex: 1, fontFamily: 'MPLUSRounded1c_400Regular' },
   genreRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderColor: '#f0f0f0' },
   genreColorDot: { width: 16, height: 16, borderRadius: 8, marginRight: 12 },
-  outlineButton: { borderWidth: 1, borderColor: TDU_BLUE, padding: 12, borderRadius: 10, alignItems: 'center', marginTop: 12 },
-  outlineButtonText: { color: TDU_BLUE, fontWeight: 'bold' },
-  dangerButton: { borderWidth: 1, borderColor: '#e74c3c', padding: 14, borderRadius: 10, alignItems: 'center' },
-  dangerButtonText: { color: '#e74c3c', fontWeight: 'bold' },
+  outlineButton: { borderWidth: 1.5, borderColor: TDU_BLUE, padding: 13, borderRadius: 14, alignItems: 'center', marginTop: 12 },
+  outlineButtonText: { color: TDU_BLUE, fontWeight: 'bold', fontFamily: 'MPLUSRounded1c_700Bold' },
+  dangerButton: { borderWidth: 1.5, borderColor: '#e74c3c', padding: 14, borderRadius: 14, alignItems: 'center' },
+  dangerButtonText: { color: '#e74c3c', fontWeight: 'bold', fontFamily: 'MPLUSRounded1c_700Bold' },
   aboutBox: { padding: 16, borderRadius: 10, marginTop: 20 },
   aboutText: { fontSize: 13, color: '#666', lineHeight: 20 },
   supportBtn: { flexDirection: 'row', alignItems: 'center', borderRadius: 14, borderWidth: 1.5, padding: 16, marginTop: 8 },
@@ -2699,7 +2699,7 @@ const styles = StyleSheet.create({
   sortChipActive: { backgroundColor: TDU_BLUE },
   sortChipText: { fontSize: 12, color: '#666' },
 
-  tabBar: { flexDirection: 'row', height: 70, borderTopWidth: 1, paddingBottom: 10 },
+  tabBar: { flexDirection: 'row', height: 74, borderTopWidth: 1, paddingBottom: 10, shadowColor: '#000', shadowOffset: { width: 0, height: -2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 8 },
   tabButton: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   tabImg: { width: 26, height: 26, opacity: 0.3, tintColor: '#aaa' },
   tabImgActive: { opacity: 1, tintColor: TDU_BLUE },
@@ -2725,9 +2725,9 @@ const styles = StyleSheet.create({
   genreChipText: { fontSize: 11, color: '#666' },
   modalButtons: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 24 },
   cancelText: { color: '#999', fontSize: 15 },
-  saveButton: { backgroundColor: TDU_BLUE, paddingVertical: 13, paddingHorizontal: 44, borderRadius: 14 },
-  saveButtonDisabled: { backgroundColor: '#aaa' },
-  saveButtonText: { color: '#fff', fontWeight: 'bold', fontSize: 15 },
+  saveButton: { backgroundColor: TDU_BLUE, paddingVertical: 14, paddingHorizontal: 44, borderRadius: 16, minHeight: 48, justifyContent: 'center', shadowColor: TDU_BLUE, shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.30, shadowRadius: 8, elevation: 4 },
+  saveButtonDisabled: { backgroundColor: '#aaa', shadowOpacity: 0 },
+  saveButtonText: { color: '#fff', fontWeight: 'bold', fontSize: 15, fontFamily: 'MPLUSRounded1c_700Bold' },
 
   pickerOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center' },
   pickerBox: { backgroundColor: '#fff', borderRadius: 20, padding: 20, width: '85%' },
