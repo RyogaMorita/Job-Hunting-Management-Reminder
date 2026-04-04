@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 // import RNIap, { initConnection, endConnection, getProducts, requestPurchase, finishTransaction, purchaseErrorListener, purchaseUpdatedListener, getAvailablePurchases } from 'react-native-iap'; // 近日公開
 import { useColorScheme } from 'react-native';
-import { useFonts, CormorantGaramond_300Light, CormorantGaramond_400Regular, CormorantGaramond_300Light_Italic } from '@expo-google-fonts/cormorant-garamond';
+import { useFonts } from 'expo-font';
+import { Inter_400Regular, Inter_700Bold } from '@expo-google-fonts/inter';
+import { NotoSansJP_400Regular, NotoSansJP_700Bold } from '@expo-google-fonts/noto-sans-jp';
 
 import {
   StyleSheet, Text, View, TouchableOpacity, ScrollView,
@@ -384,9 +386,10 @@ export default function App() {
   const [currentCalDate, setCurrentCalDate] = useState(new Date());
 
   const [fontsLoaded] = useFonts({
-    CormorantGaramond_300Light,
-    CormorantGaramond_400Regular,
-    CormorantGaramond_300Light_Italic,
+    Inter_400Regular,
+    Inter_700Bold,
+    NotoSansJP_400Regular,
+    NotoSansJP_700Bold,
   });
 
   const [activeTab, setActiveTab] = useState<TabType>('calendar');
@@ -2638,7 +2641,7 @@ const styles = StyleSheet.create({
   addButton: { backgroundColor: TDU_BLUE, paddingVertical: 6, paddingHorizontal: 12, borderRadius: 20 },
   addButtonText: { color: '#fff', fontSize: 11, fontWeight: 'bold' },
   itemCard: { paddingVertical: 13, paddingHorizontal: 6, borderBottomWidth: 1, borderColor: '#f0f0f0', flexDirection: 'row', alignItems: 'center', gap: 8 },
-  itemTitle: { fontSize: 15, fontWeight: 'bold' },
+  itemTitle: { fontSize: 15, fontWeight: 'bold', fontFamily: 'NotoSansJP_700Bold' },
   itemStatus: { fontSize: 11, marginTop: 3 },
   itemArrow: { color: '#ccc', fontSize: 16 },
   emptyText: { textAlign: 'center', marginTop: 24, fontSize: 13 },
@@ -2666,23 +2669,23 @@ const styles = StyleSheet.create({
   swipeDeleteBtn: { flex: 1, justifyContent: 'center', alignItems: 'center', width: 80 },
   swipeDeleteText: { color: '#fff', fontSize: 11, fontWeight: 'bold', textAlign: 'center' },
 
-  listCard: { padding: 14, borderRadius: 12, flexDirection: 'row', alignItems: 'center', borderWidth: 1, elevation: 1, overflow: 'hidden' },
+  listCard: { padding: 14, borderRadius: 12, flexDirection: 'row', alignItems: 'center', borderWidth: 1, elevation: 3, overflow: 'hidden', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.08, shadowRadius: 8 },
   genreBand: { width: 4, borderRadius: 4, alignSelf: 'stretch' },
-  dateText: { fontSize: 11, color: '#999', marginTop: 4 },
+  dateText: { fontSize: 11, color: '#999', marginTop: 4, fontFamily: 'Inter_400Regular' },
   notePreview: { fontSize: 10, color: '#aaa', marginTop: 2 },
   statusBadge: { backgroundColor: TDU_BLUE, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
-  statusBadgeText: { color: '#fff', fontSize: 9, fontWeight: 'bold' },
+  statusBadgeText: { color: '#fff', fontSize: 9, fontWeight: 'bold', fontFamily: 'NotoSansJP_700Bold' },
   rankBadge: { width: 22, height: 22, borderRadius: 6, alignItems: 'center', justifyContent: 'center' },
-  rankText: { color: '#fff', fontSize: 10, fontWeight: 'bold' },
+  rankText: { color: '#fff', fontSize: 10, fontWeight: 'bold', fontFamily: 'Inter_700Bold' },
   checkBtn: { backgroundColor: '#f0f4ff', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
   checkBtnText: { fontSize: 10, color: TDU_BLUE, fontWeight: 'bold' },
 
   fab: { position: 'absolute', bottom: 16, right: 20, width: 52, height: 52, borderRadius: 26, backgroundColor: TDU_BLUE, alignItems: 'center', justifyContent: 'center', elevation: 5 },
   fabText: { color: '#fff', fontSize: 26, lineHeight: 30 },
 
-  settingSection: { fontSize: 12, fontWeight: 'bold', color: '#888', marginBottom: 12, letterSpacing: 1 },
+  settingSection: { fontSize: 12, fontWeight: 'bold', color: '#888', marginBottom: 12, letterSpacing: 1, fontFamily: 'NotoSansJP_700Bold' },
   settingRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 14, borderBottomWidth: 1 },
-  settingLabel: { fontSize: 14, flex: 1 },
+  settingLabel: { fontSize: 14, flex: 1, fontFamily: 'NotoSansJP_400Regular' },
   genreRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderColor: '#f0f0f0' },
   genreColorDot: { width: 16, height: 16, borderRadius: 8, marginRight: 12 },
   outlineButton: { borderWidth: 1, borderColor: TDU_BLUE, padding: 12, borderRadius: 10, alignItems: 'center', marginTop: 12 },
@@ -2702,15 +2705,15 @@ const styles = StyleSheet.create({
   tabButton: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   tabImg: { width: 26, height: 26, opacity: 0.3, tintColor: '#aaa' },
   tabImgActive: { opacity: 1, tintColor: TDU_BLUE },
-  tabLabel: { fontSize: 9, color: '#ccc', marginTop: 3 },
-  tabLabelActive: { fontWeight: 'bold', color: TDU_BLUE },
+  tabLabel: { fontSize: 9, color: '#ccc', marginTop: 3, fontFamily: 'NotoSansJP_400Regular' },
+  tabLabelActive: { fontWeight: 'bold', color: TDU_BLUE, fontFamily: 'NotoSansJP_700Bold' },
 
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
   modalContent: { backgroundColor: '#fff', borderTopLeftRadius: 25, borderTopRightRadius: 25, padding: 24, maxHeight: '92%' },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
   dragHandleContainer: { alignItems: 'center', paddingVertical: 8, marginTop: -8, marginHorizontal: -24 },
   dragHandleBar: { width: 40, height: 4, borderRadius: 2, backgroundColor: '#ccc' },
-  modalTitle: { fontSize: 17, fontWeight: 'bold', marginBottom: 4 },
+  modalTitle: { fontSize: 17, fontWeight: 'bold', marginBottom: 4, fontFamily: 'NotoSansJP_700Bold' },
   deleteText: { color: '#e74c3c', fontSize: 13 },
   label: { fontSize: 11, color: '#888', marginBottom: 6, marginTop: 12 },
   input: { backgroundColor: '#f8f9fa', padding: 13, borderRadius: 10, fontSize: 15, marginBottom: 2 },
