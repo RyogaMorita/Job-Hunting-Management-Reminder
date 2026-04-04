@@ -376,6 +376,241 @@ function StatusStepper({ status, statusColors, isDark }: { status: string; statu
   );
 }
 
+// ─── チュートリアルモーダル ──────────────────────────────────────
+
+function PhoneMockup({ children, isDark }: { children: React.ReactNode; isDark: boolean }) {
+  return (
+    <View style={{
+      width: 190, height: 300, borderRadius: 26,
+      borderWidth: 2, borderColor: isDark ? '#444' : '#ccc',
+      backgroundColor: isDark ? '#1c1c1e' : '#f0f0f5',
+      overflow: 'hidden', alignItems: 'center',
+    }}>
+      <View style={{ width: 56, height: 5, backgroundColor: isDark ? '#444' : '#ccc', borderRadius: 3, marginTop: 10, marginBottom: 8 }} />
+      <View style={{ flex: 1, width: '100%', paddingHorizontal: 10, position: 'relative' }}>
+        {children}
+      </View>
+    </View>
+  );
+}
+
+function TutorialIllust1({ isDark }: { isDark: boolean }) {
+  const rowBg = isDark ? '#2c2c2e' : '#fff';
+  const colors = ['#27AE60', '#8E44AD', '#E74C3C'];
+  const inactive = isDark ? '#3a3a3c' : '#e8e8e8';
+  return (
+    <PhoneMockup isDark={isDark}>
+      <View style={{ gap: 6, marginBottom: 8 }}>
+        {colors.map((c, i) => (
+          <View key={i} style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: rowBg, borderRadius: 8, height: 36, paddingHorizontal: 8, gap: 8 }}>
+            <View style={{ width: 3, height: 20, backgroundColor: c, borderRadius: 2 }} />
+            <View style={{ flex: 1, height: 6, backgroundColor: inactive, borderRadius: 3 }} />
+            <View style={{ width: 28, height: 14, backgroundColor: c + '44', borderRadius: 4 }} />
+          </View>
+        ))}
+      </View>
+      <View style={{ borderTopWidth: 1, borderTopColor: isDark ? '#333' : '#e0e0e0', paddingTop: 6 }}>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 2 }}>
+          {[...Array(21)].map((_, i) => (
+            <View key={i} style={{ width: 23, height: 23, borderRadius: 12, backgroundColor: i === 8 ? TDU_BLUE : 'transparent', alignItems: 'center', justifyContent: 'center' }}>
+              <Text style={{ fontSize: 9, color: i === 8 ? '#fff' : (isDark ? '#888' : '#666') }}>{i + 1}</Text>
+            </View>
+          ))}
+        </View>
+        <Text style={{ fontSize: 9, color: isDark ? '#888' : '#999', marginTop: 4, textAlign: 'center' }}>日付をダブルタップで素早く登録</Text>
+      </View>
+      <View style={{ position: 'absolute', bottom: 10, right: 8, width: 32, height: 32, borderRadius: 16, backgroundColor: TDU_BLUE, alignItems: 'center', justifyContent: 'center' }}>
+        <Text style={{ color: '#fff', fontSize: 20, fontWeight: 'bold', lineHeight: 24 }}>+</Text>
+      </View>
+    </PhoneMockup>
+  );
+}
+
+function TutorialIllust2({ isDark }: { isDark: boolean }) {
+  const rowBg = isDark ? '#2c2c2e' : '#fff';
+  const rows: [string, string, string | null][] = [
+    ['#27AE60', 'A社', 'ES提出済 →'],
+    ['#8E44AD', 'B社', null],
+    ['#E74C3C', 'C社', null],
+  ];
+  return (
+    <PhoneMockup isDark={isDark}>
+      <View style={{ gap: 8, marginTop: 8 }}>
+        {rows.map(([c, co, btn], i) => (
+          <View key={i} style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: rowBg, borderRadius: 10, padding: 10, gap: 8 }}>
+            <View style={{ width: 3, height: 28, backgroundColor: c, borderRadius: 2 }} />
+            <View style={{ flex: 1, gap: 4 }}>
+              <View style={{ height: 8, backgroundColor: isDark ? '#3a3a3c' : '#e0e0e0', borderRadius: 4, width: '65%' }} />
+              <View style={{ height: 5, backgroundColor: isDark ? '#333' : '#ececec', borderRadius: 3, width: '45%' }} />
+            </View>
+            {btn && (
+              <View style={{ borderWidth: 1.5, borderColor: c, borderRadius: 7, paddingHorizontal: 7, paddingVertical: 4 }}>
+                <Text style={{ fontSize: 9, color: c, fontWeight: 'bold' }}>{btn}</Text>
+              </View>
+            )}
+          </View>
+        ))}
+      </View>
+    </PhoneMockup>
+  );
+}
+
+function TutorialIllust3({ isDark }: { isDark: boolean }) {
+  const rowBg = isDark ? '#2c2c2e' : '#fff';
+  const stageColors = ['#95A5A6', '#27AE60', '#8E44AD', '#E67E22', '#E74C3C', '#E91E8C'];
+  const inactive = isDark ? '#444' : '#e0e0e0';
+  const stages = [2, 4, 1];
+  return (
+    <PhoneMockup isDark={isDark}>
+      <View style={{ gap: 8, marginTop: 8 }}>
+        {stages.map((stage, ri) => (
+          <View key={ri} style={{ backgroundColor: rowBg, borderRadius: 10, padding: 10, gap: 6 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <View style={{ width: 3, height: 18, backgroundColor: stageColors[stage], borderRadius: 2 }} />
+              <View style={{ height: 7, backgroundColor: isDark ? '#3a3a3c' : '#e0e0e0', borderRadius: 4, flex: 1 }} />
+            </View>
+            <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 2 }}>
+              {stageColors.map((c, i) => (
+                <React.Fragment key={i}>
+                  <View style={{
+                    width: i === stage ? 7 : 5, height: i === stage ? 7 : 5, borderRadius: 4,
+                    backgroundColor: i <= stage ? c : 'transparent',
+                    borderWidth: 1, borderColor: i <= stage ? c : inactive,
+                  }} />
+                  {i < 5 && <View style={{ flex: 1, height: 1.5, backgroundColor: i < stage ? c : inactive }} />}
+                </React.Fragment>
+              ))}
+            </View>
+          </View>
+        ))}
+      </View>
+    </PhoneMockup>
+  );
+}
+
+function TutorialIllust4({ isDark }: { isDark: boolean }) {
+  const rowBg = isDark ? '#2c2c2e' : '#fff';
+  const items: [string, string, string][] = [
+    ['#E91E8C', '内定', 'A社'],
+    ['#8E44AD', '1次面接', 'B社'],
+    ['#27AE60', 'ES締切', 'C社'],
+    ['#2980B9', 'ES提出済', 'D社'],
+  ];
+  return (
+    <PhoneMockup isDark={isDark}>
+      <View style={{ flexDirection: 'row', marginBottom: 8, borderBottomWidth: 1, borderBottomColor: isDark ? '#333' : '#e0e0e0' }}>
+        {['📅', '📋', '🎯', '⚙️'].map((icon, i) => (
+          <View key={i} style={{ flex: 1, alignItems: 'center', paddingVertical: 5, borderBottomWidth: i === 2 ? 2 : 0, borderBottomColor: TDU_BLUE, marginBottom: -1 }}>
+            <Text style={{ fontSize: 13 }}>{icon}</Text>
+          </View>
+        ))}
+      </View>
+      <View style={{ gap: 5 }}>
+        {items.map(([c, st, co], i) => (
+          <View key={i} style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: rowBg, borderRadius: 8, height: 32, paddingHorizontal: 8, gap: 6 }}>
+            <View style={{ width: 3, height: 18, backgroundColor: c, borderRadius: 2 }} />
+            <View style={{ backgroundColor: c + '22', borderRadius: 4, paddingHorizontal: 5, paddingVertical: 2 }}>
+              <Text style={{ fontSize: 8, color: c, fontWeight: 'bold' }}>{st}</Text>
+            </View>
+            <Text style={{ fontSize: 10, color: isDark ? '#ccc' : '#333', fontWeight: '600' }}>{co}</Text>
+          </View>
+        ))}
+      </View>
+    </PhoneMockup>
+  );
+}
+
+const TUTORIAL_SLIDES = [
+  { title: '企業を登録する', desc: '右下の「＋」ボタン、またはカレンダーの\n日付をダブルタップして登録できます' },
+  { title: 'ステータスを進める', desc: 'カードの「→」ボタンをタップすると\n次の選考ステップへ進みます' },
+  { title: '選考の進捗を確認', desc: 'カード下部のドットで\n現在のフェーズが一目でわかります' },
+  { title: '持ち駒を確認する', desc: '持ち駒タブで選考中の企業を\nまとめて確認・管理できます' },
+];
+
+function TutorialModal({ visible, onClose, isDark, C }: {
+  visible: boolean; onClose: () => void; isDark: boolean; C: typeof LIGHT;
+}) {
+  const [page, setPage] = useState(0);
+  const scrollRef = useRef<any>(null);
+  const { width } = Dimensions.get('window');
+  const PAGES = TUTORIAL_SLIDES.length;
+
+  const goToNext = () => {
+    const next = page + 1;
+    if (next < PAGES) {
+      scrollRef.current?.scrollTo({ x: next * width, animated: true });
+      setPage(next);
+    }
+  };
+
+  const illusts = [
+    <TutorialIllust1 isDark={isDark} />,
+    <TutorialIllust2 isDark={isDark} />,
+    <TutorialIllust3 isDark={isDark} />,
+    <TutorialIllust4 isDark={isDark} />,
+  ];
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <View style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.4)' }}>
+        <View style={{ backgroundColor: isDark ? '#1c1c1e' : '#f2f2f7', borderTopLeftRadius: 24, borderTopRightRadius: 24, height: '92%' }}>
+          {/* Header */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 20, paddingBottom: 12 }}>
+            <View style={{ width: 64 }} />
+            <Text style={{ fontSize: 17, fontWeight: '600', color: C.text }}>基本の使い方</Text>
+            <TouchableOpacity
+              onPress={onClose}
+              style={{ backgroundColor: isDark ? '#2c2c2e' : '#e5e5ea', borderRadius: 20, paddingHorizontal: 16, paddingVertical: 8 }}>
+              <Text style={{ fontSize: 15, fontWeight: '600', color: C.text }}>閉じる</Text>
+            </TouchableOpacity>
+          </View>
+          {/* Slides */}
+          <ScrollView
+            ref={scrollRef}
+            horizontal pagingEnabled
+            showsHorizontalScrollIndicator={false}
+            onMomentumScrollEnd={(e) => setPage(Math.round(e.nativeEvent.contentOffset.x / width))}
+            style={{ flex: 1 }}>
+            {TUTORIAL_SLIDES.map((s, i) => (
+              <View key={i} style={{ width, alignItems: 'center', paddingHorizontal: 28, paddingTop: 8 }}>
+                <Text style={{ fontSize: 22, fontWeight: 'bold', color: C.text, textAlign: 'center', marginBottom: 10 }}>{s.title}</Text>
+                <Text style={{ fontSize: 14, color: C.text2, textAlign: 'center', lineHeight: 22, marginBottom: 24 }}>{s.desc}</Text>
+                {illusts[i]}
+              </View>
+            ))}
+          </ScrollView>
+          {/* Dots + start button */}
+          <View style={{ alignItems: 'center', paddingVertical: 20, gap: 14 }}>
+            <View style={{ flexDirection: 'row', gap: 6 }}>
+              {TUTORIAL_SLIDES.map((_, i) => (
+                <View key={i} style={{
+                  width: i === page ? 20 : 6, height: 6, borderRadius: 3,
+                  backgroundColor: i === page ? TDU_BLUE : (isDark ? '#555' : '#c8c8c8'),
+                }} />
+              ))}
+            </View>
+            {page === PAGES - 1 && (
+              <TouchableOpacity
+                style={{ backgroundColor: TDU_BLUE, borderRadius: 14, paddingHorizontal: 48, paddingVertical: 14 }}
+                onPress={onClose}>
+                <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}>はじめる</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        </View>
+        {/* Right arrow */}
+        {page < PAGES - 1 && (
+          <TouchableOpacity
+            onPress={goToNext}
+            style={{ position: 'absolute', right: 0, top: '50%', marginTop: -20, backgroundColor: isDark ? '#3a3a3c' : '#d8d8d8', borderTopLeftRadius: 12, borderBottomLeftRadius: 12, paddingLeft: 10, paddingRight: 6, paddingVertical: 14 }}>
+            <Text style={{ fontSize: 20, color: C.text }}>‹</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+    </Modal>
+  );
+}
+
 // ─── メインコンポーネント ─────────────────────────────────────────
 
 // Dark mode colors
@@ -2027,29 +2262,8 @@ export default function App() {
         )}
 
 
-        {/* 初回起動モーダル */}
-        <Modal visible={firstLaunchModal} transparent animationType="fade" onRequestClose={() => setFirstLaunchModal(false)}>
-          <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', padding: 24 }}>
-            <View style={{ backgroundColor: C.bg, borderRadius: 20, padding: 24, width: '90%', gap: 14 }}>
-              <Text style={{ fontSize: 22, fontWeight: 'bold', color: isDark ? '#6ea8fe' : TDU_BLUE, textAlign: 'center' }}>ようこそ！🎉</Text>
-              <Text style={{ fontSize: 15, fontWeight: 'bold', color: C.text }}>就活管理リマインダーの使い方</Text>
-              <View style={{ gap: 8 }}>
-                <Text style={{ fontSize: 13, color: C.text2, lineHeight: 20 }}>📅 <Text style={{ fontWeight: 'bold', color: C.text }}>カレンダータブ</Text>{'\n'}日付をタップして企業を登録。ダブルタップで素早く追加できます。</Text>
-                <Text style={{ fontSize: 13, color: C.text2, lineHeight: 20 }}>👥 <Text style={{ fontWeight: 'bold', color: C.text }}>持ち駒タブ</Text>{'\n'}登録した企業の選考状況を一覧管理。「→」で次のステップへ進めます。</Text>
-                <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 6 }}>
-                  <Image source={ICONS.settings} style={{ width: 14, height: 14, tintColor: C.text3, marginTop: 2 }} />
-                  <Text style={{ fontSize: 13, color: C.text2, lineHeight: 20, flex: 1 }}><Text style={{ fontWeight: 'bold', color: C.text }}>設定タブ</Text>{'\n'}詳しい使い方は設定タブ下部の「ヘルプ・使い方」をご覧ください。</Text>
-                </View>
-              </View>
-              <TouchableOpacity
-                style={{ backgroundColor: isDark ? '#1c2333' : TDU_BLUE, borderRadius: 12, paddingVertical: 12, alignItems: 'center', marginTop: 4 }}
-                onPress={() => setFirstLaunchModal(false)}
-              >
-                <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 15 }}>はじめる</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </Modal>
+        {/* チュートリアルモーダル */}
+        <TutorialModal visible={firstLaunchModal} onClose={() => setFirstLaunchModal(false)} isDark={isDark} C={C} />
 
         {/* 内定おめでとう！広告オファーモーダル */}
         <Modal visible={offerModalVisible} transparent animationType="fade" onRequestClose={() => setOfferModalVisible(false)}>
