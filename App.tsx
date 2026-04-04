@@ -223,8 +223,25 @@ function SwipeableRow({ children, onDelete }: { children: React.ReactNode; onDel
 }
 
 // ─── ミニステッパー（カード内用・ドットのみ）────────────────────────
-function MiniStepper({ status, statusColors, isDark }: { status: string; statusColors: Record<string, string>; isDark: boolean }) {
+function MiniStepper({ status, statusColors, isDark, animTrigger }: {
+  status: string; statusColors: Record<string, string>; isDark: boolean; animTrigger?: number;
+}) {
   const currentStage = STATUS_TO_STAGE[status] ?? -1;
+  const dotScale = useRef(new Animated.Value(1)).current;
+  const barAnim = useRef(new Animated.Value(1)).current;
+  const prevTrigger = useRef(0);
+
+  useEffect(() => {
+    if (!animTrigger || animTrigger === prevTrigger.current) return;
+    prevTrigger.current = animTrigger;
+    dotScale.setValue(0);
+    barAnim.setValue(0);
+    Animated.parallel([
+      Animated.spring(dotScale, { toValue: 1, friction: 5, tension: 200, useNativeDriver: true }),
+      Animated.timing(barAnim, { toValue: 1, duration: 220, useNativeDriver: false }),
+    ]).start();
+  }, [animTrigger]);
+
   if (currentStage < 0) return null;
   const inactiveColor = isDark ? '#444' : '#e0e0e0';
   return (
@@ -233,15 +250,35 @@ function MiniStepper({ status, statusColors, isDark }: { status: string; statusC
         const done = i < currentStage;
         const active = i === currentStage;
         const color = (done || active) ? (statusColors[STEPPER_STAGES[i]] ?? '#95A5A6') : inactiveColor;
+        const isNewDot = active;
+        const isNewBar = i === currentStage - 1;
         return (
           <React.Fragment key={stage}>
-            <View style={{
-              width: active ? 8 : 6, height: active ? 8 : 6, borderRadius: 4,
-              backgroundColor: done || active ? color : 'transparent',
-              borderWidth: 1.5, borderColor: color,
-            }} />
+            {isNewDot ? (
+              <Animated.View style={{
+                width: 8, height: 8, borderRadius: 4,
+                backgroundColor: color, borderWidth: 1.5, borderColor: color,
+                transform: [{ scale: dotScale }],
+              }} />
+            ) : (
+              <View style={{
+                width: active ? 8 : 6, height: active ? 8 : 6, borderRadius: 4,
+                backgroundColor: done || active ? color : 'transparent',
+                borderWidth: 1.5, borderColor: color,
+              }} />
+            )}
             {i < 4 && (
-              <View style={{ flex: 1, height: 2, backgroundColor: done ? (statusColors[STEPPER_STAGES[i]] ?? '#95A5A6') : inactiveColor }} />
+              isNewBar ? (
+                <View style={{ flex: 1, height: 2, backgroundColor: inactiveColor, overflow: 'hidden' }}>
+                  <Animated.View style={{
+                    position: 'absolute', left: 0, top: 0, bottom: 0,
+                    width: barAnim.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] }),
+                    backgroundColor: statusColors[STEPPER_STAGES[i]] ?? '#95A5A6',
+                  }} />
+                </View>
+              ) : (
+                <View style={{ flex: 1, height: 2, backgroundColor: done ? (statusColors[STEPPER_STAGES[i]] ?? '#95A5A6') : inactiveColor }} />
+              )
             )}
           </React.Fragment>
         );
@@ -537,6 +574,7 @@ export default function App() {
   const [showAllGenres, setShowAllGenres] = useState(false);
   const [showAllStatuses, setShowAllStatuses] = useState(false);
   const [openHelpItem, setOpenHelpItem] = useState<number | null>(null);
+  const [advanceAnimMap, setAdvanceAnimMap] = useState<Record<string, number>>({});
 
   // チェックリストモーダル
   const [checkModalItem, setCheckModalItem] = useState<Schedule | null>(null);
@@ -1240,6 +1278,7 @@ export default function App() {
       calendarColor: statusColors[ns] ?? '#95A5A6',
     });
     await saveSchedules(updated);
+    setAdvanceAnimMap(prev => ({ ...prev, [item.id]: (prev[item.id] ?? 0) + 1 }));
   };
 
   // ─── ジャンル管理 ─────────────────────────────────────────────
@@ -1403,6 +1442,9 @@ export default function App() {
                           const items = dateCompanyMap[ds] || [];
                           const isSel = ds === selectedDate, isToday = ds === today;
                           const internBars = internshipPeriodsMap[ds] || [];
+                          const dow = new Date(ds + 'T12:00:00').getDay(); // 0=Sun, 6=Sat
+                          const isWeekRowStart = dow === 0;
+                          const isWeekRowEnd = dow === 6;
                           return (
                             <TouchableOpacity
                               onPress={() => {
@@ -1437,18 +1479,22 @@ export default function App() {
                                 ]}>{date.day}</Text>
                               </View>
                               {/* インターン期間スパンバー */}
-                              {internBars.slice(0, 1).map((bar, bi) => (
-                                <View key={bi} style={{
-                                  position: 'absolute', top: 28, height: 5,
-                                  left: bar.isStart ? 23 : 0,
-                                  right: bar.isEnd ? 23 : 0,
-                                  backgroundColor: bar.color + 'CC',
-                                  borderTopLeftRadius: bar.isStart ? 3 : 0,
-                                  borderBottomLeftRadius: bar.isStart ? 3 : 0,
-                                  borderTopRightRadius: bar.isEnd ? 3 : 0,
-                                  borderBottomRightRadius: bar.isEnd ? 3 : 0,
-                                }} />
-                              ))}
+                              {internBars.slice(0, 1).map((bar, bi) => {
+                                const capL = bar.isStart || isWeekRowStart;
+                                const capR = bar.isEnd || isWeekRowEnd;
+                                return (
+                                  <View key={bi} style={{
+                                    position: 'absolute', top: 28, height: 5,
+                                    left: capL ? 23 : 0,
+                                    right: capR ? 23 : 0,
+                                    backgroundColor: bar.color + 'CC',
+                                    borderTopLeftRadius: capL ? 3 : 0,
+                                    borderBottomLeftRadius: capL ? 3 : 0,
+                                    borderTopRightRadius: capR ? 3 : 0,
+                                    borderBottomRightRadius: capR ? 3 : 0,
+                                  }} />
+                                );
+                              })}
                               {items.slice(0, 2).map((item: Schedule, i: number) => {
                                 const sc = item.calendarColor ?? statusColorOf(item.status);
                                 return (
@@ -1665,7 +1711,7 @@ export default function App() {
                           ) : null}
                           {item.note ? <Text style={styles.notePreview} numberOfLines={1}>📝 {item.note}</Text> : null}
                           {/* ⑩ 選考ステッパー */}
-                          {!isInactive && <MiniStepper status={item.status} statusColors={statusColors} isDark={isDark} />}
+                          {!isInactive && <MiniStepper status={item.status} statusColors={statusColors} isDark={isDark} animTrigger={advanceAnimMap[item.id] ?? 0} />}
                         </View>
                         <View style={{ alignItems: 'flex-end', gap: 6 }}>
                           <View style={[styles.statusBadge, { backgroundColor: sc },
@@ -1676,7 +1722,11 @@ export default function App() {
                             <TouchableOpacity
                               style={[styles.nextStatusBtn, { borderColor: sc }]}
                               onPress={() => advanceStatus(item)}>
-                              <Text style={[styles.nextStatusBtnText, { color: sc }]} numberOfLines={1}>{ns} →</Text>
+                              <Text style={[styles.nextStatusBtnText, { color: sc }]} numberOfLines={1}>{
+                                ns === 'インターン面接' ? '面接⇨' :
+                                ns === '🌸インターン確定' ? '参加確定⇨' :
+                                ns + ' →'
+                              }</Text>
                             </TouchableOpacity>
                           ) : null}
                           {['説明会', 'GD'].includes(item.status) && !isInactive ? (

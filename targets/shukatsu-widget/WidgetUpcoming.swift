@@ -94,32 +94,26 @@ struct UpcomingHomeView: View {
     }
 
     private func scheduleRow(_ s: WidgetSchedule) -> some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 5) {
             RoundedRectangle(cornerRadius: 2)
                 .fill(colorForStatus(s.status, override: s.calendarColor))
-                .frame(width: 3, height: family == .systemSmall ? 28 : 22)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(s.company)
-                    .font(.system(size: family == .systemSmall ? 11 : 12, weight: .semibold))
-                    .foregroundColor(.white)
+                .frame(width: 3, height: 18)
+            Text(s.status)
+                .font(.system(size: 9))
+                .foregroundColor(colorForStatus(s.status, override: s.calendarColor))
+                .lineLimit(1)
+                .fixedSize()
+            Text(s.company)
+                .font(.system(size: family == .systemSmall ? 10 : 11, weight: .semibold))
+                .foregroundColor(.white)
+                .lineLimit(1)
+            Spacer(minLength: 2)
+            if !s.date.isEmpty {
+                Text(formatDate(s.date))
+                    .font(.system(size: 9))
+                    .foregroundColor(.white.opacity(0.7))
                     .lineLimit(1)
-                HStack(spacing: 4) {
-                    Text(s.status)
-                        .font(.system(size: 9))
-                        .foregroundColor(colorForStatus(s.status, override: s.calendarColor))
-                    if family != .systemSmall {
-                        Text("·").font(.system(size: 9)).foregroundColor(.white.opacity(0.4))
-                        Text(formatDate(s.date)).font(.system(size: 9)).foregroundColor(.white.opacity(0.7))
-                    }
-                }
-            }
-            Spacer()
-            if family == .systemSmall {
-                Text(formatDate(s.date)).font(.system(size: 9)).foregroundColor(.white.opacity(0.7))
-            } else if !s.hour.isEmpty && s.hour != "0" {
-                Text(String(format: "%@:%@", s.hour, s.minute.isEmpty ? "00" : s.minute))
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundColor(.white.opacity(0.8))
+                    .fixedSize()
             }
         }
     }
