@@ -2,7 +2,8 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 // import RNIap, { initConnection, endConnection, getProducts, requestPurchase, finishTransaction, purchaseErrorListener, purchaseUpdatedListener, getAvailablePurchases } from 'react-native-iap'; // 近日公開
 import { useColorScheme } from 'react-native';
 import { useFonts } from 'expo-font';
-import { MPLUSRounded1c_400Regular, MPLUSRounded1c_700Bold, MPLUSRounded1c_900Black } from '@expo-google-fonts/m-plus-rounded-1c';
+import { Inter_400Regular, Inter_700Bold } from '@expo-google-fonts/inter';
+import { NotoSansJP_400Regular, NotoSansJP_700Bold } from '@expo-google-fonts/noto-sans-jp';
 
 import {
   StyleSheet, Text, View, TouchableOpacity, ScrollView,
@@ -55,8 +56,8 @@ const STORAGE_KEY = '@schedules_v11';
 const GENRES_KEY = '@genres_v11';
 const STATUS_COLORS_KEY = '@status_colors_v2';
 const STATUS_OPTIONS_KEY = '@status_options_v1';
-const TDU_BLUE = '#F43F5E';
-const ACCENT = '#F43F5E';
+const TDU_BLUE = '#003366';
+const ACCENT = '#1a6bcc';
 
 const DEFAULT_STATUS_OPTIONS = ['検討中', '説明会', 'ES締切', 'ES提出済', 'GD', '1次面接', '2次面接', '最終面接', '内定', '内定辞退', '不合格', '完了'];
 const STATUS_OPTIONS = DEFAULT_STATUS_OPTIONS; // 後方互換用
@@ -298,12 +299,12 @@ function StatusStepper({ status, statusColors, isDark }: { status: string; statu
 
 // Dark mode colors
 const LIGHT = {
-  bg: '#F5F5F7', bg2: '#EFEFEF', bg3: '#FFF0F3', card: '#FFFFFF',
-  border: '#E8E8E8', border2: '#F0F0F0',
-  text: '#1A1A1A', text2: '#666666', text3: '#999999',
-  calBg: '#F5F5F7', calText: '#1A1A1A',
-  tabBar: '#FFFFFF', inputBg: '#F5F5F7', searchBg: '#EFEFEF',
-  filterBg: '#FFF0F3', statChip: '#FFF0F3', headerBorder: '#E8E8E8',
+  bg: '#ffffff', bg2: '#f8f9fa', bg3: '#f0f4ff', card: '#ffffff',
+  border: '#eeeeee', border2: '#f0f0f0',
+  text: '#222222', text2: '#666666', text3: '#999999',
+  calBg: '#ffffff', calText: '#222222',
+  tabBar: '#ffffff', inputBg: '#f8f9fa', searchBg: '#f5f5f5',
+  filterBg: '#f8faff', statChip: '#e8f0fe', headerBorder: '#f0f0f0',
 };
 const DARK = {
   bg: '#0d1117', bg2: '#161b22', bg3: '#1c2333', card: '#161b22',
@@ -381,13 +382,14 @@ export default function App() {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const C = isDark ? DARK : LIGHT;
-  const ACCENT = isDark ? '#FB7185' : TDU_BLUE;
+  const ACCENT = isDark ? '#6ea8fe' : TDU_BLUE;
   const [currentCalDate, setCurrentCalDate] = useState(new Date());
 
   const [fontsLoaded] = useFonts({
-    MPLUSRounded1c_400Regular,
-    MPLUSRounded1c_700Bold,
-    MPLUSRounded1c_900Black,
+    Inter_400Regular,
+    Inter_700Bold,
+    NotoSansJP_400Regular,
+    NotoSansJP_700Bold,
   });
 
   const [activeTab, setActiveTab] = useState<TabType>('calendar');
@@ -2623,10 +2625,10 @@ const styles = StyleSheet.create({
 
   topNav: { paddingVertical: 10, borderBottomWidth: 1 },
   headerStats: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20 },
-  headerTitle: { fontSize: 18, fontWeight: 'bold', color: TDU_BLUE, fontFamily: 'MPLUSRounded1c_900Black', letterSpacing: -0.3 },
-  statChip: { borderRadius: 12, paddingHorizontal: 12, paddingVertical: 6, alignItems: 'center' },
-  statNum: { fontSize: 18, fontWeight: 'bold', fontFamily: 'MPLUSRounded1c_900Black' },
-  statLabel: { fontSize: 9, fontFamily: 'MPLUSRounded1c_400Regular' },
+  headerTitle: { fontSize: 17, fontWeight: 'bold', color: TDU_BLUE },
+  statChip: { borderRadius: 10, paddingHorizontal: 12, paddingVertical: 6, alignItems: 'center' },
+  statNum: { fontSize: 18, fontWeight: 'bold', color: TDU_BLUE },
+  statLabel: { fontSize: 9, color: TDU_BLUE },
 
   calLabel: { borderLeftWidth: 2, borderRadius: 3, paddingHorizontal: 2, marginTop: 1, width: 44 },
   calLabelText: { fontSize: 7, fontWeight: 'bold' },
@@ -2635,14 +2637,14 @@ const styles = StyleSheet.create({
   upcomingCard: { flexDirection: 'row', alignItems: 'center', padding: 12, borderRadius: 10, marginBottom: 8 },
   todoArea: { flex: 1, paddingHorizontal: 16, paddingTop: 14, overflow: 'hidden' },
   sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  subTitle: { fontSize: 15, fontWeight: 'bold', marginBottom: 10, fontFamily: 'MPLUSRounded1c_700Bold' },
+  subTitle: { fontSize: 15, fontWeight: 'bold', marginBottom: 10 },
   addButton: { backgroundColor: TDU_BLUE, paddingVertical: 6, paddingHorizontal: 12, borderRadius: 20 },
   addButtonText: { color: '#fff', fontSize: 11, fontWeight: 'bold' },
   itemCard: { paddingVertical: 13, paddingHorizontal: 6, borderBottomWidth: 1, borderColor: '#f0f0f0', flexDirection: 'row', alignItems: 'center', gap: 8 },
-  itemTitle: { fontSize: 15, fontWeight: 'bold', fontFamily: 'MPLUSRounded1c_700Bold' },
+  itemTitle: { fontSize: 15, fontWeight: 'bold', fontFamily: 'NotoSansJP_700Bold' },
   itemStatus: { fontSize: 11, marginTop: 3 },
   itemArrow: { color: '#ccc', fontSize: 16 },
-  emptyText: { textAlign: 'center', marginTop: 32, fontSize: 14, fontFamily: 'MPLUSRounded1c_400Regular', lineHeight: 22 },
+  emptyText: { textAlign: 'center', marginTop: 24, fontSize: 13 },
 
   searchBar: { flexDirection: 'row', alignItems: 'center', margin: 12, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8 },
   searchIcon: { fontSize: 14, marginRight: 6 },
@@ -2667,29 +2669,29 @@ const styles = StyleSheet.create({
   swipeDeleteBtn: { flex: 1, justifyContent: 'center', alignItems: 'center', width: 80 },
   swipeDeleteText: { color: '#fff', fontSize: 11, fontWeight: 'bold', textAlign: 'center' },
 
-  listCard: { padding: 14, borderRadius: 16, flexDirection: 'row', alignItems: 'center', borderWidth: 0, elevation: 4, overflow: 'hidden', shadowColor: '#000', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.10, shadowRadius: 12 },
+  listCard: { padding: 14, borderRadius: 12, flexDirection: 'row', alignItems: 'center', borderWidth: 1, elevation: 3, overflow: 'hidden', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.08, shadowRadius: 8 },
   genreBand: { width: 4, borderRadius: 4, alignSelf: 'stretch' },
-  dateText: { fontSize: 11, color: '#999', marginTop: 4, fontFamily: 'MPLUSRounded1c_400Regular' },
-  notePreview: { fontSize: 10, color: '#aaa', marginTop: 2, fontFamily: 'MPLUSRounded1c_400Regular' },
-  statusBadge: { backgroundColor: TDU_BLUE, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20 },
-  statusBadgeText: { color: '#fff', fontSize: 9, fontWeight: 'bold', fontFamily: 'MPLUSRounded1c_700Bold' },
+  dateText: { fontSize: 11, color: '#999', marginTop: 4, fontFamily: 'Inter_400Regular' },
+  notePreview: { fontSize: 10, color: '#aaa', marginTop: 2 },
+  statusBadge: { backgroundColor: TDU_BLUE, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
+  statusBadgeText: { color: '#fff', fontSize: 9, fontWeight: 'bold', fontFamily: 'NotoSansJP_700Bold' },
   rankBadge: { width: 22, height: 22, borderRadius: 6, alignItems: 'center', justifyContent: 'center' },
-  rankText: { color: '#fff', fontSize: 10, fontWeight: 'bold', fontFamily: 'MPLUSRounded1c_700Bold' },
+  rankText: { color: '#fff', fontSize: 10, fontWeight: 'bold', fontFamily: 'Inter_700Bold' },
   checkBtn: { backgroundColor: '#f0f4ff', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
   checkBtnText: { fontSize: 10, color: TDU_BLUE, fontWeight: 'bold' },
 
-  fab: { position: 'absolute', bottom: 16, right: 20, width: 56, height: 56, borderRadius: 28, backgroundColor: TDU_BLUE, alignItems: 'center', justifyContent: 'center', elevation: 6, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.20, shadowRadius: 8 },
+  fab: { position: 'absolute', bottom: 16, right: 20, width: 52, height: 52, borderRadius: 26, backgroundColor: TDU_BLUE, alignItems: 'center', justifyContent: 'center', elevation: 5 },
   fabText: { color: '#fff', fontSize: 26, lineHeight: 30 },
 
-  settingSection: { fontSize: 12, fontWeight: 'bold', color: '#888', marginBottom: 12, letterSpacing: 1, fontFamily: 'MPLUSRounded1c_700Bold' },
+  settingSection: { fontSize: 12, fontWeight: 'bold', color: '#888', marginBottom: 12, letterSpacing: 1, fontFamily: 'NotoSansJP_700Bold' },
   settingRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 14, borderBottomWidth: 1 },
-  settingLabel: { fontSize: 14, flex: 1, fontFamily: 'MPLUSRounded1c_400Regular' },
+  settingLabel: { fontSize: 14, flex: 1, fontFamily: 'NotoSansJP_400Regular' },
   genreRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderColor: '#f0f0f0' },
   genreColorDot: { width: 16, height: 16, borderRadius: 8, marginRight: 12 },
-  outlineButton: { borderWidth: 1.5, borderColor: TDU_BLUE, padding: 13, borderRadius: 14, alignItems: 'center', marginTop: 12 },
-  outlineButtonText: { color: TDU_BLUE, fontWeight: 'bold', fontFamily: 'MPLUSRounded1c_700Bold' },
-  dangerButton: { borderWidth: 1.5, borderColor: '#e74c3c', padding: 14, borderRadius: 14, alignItems: 'center' },
-  dangerButtonText: { color: '#e74c3c', fontWeight: 'bold', fontFamily: 'MPLUSRounded1c_700Bold' },
+  outlineButton: { borderWidth: 1, borderColor: TDU_BLUE, padding: 12, borderRadius: 10, alignItems: 'center', marginTop: 12 },
+  outlineButtonText: { color: TDU_BLUE, fontWeight: 'bold' },
+  dangerButton: { borderWidth: 1, borderColor: '#e74c3c', padding: 14, borderRadius: 10, alignItems: 'center' },
+  dangerButtonText: { color: '#e74c3c', fontWeight: 'bold' },
   aboutBox: { padding: 16, borderRadius: 10, marginTop: 20 },
   aboutText: { fontSize: 13, color: '#666', lineHeight: 20 },
   supportBtn: { flexDirection: 'row', alignItems: 'center', borderRadius: 14, borderWidth: 1.5, padding: 16, marginTop: 8 },
@@ -2699,19 +2701,19 @@ const styles = StyleSheet.create({
   sortChipActive: { backgroundColor: TDU_BLUE },
   sortChipText: { fontSize: 12, color: '#666' },
 
-  tabBar: { flexDirection: 'row', height: 74, borderTopWidth: 1, paddingBottom: 10, shadowColor: '#000', shadowOffset: { width: 0, height: -2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 8 },
+  tabBar: { flexDirection: 'row', height: 70, borderTopWidth: 1, paddingBottom: 10 },
   tabButton: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   tabImg: { width: 26, height: 26, opacity: 0.3, tintColor: '#aaa' },
   tabImgActive: { opacity: 1, tintColor: TDU_BLUE },
-  tabLabel: { fontSize: 9, color: '#ccc', marginTop: 3, fontFamily: 'MPLUSRounded1c_400Regular' },
-  tabLabelActive: { fontWeight: 'bold', color: TDU_BLUE, fontFamily: 'MPLUSRounded1c_700Bold' },
+  tabLabel: { fontSize: 9, color: '#ccc', marginTop: 3, fontFamily: 'NotoSansJP_400Regular' },
+  tabLabelActive: { fontWeight: 'bold', color: TDU_BLUE, fontFamily: 'NotoSansJP_700Bold' },
 
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
   modalContent: { backgroundColor: '#fff', borderTopLeftRadius: 25, borderTopRightRadius: 25, padding: 24, maxHeight: '92%' },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
   dragHandleContainer: { alignItems: 'center', paddingVertical: 8, marginTop: -8, marginHorizontal: -24 },
   dragHandleBar: { width: 40, height: 4, borderRadius: 2, backgroundColor: '#ccc' },
-  modalTitle: { fontSize: 17, fontWeight: 'bold', marginBottom: 4, fontFamily: 'MPLUSRounded1c_700Bold' },
+  modalTitle: { fontSize: 17, fontWeight: 'bold', marginBottom: 4, fontFamily: 'NotoSansJP_700Bold' },
   deleteText: { color: '#e74c3c', fontSize: 13 },
   label: { fontSize: 11, color: '#888', marginBottom: 6, marginTop: 12 },
   input: { backgroundColor: '#f8f9fa', padding: 13, borderRadius: 10, fontSize: 15, marginBottom: 2 },
@@ -2725,9 +2727,9 @@ const styles = StyleSheet.create({
   genreChipText: { fontSize: 11, color: '#666' },
   modalButtons: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 24 },
   cancelText: { color: '#999', fontSize: 15 },
-  saveButton: { backgroundColor: TDU_BLUE, paddingVertical: 14, paddingHorizontal: 44, borderRadius: 16, minHeight: 48, justifyContent: 'center', shadowColor: '#F43F5E', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.30, shadowRadius: 8, elevation: 4 },
-  saveButtonDisabled: { backgroundColor: '#aaa', shadowOpacity: 0 },
-  saveButtonText: { color: '#fff', fontWeight: 'bold', fontSize: 15, fontFamily: 'MPLUSRounded1c_700Bold' },
+  saveButton: { backgroundColor: TDU_BLUE, paddingVertical: 13, paddingHorizontal: 44, borderRadius: 14 },
+  saveButtonDisabled: { backgroundColor: '#aaa' },
+  saveButtonText: { color: '#fff', fontWeight: 'bold', fontSize: 15 },
 
   pickerOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center' },
   pickerBox: { backgroundColor: '#fff', borderRadius: 20, padding: 20, width: '85%' },
