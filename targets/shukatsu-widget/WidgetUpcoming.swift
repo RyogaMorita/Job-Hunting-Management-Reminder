@@ -47,7 +47,13 @@ struct UpcomingHomeView: View {
     let entry: UpcomingEntry
     @Environment(\.widgetFamily) var family
 
-    private var limit: Int { family == .systemSmall ? 2 : 3 }
+    private var limit: Int {
+        switch family {
+        case .systemSmall: return 3
+        case .systemLarge: return 8
+        default: return 5 // systemMedium
+        }
+    }
 
     var body: some View {
         ZStack {
@@ -109,7 +115,7 @@ struct UpcomingHomeView: View {
                 .lineLimit(1)
             Spacer(minLength: 2)
             if !s.date.isEmpty {
-                Text(formatDate(s.date))
+                Text(formatDate(s.date) + (s.hour.isEmpty ? "" : " \(s.hour):\(s.minute)"))
                     .font(.system(size: 9))
                     .foregroundColor(.white.opacity(0.7))
                     .lineLimit(1)
@@ -190,6 +196,6 @@ struct UpcomingWidget: Widget {
         }
         .configurationDisplayName("直近の持ち駒")
         .description("日程が近い順に選考中の企業を表示")
-        .supportedFamilies([.systemSmall, .systemMedium, .accessoryRectangular, .accessoryCircular])
+        .supportedFamilies([.systemSmall, .systemMedium, .systemLarge, .accessoryRectangular, .accessoryCircular])
     }
 }

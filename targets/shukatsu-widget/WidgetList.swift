@@ -29,7 +29,7 @@ struct ListWidgetView: View {
     private var limit: Int { family == .systemMedium ? 5 : 10 }
 
     // ステータス優先度（選考段階が進んでいるものを上に）
-    private let statusOrder = ["最終面接", "2次面接", "1次面接", "GD", "ES締切", "ES提出済", "説明会", "検討中", "内定"]
+    private let statusOrder = ["最終面接", "2次面接", "1次面接", "GD", "ES締切", "ES提出済", "説明会", "検討中", "インターン面接", "インターンES締切", "🌸インターン確定", "内定"]
 
     private var sortedSchedules: [WidgetSchedule] {
         entry.schedules.sorted { a, b in

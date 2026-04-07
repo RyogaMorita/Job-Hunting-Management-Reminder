@@ -46,7 +46,7 @@ struct AppGroupHelper {
     }
 
     static var activeSchedules: [WidgetSchedule] {
-        let inactive = ["内定", "内定辞退", "不合格"]
+        let inactive = ["内定", "内定辞退", "不合格", "完了"]
         return loadSchedules()
             .filter { !inactive.contains($0.status) }
             .sorted { $0.company < $1.company }
