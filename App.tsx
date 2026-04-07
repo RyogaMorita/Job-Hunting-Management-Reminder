@@ -1,5 +1,9 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import ReAnimated, { useSharedValue, useAnimatedStyle, withSpring, withTiming } from 'react-native-reanimated';
+import ReAnimated, {
+  useSharedValue, useAnimatedStyle, withSpring, withTiming,
+  FadeInDown, FadeOutLeft, LinearTransition,
+} from 'react-native-reanimated';
+import { Pressable } from 'react-native';
 // import RNIap, { initConnection, endConnection, getProducts, requestPurchase, finishTransaction, purchaseErrorListener, purchaseUpdatedListener, getAvailablePurchases } from 'react-native-iap'; // 近日公開
 import { useColorScheme } from 'react-native';
 import { useFonts } from 'expo-font';
@@ -220,6 +224,22 @@ function SwipeableRow({ children, onDelete }: { children: React.ReactNode; onDel
         {children}
       </Animated.View>
     </View>
+  );
+}
+
+// ─── アニメーションカード（プレス時スケール）────────────────────────
+function AnimatedCard({ children, style, onPress }: { children: React.ReactNode; style?: any; onPress: () => void }) {
+  const scale = useSharedValue(1);
+  const animStyle = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
+  return (
+    <Pressable
+      onPressIn={() => { scale.value = withSpring(0.97, { damping: 15, stiffness: 300 }); }}
+      onPressOut={() => { scale.value = withSpring(1, { damping: 15, stiffness: 300 }); }}
+      onPress={onPress}>
+      <ReAnimated.View style={[style, animStyle]}>
+        {children}
+      </ReAnimated.View>
+    </Pressable>
   );
 }
 
@@ -758,8 +778,10 @@ export default function App() {
   const scrollToMemo = () => setTimeout(() => modalScrollRef.current?.scrollToEnd({ animated: true }), 300);
 
   // ─── アニメーション値 ────────────────────────────────────────
-  const tabIndicatorX = useRef(new Animated.Value(0)).current;
-  const fabScale = useRef(new Animated.Value(1)).current;
+  const tabIndicatorPos = useSharedValue(0);
+  const fabScale = useSharedValue(1);
+  const tabIndicatorStyle = useAnimatedStyle(() => ({ transform: [{ translateX: tabIndicatorPos.value }] }));
+  const fabScaleStyle = useAnimatedStyle(() => ({ transform: [{ scale: fabScale.value }] }));
   const modalTranslateY = useRef(new Animated.Value(600)).current;
   const modalScrollY = useRef(0);
   const modalPanResponder = useRef(PanResponder.create({
@@ -849,11 +871,8 @@ export default function App() {
   // タブ切り替えインジケーターアニメーション
   useEffect(() => {
     const idx = ['calendar', 'list', 'settings'].indexOf(activeTab);
-    Animated.spring(tabIndicatorX, {
-      toValue: idx,
-      tension: 80, friction: 12, useNativeDriver: true,
-    }).start();
-  }, [activeTab]);
+    tabIndicatorPos.value = withSpring(idx * (screenWidth / 3), { damping: 12, stiffness: 80 });
+  }, [activeTab, screenWidth]);
 
   // リストフェードイン（フィルター/ソート変更時）
   const listFadeAnim = useRef(new Animated.Value(1)).current;
@@ -1814,14 +1833,13 @@ export default function App() {
               )}
             </View>
             {/* カレンダータブのFAB */}
-            <TouchableOpacity
+            <Pressable
               style={styles.fab}
               onPress={() => { openAdd(); countAction(); }}
-              onPressIn={() => Animated.spring(fabScale, { toValue: 0.85, useNativeDriver: true, tension: 300, friction: 10 }).start()}
-              onPressOut={() => Animated.spring(fabScale, { toValue: 1, useNativeDriver: true, tension: 300, friction: 10 }).start()}
-              activeOpacity={1}>
-              <Animated.Text style={[styles.fabText, { transform: [{ scale: fabScale }] }]}>＋</Animated.Text>
-            </TouchableOpacity>
+              onPressIn={() => { fabScale.value = withSpring(0.85, { damping: 15, stiffness: 300 }); }}
+              onPressOut={() => { fabScale.value = withSpring(1, { damping: 15, stiffness: 300 }); }}>
+              <ReAnimated.Text style={[styles.fabText, fabScaleStyle]}>＋</ReAnimated.Text>
+            </Pressable>
           </View>
         )}
 
@@ -1896,22 +1914,26 @@ export default function App() {
             <Animated.ScrollView style={{ flex: 1, paddingHorizontal: 16, opacity: listFadeAnim }}>
               {filteredSorted.length === 0
                 ? <Text style={[styles.emptyText, { color: C.text3 }]}>該当する企業がありません</Text>
-                : filteredSorted.map(item => {
+                : filteredSorted.map((item, index) => {
                   const sc = statusColorOf(item.status);
                   const isInternal = item.status === '内定';
                   const isInactive = INACTIVE.includes(item.status);
                   const ns = nextStatus(item.status);
                   const cdLabel = countdownLabel(item.date); // ⑪
                   return (
-                    <SwipeableRow key={item.id} onDelete={() => deleteSchedule(item.id)}>
-                      <TouchableOpacity
+                    <ReAnimated.View
+                      key={item.id}
+                      entering={FadeInDown.delay(Math.min(index * 60, 400)).springify()}
+                      exiting={FadeOutLeft.duration(200)}
+                      layout={LinearTransition.springify()}>
+                    <SwipeableRow onDelete={() => deleteSchedule(item.id)}>
+                      <AnimatedCard
                         style={[styles.listCard,
                         {
                           backgroundColor: isDark ? (isInactive ? '#2a2a2a' : isInternal ? '#2d0a0a' : C.card) : statusCardColor(item.status),
                           borderColor: isDark ? C.border : statusCardBorder(item.status)
                         }]}
-                        onPress={() => openDetail(item)}
-                        activeOpacity={0.9}>
+                        onPress={() => openDetail(item)}>
                         <View style={[styles.genreBand, { backgroundColor: sc }]} />
                         <View style={{ flex: 1, paddingLeft: 10 }}>
                           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
@@ -1978,21 +2000,21 @@ export default function App() {
                             </TouchableOpacity>
                           ) : null}
                         </View>
-                      </TouchableOpacity>
+                      </AnimatedCard>
                     </SwipeableRow>
+                    </ReAnimated.View>
                   );
                 })
               }
               <View style={{ height: 80 }} />
             </Animated.ScrollView>
-            <TouchableOpacity
+            <Pressable
               style={styles.fab}
               onPress={() => { openAdd(); countAction(); }}
-              onPressIn={() => Animated.spring(fabScale, { toValue: 0.85, useNativeDriver: true, tension: 300, friction: 10 }).start()}
-              onPressOut={() => Animated.spring(fabScale, { toValue: 1, useNativeDriver: true, tension: 300, friction: 10 }).start()}
-              activeOpacity={1}>
-              <Animated.Text style={[styles.fabText, { transform: [{ scale: fabScale }] }]}>＋</Animated.Text>
-            </TouchableOpacity>
+              onPressIn={() => { fabScale.value = withSpring(0.85, { damping: 15, stiffness: 300 }); }}
+              onPressOut={() => { fabScale.value = withSpring(1, { damping: 15, stiffness: 300 }); }}>
+              <ReAnimated.Text style={[styles.fabText, fabScaleStyle]}>＋</ReAnimated.Text>
+            </Pressable>
           </View>
         )}
 
@@ -2394,18 +2416,18 @@ export default function App() {
         <View style={[styles.tabBar, { backgroundColor: C.tabBar, borderTopColor: C.border }]}
           onLayout={(e) => {
             const w = e.nativeEvent.layout.width;
-            tabIndicatorX.setValue(['calendar', 'list', 'settings'].indexOf(activeTab) * (w / 3));
+            setScreenWidth(w);
+            tabIndicatorPos.value = ['calendar', 'list', 'settings'].indexOf(activeTab) * (w / 3);
           }}>
           {/* スライドインジケーター */}
           {screenWidth > 0 && (() => {
             const activeColor = isDark ? '#6ea8fe' : TDU_BLUE;
             const tabW = screenWidth / 3;
             return (
-              <Animated.View style={{
+              <ReAnimated.View style={[{
                 position: 'absolute', top: 0, left: 0,
                 width: tabW, height: 2, backgroundColor: activeColor,
-                transform: [{ translateX: tabIndicatorX.interpolate({ inputRange: [0, 1, 2], outputRange: [0, tabW, tabW * 2] }) }],
-              }} />
+              }, tabIndicatorStyle]} />
             );
           })()}
           {(['calendar', 'list', 'settings'] as TabType[]).map((tab, i) => {
