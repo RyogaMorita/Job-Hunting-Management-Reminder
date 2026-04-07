@@ -39,3 +39,42 @@
 - iOSビルドが必要な場合はEAS Build（クラウド）を使う前提で考えること
 - **EASの無料枠が切れた場合は新しいEASアカウントを作成して対応する**
   - `eas logout` → `eas login`（新アカウント）→ `git checkout -- app.json` → `eas init`
+
+## デザインシステム（Design Tokens）
+
+アプリのカラー・タイポグラフィ・スペーシングは以下に従うこと。ハードコード値を直接使わず、必ずこれらのトークンを参照する。
+
+### カラー
+- Primary: `#003366`（TDU_BLUE）
+- Accent: `#1a6bcc`（ACCENT）
+- ステータス色は `DEFAULT_STATUS_COLORS` / `statusColors` オブジェクトから参照
+- Dark mode は DARK オブジェクト、Light mode は LIGHT オブジェクトから `C` 経由で参照
+- **新しいカラーを追加する際はハードコードせず、既存のトークンを再利用すること**
+
+### タイポグラフィ
+- 日本語: Noto Sans JP（400 / 700）
+- 英数字: Inter（400 / 700）
+- フォントを変更する際は `useFonts` フックと `fontFamily` スタイルを確認すること
+- **Inter, Roboto, system default font をデフォルトとして使わない**
+
+### スペーシング
+- 基本リズム: 4px、8px、12px、16px、24px、32px
+- カードパディング: 12〜16px
+- カード角丸: 12px（リスト）、16px（詳細モーダル）
+
+### アニメーション規則（重要）
+- **`transform`（translateX/Y, scale, rotate）と `opacity` のみアニメーションする**
+- `width`, `height`, `margin`, `padding` のアニメーションは極力避ける（レイアウト再計算が発生する）
+- `useNativeDriver: true` を可能な限り使用する（transform/opacity は必ず true）
+- `width`/`height` のアニメーションが必要な場合のみ `useNativeDriver: false`
+- スプリング設定の基本値: `damping: 15, stiffness: 150`
+- リストのスタガー遅延: 80〜120ms
+- `react-native-reanimated` は未インストール。アニメーションは React Native 標準の `Animated` API を使用すること
+  - インストールする場合は EAS ビルドが必要。事前にユーザーに確認すること
+
+## コーディング規則
+
+- **インラインスタイルでハードコードした色を使わない** — 必ず `C.xxx` / `TDU_BLUE` / `ACCENT` / `statusColors[status]` を参照
+- **汎用ヘルパーは作らない** — 1箇所でしか使わないなら直接書く
+- 既存のコンポーネント（SwipeableRow, MiniStepper, StatusStepper 等）を再利用する
+- 新機能追加時は既存のステート管理パターン（AsyncStorage + useState）に合わせる

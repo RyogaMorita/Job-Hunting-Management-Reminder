@@ -238,7 +238,7 @@ function MiniStepper({ status, statusColors, isDark, animTrigger }: {
     barAnim.setValue(0);
     Animated.parallel([
       Animated.spring(dotScale, { toValue: 1, friction: 5, tension: 200, useNativeDriver: true }),
-      Animated.timing(barAnim, { toValue: 1, duration: 220, useNativeDriver: false }),
+      Animated.timing(barAnim, { toValue: 1, duration: 220, useNativeDriver: true }),
     ]).start();
   }, [animTrigger]);
 
@@ -271,9 +271,9 @@ function MiniStepper({ status, statusColors, isDark, animTrigger }: {
               isNewBar ? (
                 <View style={{ flex: 1, height: 2, backgroundColor: inactiveColor, overflow: 'hidden' }}>
                   <Animated.View style={{
-                    position: 'absolute', left: 0, top: 0, bottom: 0,
-                    width: barAnim.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] }),
+                    position: 'absolute', left: 0, top: 0, bottom: 0, right: 0,
                     backgroundColor: statusColors[STEPPER_STAGES[i]] ?? '#95A5A6',
+                    transform: [{ translateX: barAnim.interpolate({ inputRange: [0, 1], outputRange: [-300, 0] }) }],
                   }} />
                 </View>
               ) : (
@@ -326,7 +326,7 @@ function StatusStepper({ status, statusColors, isDark }: { status: string; statu
         Animated.timing(labelTranslates[i], { toValue: 0, duration: 200, useNativeDriver: true }),
       ]));
       if (i < currentStage && i < 5) {
-        seq.push(Animated.timing(barAnims[i], { toValue: 1, duration: 320, useNativeDriver: false }));
+        seq.push(Animated.timing(barAnims[i], { toValue: 1, duration: 320, useNativeDriver: true }));
       }
     }
     Animated.sequence(seq).start();
@@ -361,10 +361,11 @@ function StatusStepper({ status, statusColors, isDark }: { status: string; statu
                 </Animated.Text>
               </View>
               {i < 5 && (
-                <View style={{ flex: 1, height: 2, backgroundColor: inactiveColor, marginBottom: 18 }}>
+                <View style={{ flex: 1, height: 2, backgroundColor: inactiveColor, marginBottom: 18, overflow: 'hidden' }}>
                   <Animated.View style={{
-                    height: 2, backgroundColor: stageColor(i),
-                    width: barAnims[i].interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] }),
+                    position: 'absolute', left: 0, top: 0, bottom: 0, right: 0,
+                    backgroundColor: stageColor(i),
+                    transform: [{ translateX: barAnims[i].interpolate({ inputRange: [0, 1], outputRange: [-300, 0] }) }],
                   }} />
                 </View>
               )}
