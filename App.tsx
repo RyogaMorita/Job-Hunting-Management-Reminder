@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import ReAnimated, { useSharedValue, useAnimatedStyle, withSpring, withTiming } from 'react-native-reanimated';
 // import RNIap, { initConnection, endConnection, getProducts, requestPurchase, finishTransaction, purchaseErrorListener, purchaseUpdatedListener, getAvailablePurchases } from 'react-native-iap'; // 近日公開
 import { useColorScheme } from 'react-native';
 import { useFonts } from 'expo-font';
@@ -222,24 +223,29 @@ function SwipeableRow({ children, onDelete }: { children: React.ReactNode; onDel
   );
 }
 
-// ─── ミニステッパー（カード内用・ドットのみ）────────────────────────
+// ─── ミニステッパー（カード内用・Reanimated v3）────────────────────
 function MiniStepper({ status, statusColors, isDark, animTrigger }: {
   status: string; statusColors: Record<string, string>; isDark: boolean; animTrigger?: number;
 }) {
   const currentStage = STATUS_TO_STAGE[status] ?? -1;
-  const dotScale = useRef(new Animated.Value(1)).current;
-  const barAnim = useRef(new Animated.Value(1)).current;
+  const dotScale = useSharedValue(1);
+  const barProgress = useSharedValue(1);
   const prevTrigger = useRef(0);
+
+  const animDotStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: dotScale.value }],
+  }));
+  const animBarStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: (1 - barProgress.value) * -300 }],
+  }));
 
   useEffect(() => {
     if (!animTrigger || animTrigger === prevTrigger.current) return;
     prevTrigger.current = animTrigger;
-    dotScale.setValue(0);
-    barAnim.setValue(0);
-    Animated.parallel([
-      Animated.spring(dotScale, { toValue: 1, friction: 5, tension: 200, useNativeDriver: true }),
-      Animated.timing(barAnim, { toValue: 1, duration: 220, useNativeDriver: true }),
-    ]).start();
+    dotScale.value = 0;
+    barProgress.value = 0;
+    dotScale.value = withSpring(1, { damping: 5, stiffness: 200 });
+    barProgress.value = withTiming(1, { duration: 220 });
   }, [animTrigger]);
 
   if (currentStage < 0) return null;
@@ -255,14 +261,13 @@ function MiniStepper({ status, statusColors, isDark, animTrigger }: {
         return (
           <React.Fragment key={stage}>
             {isNewDot ? (
-              <Animated.View style={{
+              <ReAnimated.View style={[{
                 width: 8, height: 8, borderRadius: 4,
                 backgroundColor: color, borderWidth: 1.5, borderColor: color,
-                transform: [{ scale: dotScale }],
-              }} />
+              }, animDotStyle]} />
             ) : (
               <View style={{
-                width: active ? 8 : 6, height: active ? 8 : 6, borderRadius: 4,
+                width: done || active ? 8 : 6, height: done || active ? 8 : 6, borderRadius: 4,
                 backgroundColor: done || active ? color : 'transparent',
                 borderWidth: 1.5, borderColor: color,
               }} />
@@ -270,11 +275,10 @@ function MiniStepper({ status, statusColors, isDark, animTrigger }: {
             {i < 5 && (
               isNewBar ? (
                 <View style={{ flex: 1, height: 2, backgroundColor: inactiveColor, overflow: 'hidden' }}>
-                  <Animated.View style={{
+                  <ReAnimated.View style={[{
                     position: 'absolute', left: 0, top: 0, bottom: 0, right: 0,
                     backgroundColor: statusColors[STEPPER_STAGES[i]] ?? '#95A5A6',
-                    transform: [{ translateX: barAnim.interpolate({ inputRange: [0, 1], outputRange: [-300, 0] }) }],
-                  }} />
+                  }, animBarStyle]} />
                 </View>
               ) : (
                 <View style={{ flex: 1, height: 2, backgroundColor: done ? (statusColors[STEPPER_STAGES[i]] ?? '#95A5A6') : inactiveColor }} />
