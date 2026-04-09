@@ -33,7 +33,7 @@ import { LISTED_COMPANIES, CompanyEntry } from './companies_v2';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
-    shouldShowAlert: true, shouldPlaySound: true, shouldSetBadge: true,
+    shouldShowAlert: true, shouldPlaySound: true, shouldSetBadge: false,
     shouldShowBanner: true, shouldShowList: true,
   }),
 });
@@ -794,9 +794,7 @@ export default function App() {
   const scrollToMemo = () => setTimeout(() => modalScrollRef.current?.scrollToEnd({ animated: true }), 300);
 
   // ─── アニメーション値 ────────────────────────────────────────
-  const tabIndicatorPos = useSharedValue(0);
   const fabScale = useSharedValue(1);
-  const tabIndicatorStyle = useAnimatedStyle(() => ({ transform: [{ translateX: tabIndicatorPos.value }] }));
   const fabScaleStyle = useAnimatedStyle(() => ({ transform: [{ scale: fabScale.value }] }));
   const modalTranslateY = useRef(new Animated.Value(600)).current;
   const modalScrollY = useRef(0);
@@ -883,12 +881,6 @@ export default function App() {
   const [wheelDay, setWheelDay] = useState(new Date().getDate());
 
   useEffect(() => { loadAll(); }, []);
-
-  // タブ切り替えインジケーターアニメーション
-  useEffect(() => {
-    const idx = ['calendar', 'list', 'settings'].indexOf(activeTab);
-    tabIndicatorPos.value = withSpring(idx * (screenWidth / 3), { damping: 12, stiffness: 80 });
-  }, [activeTab, screenWidth]);
 
   // リストフェードイン（フィルター/ソート変更時）
   const listFadeAnim = useRef(new Animated.Value(1)).current;
@@ -1103,12 +1095,6 @@ export default function App() {
     setSchedules(data);
     await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(data));
     await syncWidgetData(data);
-    // バッジ: 直近7日以内に締切・予定がある件数
-    const today = new Date().toISOString().slice(0, 10);
-    const in7 = new Date(); in7.setDate(in7.getDate() + 7);
-    const limit7 = in7.toISOString().slice(0, 10);
-    const badgeCount = data.filter(s => s.date && s.date >= today && s.date <= limit7 && !INACTIVE.includes(s.status)).length;
-    Notifications.setBadgeCountAsync(badgeCount).catch(() => {});
   };
   const saveGenres = async (data: Genre[]) => {
     setGenres(data);
@@ -2479,22 +2465,7 @@ export default function App() {
 
         {/* タブバー */}
         <View style={[styles.tabBar, { backgroundColor: C.tabBar, borderTopColor: C.border }]}
-          onLayout={(e) => {
-            const w = e.nativeEvent.layout.width;
-            setScreenWidth(w);
-            tabIndicatorPos.value = ['calendar', 'list', 'settings'].indexOf(activeTab) * (w / 3);
-          }}>
-          {/* スライドインジケーター */}
-          {screenWidth > 0 && (() => {
-            const activeColor = isDark ? '#6ea8fe' : TDU_BLUE;
-            const tabW = screenWidth / 3;
-            return (
-              <ReAnimated.View style={[{
-                position: 'absolute', top: 0, left: 0,
-                width: tabW, height: 2, backgroundColor: activeColor,
-              }, tabIndicatorStyle]} />
-            );
-          })()}
+          onLayout={(e) => { setScreenWidth(e.nativeEvent.layout.width); }}>
           {(['calendar', 'list', 'settings'] as TabType[]).map((tab, i) => {
             const imgSrcs = [
               require('./assets/tab_calendar.png'),
@@ -3012,18 +2983,6 @@ export default function App() {
 
                 <View style={styles.modalButtons}>
                   <TouchableOpacity onPress={() => closeModal()}><Text style={styles.cancelText}>戻る</Text></TouchableOpacity>
-                  {isDetailVisible && selectedItem && (
-                    <TouchableOpacity
-                      style={[styles.outlineButton, { borderColor: ACCENT, paddingVertical: 8, paddingHorizontal: 14 }]}
-                      onPress={() => {
-                        const item = selectedItem;
-                        setDetailVisible(false);
-                        setSelectedItem(null);
-                        openAddWithInherit(item);
-                      }}>
-                      <Text style={[styles.outlineButtonText, { color: ACCENT, fontSize: 13 }]}>複製して追加</Text>
-                    </TouchableOpacity>
-                  )}
                   <TouchableOpacity style={[styles.saveButton, !companyName.trim() && styles.saveButtonDisabled]} onPress={() => handleSave()}>
                     <Text style={styles.saveButtonText}>保存</Text>
                   </TouchableOpacity>
