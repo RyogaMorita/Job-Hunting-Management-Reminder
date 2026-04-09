@@ -99,25 +99,33 @@ struct UpcomingHomeView: View {
         }
     }
 
+    private func isToday(_ dateStr: String) -> Bool {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        guard let d = f.date(from: dateStr) else { return false }
+        return Calendar.current.isDateInToday(d)
+    }
+
     private func scheduleRow(_ s: WidgetSchedule) -> some View {
-        HStack(spacing: 5) {
+        let today = isToday(s.date)
+        return HStack(spacing: 5) {
             RoundedRectangle(cornerRadius: 2)
-                .fill(colorForStatus(s.status, override: s.calendarColor))
+                .fill(today ? Color.yellow : colorForStatus(s.status, override: s.calendarColor))
                 .frame(width: 3, height: 18)
             Text(s.status)
                 .font(.system(size: 9))
-                .foregroundColor(colorForStatus(s.status, override: s.calendarColor))
+                .foregroundColor(today ? Color.yellow : colorForStatus(s.status, override: s.calendarColor))
                 .lineLimit(1)
                 .fixedSize()
             Text(s.company)
-                .font(.system(size: family == .systemSmall ? 10 : 11, weight: .semibold))
-                .foregroundColor(.white)
+                .font(.system(size: family == .systemSmall ? 10 : 11, weight: today ? .bold : .semibold))
+                .foregroundColor(today ? .white : .white.opacity(0.85))
                 .lineLimit(1)
             Spacer(minLength: 2)
             if !s.date.isEmpty {
                 Text(formatDate(s.date) + (s.hour.isEmpty ? "" : " \(s.hour):\(s.minute)"))
-                    .font(.system(size: 9))
-                    .foregroundColor(.white.opacity(0.7))
+                    .font(.system(size: 9, weight: today ? .bold : .regular))
+                    .foregroundColor(today ? Color.yellow : .white.opacity(0.7))
                     .lineLimit(1)
                     .fixedSize()
             }

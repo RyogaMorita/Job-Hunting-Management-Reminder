@@ -22,6 +22,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import SharedGroupPreferences from 'react-native-shared-group-preferences';
 import * as Notifications from 'expo-notifications';
 import * as StoreReview from 'expo-store-review';
+import * as Haptics from 'expo-haptics';
 import { SafeAreaProvider, SafeAreaView as SafeAreaViewContext } from 'react-native-safe-area-context';
 import {
   BannerAd, BannerAdSize, TestIds,
@@ -32,7 +33,7 @@ import { LISTED_COMPANIES, CompanyEntry } from './companies_v2';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
-    shouldShowAlert: true, shouldPlaySound: true, shouldSetBadge: false,
+    shouldShowAlert: true, shouldPlaySound: true, shouldSetBadge: true,
     shouldShowBanner: true, shouldShowList: true,
   }),
 });
@@ -224,6 +225,21 @@ function SwipeableRow({ children, onDelete }: { children: React.ReactNode; onDel
         {children}
       </Animated.View>
     </View>
+  );
+}
+
+// ─── 検索ハイライトテキスト ──────────────────────────────────────────
+function HighlightText({ text, query, style }: { text: string; query: string; style?: any }) {
+  if (!query.trim()) return <Text style={style} numberOfLines={1}>{text}</Text>;
+  const q = query.trim().toLowerCase();
+  const idx = text.toLowerCase().indexOf(q);
+  if (idx === -1) return <Text style={style} numberOfLines={1}>{text}</Text>;
+  return (
+    <Text style={style} numberOfLines={1}>
+      {text.slice(0, idx)}
+      <Text style={{ color: ACCENT, fontWeight: 'bold' }}>{text.slice(idx, idx + q.length)}</Text>
+      {text.slice(idx + q.length)}
+    </Text>
   );
 }
 
@@ -1087,6 +1103,12 @@ export default function App() {
     setSchedules(data);
     await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(data));
     await syncWidgetData(data);
+    // バッジ: 直近7日以内に締切・予定がある件数
+    const today = new Date().toISOString().slice(0, 10);
+    const in7 = new Date(); in7.setDate(in7.getDate() + 7);
+    const limit7 = in7.toISOString().slice(0, 10);
+    const badgeCount = data.filter(s => s.date && s.date >= today && s.date <= limit7 && !INACTIVE.includes(s.status)).length;
+    Notifications.setBadgeCountAsync(badgeCount).catch(() => {});
   };
   const saveGenres = async (data: Genre[]) => {
     setGenres(data);
@@ -1105,6 +1127,12 @@ export default function App() {
   const EXCLUDE_FROM_COUNT = ['内定', '内定辞退', '不合格', '完了', '説明会', 'GD', ...INTERN_STATUSES];
   const activeCount = useMemo(() => schedules.filter(s => !EXCLUDE_FROM_COUNT.includes(s.status)).length, [schedules]);
   const internalCount = useMemo(() => schedules.filter(s => s.status === '内定').length, [schedules]);
+  const passRate = useMemo(() => {
+    const offer = schedules.filter(s => s.status === '内定' || s.status === '内定辞退').length;
+    const reject = schedules.filter(s => s.status === '不合格').length;
+    if (offer + reject === 0) return null;
+    return Math.round(offer / (offer + reject) * 100);
+  }, [schedules]);
 
   const upcomingSchedules = useMemo(() => {
     const today = new Date().toISOString().split('T')[0];
@@ -1408,6 +1436,7 @@ export default function App() {
       { text: '戻る', style: 'cancel' },
       {
         text: '削除', style: 'destructive', onPress: async () => {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
           const target = schedules.find(s => s.id === id);
           await cancelNotification(id, target);
           await saveSchedules(schedules.filter(s => s.id !== id));
@@ -1530,6 +1559,7 @@ export default function App() {
   const advanceStatus = async (item: Schedule) => {
     const ns = nextStatus(item.status);
     if (!ns) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     const autoChecks = STATUS_TO_CHECKS[ns] ?? [];
     const initCL: Record<string, boolean> = { ...(item.checklist ?? {}) };
     CHECKLIST_STEPS.forEach(step => { if (autoChecks.includes(step)) initCL[step] = true; });
@@ -1835,7 +1865,7 @@ export default function App() {
             {/* カレンダータブのFAB */}
             <Pressable
               style={styles.fab}
-              onPress={() => { openAdd(); countAction(); }}
+              onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); openAdd(); countAction(); }}
               onPressIn={() => { fabScale.value = withSpring(0.85, { damping: 15, stiffness: 300 }); }}
               onPressOut={() => { fabScale.value = withSpring(1, { damping: 15, stiffness: 300 }); }}>
               <ReAnimated.Text style={[styles.fabText, fabScaleStyle]}>＋</ReAnimated.Text>
@@ -1913,7 +1943,17 @@ export default function App() {
 
             <Animated.ScrollView style={{ flex: 1, paddingHorizontal: 16, opacity: listFadeAnim }}>
               {filteredSorted.length === 0
-                ? <Text style={[styles.emptyText, { color: C.text3 }]}>該当する企業がありません</Text>
+                ? (
+                  <ReAnimated.View entering={FadeInDown.duration(400).springify()} style={{ alignItems: 'center', paddingTop: 60, gap: 8 }}>
+                    <Text style={{ fontSize: 44 }}>📭</Text>
+                    <Text style={[styles.emptyText, { color: C.text3 }]}>
+                      {isFilterActive || searchQuery.trim() ? '該当する企業がありません' : '企業を追加してみましょう'}
+                    </Text>
+                    {(isFilterActive || searchQuery.trim()) && (
+                      <Text style={{ fontSize: 12, color: C.text3 }}>検索条件を変えてみてください</Text>
+                    )}
+                  </ReAnimated.View>
+                )
                 : filteredSorted.map((item, index) => {
                   const sc = statusColorOf(item.status);
                   const isInternal = item.status === '内定';
@@ -1940,9 +1980,11 @@ export default function App() {
                             <View style={[styles.rankBadge, { backgroundColor: rankColor(item.rank) }]}>
                               <Text style={styles.rankText}>{item.rank}</Text>
                             </View>
-                            <Text style={[styles.itemTitle, { color: isInactive ? '#888' : C.text, flex: 1 }]} numberOfLines={1}>
-                              {item.company}{isInternal ? ' 🌸' : ''}
-                            </Text>
+                            <HighlightText
+                              text={item.company + (isInternal ? ' 🌸' : '')}
+                              query={searchQuery}
+                              style={[styles.itemTitle, { color: isInactive ? '#888' : C.text, flex: 1 }]}
+                            />
                             {cdLabel && <View style={{ backgroundColor: cdLabel === '今日' ? '#e74c3c' : '#f39c12', borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2 }}>
                               <Text style={{ color: '#fff', fontSize: 10, fontWeight: 'bold' }}>{cdLabel}</Text>
                             </View>}
@@ -2010,7 +2052,7 @@ export default function App() {
             </Animated.ScrollView>
             <Pressable
               style={styles.fab}
-              onPress={() => { openAdd(); countAction(); }}
+              onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); openAdd(); countAction(); }}
               onPressIn={() => { fabScale.value = withSpring(0.85, { damping: 15, stiffness: 300 }); }}
               onPressOut={() => { fabScale.value = withSpring(1, { damping: 15, stiffness: 300 }); }}>
               <ReAnimated.Text style={[styles.fabText, fabScaleStyle]}>＋</ReAnimated.Text>
@@ -2021,6 +2063,29 @@ export default function App() {
         {/* ── 設定タブ ── */}
         {activeTab === 'settings' && (
           <ScrollView style={{ flex: 1, padding: 20, backgroundColor: C.bg }}>
+            {/* 統計ダッシュボード */}
+            <View style={{ backgroundColor: isDark ? '#1a2a3a' : '#eaf2ff', borderRadius: 16, padding: 16, marginBottom: 24, borderWidth: 1, borderColor: isDark ? '#2a3a4a' : '#c8ddf7' }}>
+              <Text style={{ fontSize: 12, color: ACCENT, fontWeight: 'bold', marginBottom: 12 }}>就活ダッシュボード</Text>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-around' }}>
+                <View style={{ alignItems: 'center' }}>
+                  <Text style={{ fontSize: 28, fontWeight: 'bold', color: C.text }}>{activeCount}</Text>
+                  <Text style={{ fontSize: 11, color: C.text3, marginTop: 2 }}>応募中</Text>
+                </View>
+                <View style={{ width: 1, backgroundColor: isDark ? '#2a3a4a' : '#c8ddf7' }} />
+                <View style={{ alignItems: 'center' }}>
+                  <Text style={{ fontSize: 28, fontWeight: 'bold', color: '#E91E8C' }}>{internalCount}</Text>
+                  <Text style={{ fontSize: 11, color: C.text3, marginTop: 2 }}>内定</Text>
+                </View>
+                <View style={{ width: 1, backgroundColor: isDark ? '#2a3a4a' : '#c8ddf7' }} />
+                <View style={{ alignItems: 'center' }}>
+                  <Text style={{ fontSize: 28, fontWeight: 'bold', color: passRate !== null ? (passRate >= 50 ? '#27AE60' : '#E67E22') : C.text3 }}>
+                    {passRate !== null ? `${passRate}%` : '-'}
+                  </Text>
+                  <Text style={{ fontSize: 11, color: C.text3, marginTop: 2 }}>通過率</Text>
+                </View>
+              </View>
+            </View>
+
             <Text style={styles.settingSection}>ジャンル管理</Text>
             {(showAllGenres ? genres : genres.slice(0, 5)).map(g => (
               <TouchableOpacity key={g.id} style={[styles.genreRow, { borderColor: C.border2 }]} onPress={() => openEditGenre(g)}>
@@ -2947,6 +3012,18 @@ export default function App() {
 
                 <View style={styles.modalButtons}>
                   <TouchableOpacity onPress={() => closeModal()}><Text style={styles.cancelText}>戻る</Text></TouchableOpacity>
+                  {isDetailVisible && selectedItem && (
+                    <TouchableOpacity
+                      style={[styles.outlineButton, { borderColor: ACCENT, paddingVertical: 8, paddingHorizontal: 14 }]}
+                      onPress={() => {
+                        const item = selectedItem;
+                        setDetailVisible(false);
+                        setSelectedItem(null);
+                        openAddWithInherit(item);
+                      }}>
+                      <Text style={[styles.outlineButtonText, { color: ACCENT, fontSize: 13 }]}>複製して追加</Text>
+                    </TouchableOpacity>
+                  )}
                   <TouchableOpacity style={[styles.saveButton, !companyName.trim() && styles.saveButtonDisabled]} onPress={() => handleSave()}>
                     <Text style={styles.saveButtonText}>保存</Text>
                   </TouchableOpacity>
