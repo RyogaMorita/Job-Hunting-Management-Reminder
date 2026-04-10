@@ -449,11 +449,11 @@ function MiniStepper({ status, statusColors, isDark, animTrigger }: {
                 <View style={{ flex: 1, height: 2, backgroundColor: inactiveColor, overflow: 'hidden' }}>
                   <ReAnimated.View style={[{
                     position: 'absolute', left: 0, top: 0, bottom: 0, right: 0,
-                    backgroundColor: statusColors[STEPPER_STAGES[i]] ?? '#95A5A6',
+                    backgroundColor: statusColors[status] ?? '#95A5A6',
                   }, animBarStyle]} />
                 </View>
               ) : (
-                <View style={{ flex: 1, height: 2, backgroundColor: done ? (statusColors[STEPPER_STAGES[i]] ?? '#95A5A6') : inactiveColor }} />
+                <View style={{ flex: 1, height: 2, backgroundColor: done ? (statusColors[status] ?? '#95A5A6') : inactiveColor }} />
               )
             )}
           </React.Fragment>
