@@ -941,9 +941,9 @@ export default function App() {
   const fabScale = useSharedValue(1);
   const fabScaleStyle = useAnimatedStyle(() => ({ transform: [{ scale: fabScale.value }] }));
   const calHeight = useSharedValue(0); // 初期値は useEffect で設定
-  const calOpacity = useSharedValue(1);
+
   const calHeightStyle = useAnimatedStyle(() => ({ height: calHeight.value }));
-  const calOpacityStyle = useAnimatedStyle(() => ({ opacity: calOpacity.value }));
+
   const modalTranslateY = useRef(new Animated.Value(600)).current;
   const modalScrollY = useRef(0);
   const modalPanResponder = useRef(PanResponder.create({
@@ -1037,15 +1037,6 @@ export default function App() {
     calHeight.value = withSpring(calendarMode === 'week' ? WEEK_H : MONTH_H, { damping: 15, stiffness: 150 });
   }, [calendarMode, maxCalRows]);
 
-  // 月遷移フェードアニメーション
-  useEffect(() => {
-    if (calendarMode === 'month') {
-      calOpacity.value = withSequence(
-        withTiming(0, { duration: 140 }),
-        withTiming(1, { duration: 220 })
-      );
-    }
-  }, [currentCalDate]);
 
   // リストフェードイン（フィルター/ソート変更時）
   const listFadeAnim = useRef(new Animated.Value(1)).current;
@@ -1829,7 +1820,7 @@ export default function App() {
             <CalendarHeader isDark={isDark} C={C} currentDate={currentCalDate} weekStart={weekStart} onOpenDatePicker={() => setDatePickerVisible(true)} calendarMode={calendarMode} onToggleMode={() => setCalendarMode(m => m === 'month' ? 'week' : 'month')} />
             <WeekdayHeader C={C} weekStart={weekStart} />
             {screenWidth > 0 && (
-              <ReAnimated.View style={[calHeightStyle, calOpacityStyle, { overflow: 'hidden' }]}>
+              <ReAnimated.View style={[calHeightStyle, { overflow: 'hidden' }]}>
               {calendarMode === 'week'
                 ? (
                   <WeekCalendarRow
