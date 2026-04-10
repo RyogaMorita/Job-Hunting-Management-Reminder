@@ -68,16 +68,16 @@ const STATUS_OPTIONS_KEY = '@status_options_v1';
 const TDU_BLUE = '#003366';
 const ACCENT = '#1a6bcc';
 
-const INTERN_STATUSES = ['インターンES締切', 'インターン面接', '🌸インターン確定'];
+const INTERN_STATUSES = ['インターンES締切', 'インターン面接', 'インターン確定'];
 const SEPARATE_STATUSES = ['説明会', 'GD', ...INTERN_STATUSES]; // 本選考と別トラック
-const DEFAULT_STATUS_OPTIONS = ['検討中', '説明会', 'ES締切', 'ES提出済', 'GD', '1次面接', '2次面接', '最終面接', '内定', 'インターンES締切', 'インターン面接', '🌸インターン確定', '内定辞退', '不合格', '完了'];
+const DEFAULT_STATUS_OPTIONS = ['検討中', '説明会', 'ES締切', 'ES提出済', 'GD', '1次面接', '2次面接', '最終面接', '内定', 'インターンES締切', 'インターン面接', 'インターン確定', '内定辞退', '不合格', '完了'];
 const STATUS_OPTIONS = DEFAULT_STATUS_OPTIONS; // 後方互換用
 const STATUS_PRIORITY: Record<string, number> = {
   '内定': 8, '最終面接': 7, '2次面接': 6, '1次面接': 5, 'GD': 4, 'ES提出済': 3, 'ES締切': 2, '説明会': 1, '検討中': 0,
-  '🌸インターン確定': 0.3, 'インターン面接': 0.2, 'インターンES締切': 0.1,
+  'インターン確定': 0.3, 'インターン面接': 0.2, 'インターンES締切': 0.1,
   '内定辞退': -1, '不合格': -2, '完了': -3,
 };
-const STATUS_SORT_ORDER = ['内定', '最終面接', '2次面接', '1次面接', 'GD', 'ES提出済', 'ES締切', '説明会', '検討中', '🌸インターン確定', 'インターン面接', 'インターンES締切', '内定辞退', '不合格', '完了'];
+const STATUS_SORT_ORDER = ['内定', '最終面接', '2次面接', '1次面接', 'GD', 'ES提出済', 'ES締切', '説明会', '検討中', 'インターン確定', 'インターン面接', 'インターンES締切', '内定辞退', '不合格', '完了'];
 // 持ち駒トラックグループ（同名企業でも別トラックは別行表示）
 const trackGroup = (status: string): string => {
   if (['説明会', 'GD'].includes(status)) return '説明会GD';
@@ -183,7 +183,7 @@ const DEFAULT_STATUS_COLORS: StatusColors = {
   '内定': '#E91E8C',
   'インターンES締切': '#F59E0B',
   'インターン面接': '#EF6C00',
-  '🌸インターン確定': '#EC407A',
+  'インターン確定': '#EC407A',
   '内定辞退': '#7F8C8D',
   '不合格': '#BDC3C7',
   '完了': '#95A5A6',
@@ -332,6 +332,35 @@ function AnimatedCheckmark({ checked, color }: { checked: boolean; color: string
   );
 }
 
+// ─── リップルボタン（ぽちゃんアニメーション） ──────────────────────────
+function RippleButton({ style, onPress, children, activeOpacity = 0.8 }: {
+  style?: any; onPress?: () => void; children: React.ReactNode; activeOpacity?: number;
+}) {
+  const rippleScale = useSharedValue(0);
+  const rippleOpacity = useSharedValue(0);
+  const rippleStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: rippleScale.value }],
+    opacity: rippleOpacity.value,
+  }));
+  const handlePress = () => {
+    rippleScale.value = 0;
+    rippleOpacity.value = 0.35;
+    rippleScale.value = withTiming(3, { duration: 380 });
+    rippleOpacity.value = withTiming(0, { duration: 380 });
+    onPress?.();
+  };
+  return (
+    <TouchableOpacity style={[style, { overflow: 'hidden' }]} onPress={handlePress} activeOpacity={activeOpacity}>
+      <ReAnimated.View style={[
+        StyleSheet.absoluteFill,
+        { borderRadius: 100, backgroundColor: '#fff' },
+        rippleStyle,
+      ]} />
+      {children}
+    </TouchableOpacity>
+  );
+}
+
 // ─── 検索ハイライトテキスト ──────────────────────────────────────────
 function HighlightText({ text, query, style }: { text: string; query: string; style?: any }) {
   if (!query.trim()) return <Text style={style} numberOfLines={1}>{text}</Text>;
@@ -384,7 +413,10 @@ function MiniStepper({ status, statusColors, isDark, animTrigger }: {
     prevTrigger.current = animTrigger;
     dotScale.value = 0;
     barProgress.value = 0;
-    dotScale.value = withSpring(1, { damping: 5, stiffness: 200 });
+    dotScale.value = withSequence(
+      withTiming(1.5, { duration: 100 }),
+      withSpring(1, { damping: 20, stiffness: 400 })
+    );
     barProgress.value = withTiming(1, { duration: 220 });
   }, [animTrigger]);
 
@@ -1669,9 +1701,10 @@ export default function App() {
   };
 
   // 次のステータスを返す（最終は変更なし）
-  const PROGRESS_FLOW = ['検討中', 'ES締切', 'ES提出済', '1次面接', '2次面接', '最終面接', '内定'];
-  const INTERN_FLOW = ['インターンES締切', 'インターン面接', '🌸インターン確定'];
+  const PROGRESS_FLOW = ['検討中', 'ES提出済', '1次面接', '2次面接', '最終面接', '内定'];
+  const INTERN_FLOW = ['インターンES締切', 'インターン面接', 'インターン確定'];
   const nextStatus = (current: string): string | null => {
+    if (current === 'ES締切') return 'ES提出済';
     const idx = PROGRESS_FLOW.indexOf(current);
     if (idx !== -1 && idx < PROGRESS_FLOW.length - 1) return PROGRESS_FLOW[idx + 1];
     const iIdx = INTERN_FLOW.indexOf(current);
@@ -2230,22 +2263,22 @@ export default function App() {
                             <Text style={styles.statusBadgeText}>{item.status}</Text>
                           </View>
                           {ns && !isInactive ? (
-                            <TouchableOpacity
+                            <RippleButton
                               style={[styles.nextStatusBtn, { borderColor: sc }]}
                               onPress={() => advanceStatus(item)}>
                               <Text style={[styles.nextStatusBtnText, { color: sc }]} numberOfLines={1}>{
                                 ns === 'インターン面接' ? '面接→' :
-                                ns === '🌸インターン確定' ? '参加確定→' :
+                                ns === 'インターン確定' ? '参加確定→' :
                                 ns + ' →'
                               }</Text>
-                            </TouchableOpacity>
+                            </RippleButton>
                           ) : null}
                           {['説明会', 'GD'].includes(item.status) && !isInactive ? (
-                            <TouchableOpacity
+                            <RippleButton
                               style={[styles.nextStatusBtn, { borderColor: '#95A5A6' }]}
                               onPress={() => completeStatus(item)}>
                               <Text style={[styles.nextStatusBtnText, { color: '#95A5A6' }]}>完了 →</Text>
-                            </TouchableOpacity>
+                            </RippleButton>
                           ) : null}
                         </View>
                       </AnimatedCard>
@@ -3095,7 +3128,7 @@ export default function App() {
                 )}
 
                 {/* インターン期間設定 */}
-                {(selStatus === '🌸インターン確定' || internshipStart || internshipEnd) && (
+                {(selStatus === 'インターン確定' || internshipStart || internshipEnd) && (
                   <>
                     <Text style={[styles.label, { color: C.text3 }]}>インターン期間</Text>
                     {(['開始日', '終了日'] as const).map(label => {
