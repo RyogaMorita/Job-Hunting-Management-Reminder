@@ -1,8 +1,11 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import ReAnimated, {
-  useSharedValue, useAnimatedStyle, withSpring, withTiming,
+  useSharedValue, useAnimatedStyle, useAnimatedProps, withSpring, withTiming, withSequence,
   FadeInDown, FadeOutLeft, LinearTransition,
 } from 'react-native-reanimated';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import DraggableFlatList, { ScaleDecorator, RenderItemParams } from 'react-native-draggable-flatlist';
+import Svg, { Path } from 'react-native-svg';
 import { Pressable } from 'react-native';
 // import RNIap, { initConnection, endConnection, getProducts, requestPurchase, finishTransaction, purchaseErrorListener, purchaseUpdatedListener, getAvailablePurchases } from 'react-native-iap'; // 近日公開
 import { useColorScheme } from 'react-native';
@@ -112,7 +115,8 @@ const ICONS = {
 };
 
 const RANK_OPTIONS = ['S', 'A', 'B', 'C'];
-const SORT_OPTIONS = ['登録順', '直近順', '五十音', '志望度', 'ステータス', 'ジャンル'];
+const SORT_OPTIONS = ['登録順', '直近順', '五十音', '志望度', 'ステータス', 'ジャンル', '手動'];
+const MANUAL_ORDER_KEY = '@manual_order_v1';
 const HOURS = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0'));
 const MINUTES = ['00', '15', '30', '45'];
 const INACTIVE = ['内定辞退', '不合格', '完了'];
@@ -144,7 +148,7 @@ interface Schedule {
 }
 
 type TabType = 'calendar' | 'list' | 'settings';
-type SortType = '登録順' | '直近順' | '五十音' | '志望度' | 'ステータス' | 'ジャンル';
+type SortType = '登録順' | '直近順' | '五十音' | '志望度' | 'ステータス' | 'ジャンル' | '手動';
 
 // ─── デフォルトジャンル ───────────────────────────────────────────
 const DEFAULT_GENRES: Genre[] = [
@@ -224,6 +228,106 @@ function SwipeableRow({ children, onDelete }: { children: React.ReactNode; onDel
       <Animated.View style={{ transform: [{ translateX }] }} {...panResponder.panHandlers}>
         {children}
       </Animated.View>
+    </View>
+  );
+}
+
+// ─── 週表示カレンダー行 ──────────────────────────────────────────────
+function WeekCalendarRow({ selectedDate, today, weekStart, C, isDark, dateCompanyMap, statusColorOf, onDayPress, onDayDoubleTap }: {
+  selectedDate: string; today: string; weekStart: number; C: typeof LIGHT; isDark: boolean;
+  dateCompanyMap: Record<string, Schedule[]>; statusColorOf: (s: string) => string;
+  onDayPress: (ds: string) => void; onDayDoubleTap: (ds: string) => void;
+}) {
+  const weekDates = useMemo(() => {
+    const d = new Date(selectedDate + 'T12:00:00');
+    const diff = (d.getDay() - weekStart + 7) % 7;
+    const start = new Date(d); start.setDate(d.getDate() - diff);
+    return Array.from({ length: 7 }, (_, i) => {
+      const day = new Date(start); day.setDate(start.getDate() + i);
+      return day.toISOString().slice(0, 10);
+    });
+  }, [selectedDate, weekStart]);
+  const lastTapRef = useRef<{ ds: string; time: number }>({ ds: '', time: 0 });
+  return (
+    <View style={{ flexDirection: 'row', justifyContent: 'space-around', paddingHorizontal: 2, height: 52 }}>
+      {weekDates.map(ds => {
+        const items = dateCompanyMap[ds] || [];
+        const isSel = ds === selectedDate;
+        const isToday = ds === today;
+        const dow = new Date(ds + 'T12:00:00').getDay();
+        const day = parseInt(ds.slice(-2));
+        return (
+          <TouchableOpacity
+            key={ds}
+            onPress={() => {
+              const now = Date.now();
+              const last = lastTapRef.current;
+              if (last.ds === ds && now - last.time < 400) {
+                onDayDoubleTap(ds); lastTapRef.current = { ds: '', time: 0 };
+              } else {
+                onDayPress(ds); lastTapRef.current = { ds, time: now };
+              }
+            }}
+            style={{ alignItems: 'center', width: 46, minHeight: 44, position: 'relative' }}>
+            <View style={[
+              { width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
+              isSel && { backgroundColor: TDU_BLUE },
+              isToday && !isSel && { borderWidth: 1.5, borderColor: ACCENT },
+            ]}>
+              <Text style={[{ fontSize: 12 }, (() => {
+                if (isSel) return { color: '#fff', fontWeight: 'bold' } as any;
+                if (isToday) return { color: ACCENT, fontWeight: 'bold' } as any;
+                if (dow === 0) return { color: '#e74c3c' };
+                if (dow === 6) return { color: '#4A90D9' };
+                return { color: C.calText };
+              })()]}>{day}</Text>
+            </View>
+            {items.slice(0, 2).map((item: Schedule, i: number) => {
+              const sc = item.calendarColor ?? statusColorOf(item.status);
+              return (
+                <View key={i} style={[styles.calLabel, { backgroundColor: sc + '33', borderLeftColor: sc }]}>
+                  <Text style={[styles.calLabelText, { color: sc }]} numberOfLines={1}>{item.company}</Text>
+                </View>
+              );
+            })}
+            {items.length > 2 && <Text style={styles.calMore}>+{items.length - 2}</Text>}
+          </TouchableOpacity>
+        );
+      })}
+    </View>
+  );
+}
+
+// ─── SVGチェックマーク（strokeDashoffset 描画アニメーション）──────────
+const AnimatedSvgPath = ReAnimated.createAnimatedComponent(Path);
+const TICK_LENGTH = 20;
+function AnimatedCheckmark({ checked, color }: { checked: boolean; color: string }) {
+  const progress = useSharedValue(checked ? 1 : 0);
+  const bgScale = useSharedValue(checked ? 1 : 0);
+  useEffect(() => {
+    progress.value = withTiming(checked ? 1 : 0, { duration: 320 });
+    bgScale.value = withSpring(checked ? 1 : 0, { damping: 14, stiffness: 200 });
+  }, [checked]);
+  const checkProps = useAnimatedProps(() => ({ strokeDashoffset: TICK_LENGTH * (1 - progress.value) }));
+  const bgStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: bgScale.value }],
+    backgroundColor: color,
+  }));
+  return (
+    <View style={[styles.checkbox, { borderColor: checked ? color : '#ccc', overflow: 'hidden' }]}>
+      <ReAnimated.View style={[StyleSheet.absoluteFill, { borderRadius: 4 }, bgStyle]} />
+      <Svg width={18} height={18} viewBox="0 0 18 18">
+        <AnimatedSvgPath
+          d="M3.5 9.5l3.5 3.5 7.5-7.5"
+          stroke="white"
+          strokeWidth={2.2}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          fill="none"
+          strokeDasharray={TICK_LENGTH}
+          animatedProps={checkProps}
+        />
+      </Svg>
     </View>
   );
 }
@@ -673,26 +777,32 @@ const DARK = {
 };
 
 // カレンダーヘッダー
-function CalendarHeader({ isDark, C, currentDate, weekStart, onOpenDatePicker }: {
+function CalendarHeader({ isDark, C, currentDate, weekStart, onOpenDatePicker, calendarMode, onToggleMode }: {
   isDark: boolean; C: typeof LIGHT; currentDate: Date; weekStart: number; onOpenDatePicker: () => void;
+  calendarMode: 'week' | 'month'; onToggleMode: () => void;
 }) {
   const month = currentDate.getMonth() + 1;
   const year = currentDate.getFullYear();
   const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
   return (
-    <TouchableOpacity onPress={onOpenDatePicker} activeOpacity={0.8}
-      style={{
-        paddingHorizontal: 20, paddingTop: 14, paddingBottom: 12, backgroundColor: C.bg,
-        flexDirection: 'row', alignItems: 'center', gap: 10
-      }}>
-      <Text style={{ fontSize: 28, fontWeight: '600', color: C.text, letterSpacing: -0.5 }}>
-        {String(month).padStart(2, '0')}
-      </Text>
-      <Text style={{ fontSize: 18, color: C.text3, fontWeight: '300' }}>/</Text>
-      <Text style={{ fontSize: 15, color: C.text3, fontWeight: '400', letterSpacing: 1 }}>{year}</Text>
-      <Text style={{ fontSize: 15, color: C.text2, fontWeight: '300' }}>{monthNames[currentDate.getMonth()]}</Text>
-      <Text style={{ fontSize: 10, color: C.text3, marginLeft: 2 }}>▾</Text>
-    </TouchableOpacity>
+    <View style={{ paddingHorizontal: 20, paddingTop: 14, paddingBottom: 12, backgroundColor: C.bg, flexDirection: 'row', alignItems: 'center' }}>
+      <TouchableOpacity onPress={onOpenDatePicker} activeOpacity={0.8} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
+        <Text style={{ fontSize: 28, fontWeight: '600', color: C.text, letterSpacing: -0.5 }}>
+          {String(month).padStart(2, '0')}
+        </Text>
+        <Text style={{ fontSize: 18, color: C.text3, fontWeight: '300' }}>/</Text>
+        <Text style={{ fontSize: 15, color: C.text3, fontWeight: '400', letterSpacing: 1 }}>{year}</Text>
+        <Text style={{ fontSize: 15, color: C.text2, fontWeight: '300' }}>{monthNames[currentDate.getMonth()]}</Text>
+        <Text style={{ fontSize: 10, color: C.text3, marginLeft: 2 }}>▾</Text>
+      </TouchableOpacity>
+      <TouchableOpacity
+        onPress={onToggleMode}
+        style={{ backgroundColor: isDark ? '#1e3a5f' : '#e8f0fe', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5 }}>
+        <Text style={{ fontSize: 12, fontWeight: 'bold', color: ACCENT }}>
+          {calendarMode === 'month' ? '週' : '月'}
+        </Text>
+      </TouchableOpacity>
+    </View>
   );
 }
 
@@ -741,6 +851,8 @@ export default function App() {
   const C = isDark ? DARK : LIGHT;
   const ACCENT = isDark ? '#6ea8fe' : TDU_BLUE;
   const [currentCalDate, setCurrentCalDate] = useState(new Date());
+  const [calendarMode, setCalendarMode] = useState<'week' | 'month'>('month');
+  const [manualOrder, setManualOrder] = useState<string[]>([]);
 
   const [fontsLoaded] = useFonts({
     Inter_400Regular,
@@ -796,6 +908,10 @@ export default function App() {
   // ─── アニメーション値 ────────────────────────────────────────
   const fabScale = useSharedValue(1);
   const fabScaleStyle = useAnimatedStyle(() => ({ transform: [{ scale: fabScale.value }] }));
+  const calHeight = useSharedValue(0); // 初期値は useEffect で設定
+  const calOpacity = useSharedValue(1);
+  const calHeightStyle = useAnimatedStyle(() => ({ height: calHeight.value }));
+  const calOpacityStyle = useAnimatedStyle(() => ({ opacity: calOpacity.value }));
   const modalTranslateY = useRef(new Animated.Value(600)).current;
   const modalScrollY = useRef(0);
   const modalPanResponder = useRef(PanResponder.create({
@@ -881,6 +997,23 @@ export default function App() {
   const [wheelDay, setWheelDay] = useState(new Date().getDate());
 
   useEffect(() => { loadAll(); }, []);
+
+  // カレンダー高さアニメーション（週↔月切り替え・月変更）
+  useEffect(() => {
+    const WEEK_H = 52;
+    const MONTH_H = maxCalRows * 52;
+    calHeight.value = withSpring(calendarMode === 'week' ? WEEK_H : MONTH_H, { damping: 15, stiffness: 150 });
+  }, [calendarMode, maxCalRows]);
+
+  // 月遷移フェードアニメーション
+  useEffect(() => {
+    if (calendarMode === 'month') {
+      calOpacity.value = withSequence(
+        withTiming(0, { duration: 140 }),
+        withTiming(1, { duration: 220 })
+      );
+    }
+  }, [currentCalDate]);
 
   // リストフェードイン（フィルター/ソート変更時）
   const listFadeAnim = useRef(new Animated.Value(1)).current;
@@ -1054,6 +1187,10 @@ export default function App() {
       const af = await AsyncStorage.getItem('@ad_free');
       if (af === 'true') setAdFree(true);
 
+      // 手動並び順を読み込み
+      const mo = await AsyncStorage.getItem(MANUAL_ORDER_KEY);
+      if (mo) setManualOrder(JSON.parse(mo));
+
       // 起動時に表示済みフラグをリセット（新しい起動サイクル開始）
       await AsyncStorage.setItem('@interstitial_triggered', 'false');
 
@@ -1218,10 +1355,17 @@ export default function App() {
           return (ro[a.rank] ?? 3) - (ro[b.rank] ?? 3);
         }); break;
       case 'ジャンル': list.sort((a, b) => a.genreId.localeCompare(b.genreId)); break;
+      case '手動': {
+        if (manualOrder.length > 0) {
+          const orderMap = new Map(manualOrder.map((id, i) => [id, i]));
+          list.sort((a, b) => (orderMap.get(a.id) ?? 9999) - (orderMap.get(b.id) ?? 9999));
+        }
+        break;
+      }
     }
-    if (!sortAsc && sortType !== '直近順') list.reverse();
+    if (!sortAsc && sortType !== '直近順' && sortType !== '手動') list.reverse();
     return list;
-  }, [deduplicatedSchedules, searchQuery, filterGenreIds, filterStatuses, sortType, sortAsc]); // ② 正しい依存配列
+  }, [deduplicatedSchedules, searchQuery, filterGenreIds, filterStatuses, sortType, sortAsc, manualOrder]); // ② 正しい依存配列
 
   const filteredByDate = useMemo(() => schedules.filter(s => s.date && s.date === selectedDate), [schedules, selectedDate]);
 
@@ -1613,6 +1757,7 @@ export default function App() {
   // ─── UI ────────────────────────────────────────────────────────
   if (!fontsLoaded) return null;
   return (
+    <GestureHandlerRootView style={{ flex: 1 }}>
     <SafeAreaView style={[styles.safeArea, { backgroundColor: C.bg }]}>
       <StatusBar style="dark" />
       <View style={[styles.container, { backgroundColor: C.bg }]}>
@@ -1648,9 +1793,19 @@ export default function App() {
         {activeTab === 'calendar' && (
           <View style={{ flex: 1, backgroundColor: C.bg, position: 'relative' }}
             onLayout={(e) => setScreenWidth(e.nativeEvent.layout.width)}>
-            <CalendarHeader isDark={isDark} C={C} currentDate={currentCalDate} weekStart={weekStart} onOpenDatePicker={() => setDatePickerVisible(true)} />
+            <CalendarHeader isDark={isDark} C={C} currentDate={currentCalDate} weekStart={weekStart} onOpenDatePicker={() => setDatePickerVisible(true)} calendarMode={calendarMode} onToggleMode={() => setCalendarMode(m => m === 'month' ? 'week' : 'month')} />
             <WeekdayHeader C={C} weekStart={weekStart} />
             {screenWidth > 0 && (
+              <ReAnimated.View style={[calHeightStyle, calOpacityStyle, { overflow: 'hidden' }]}>
+              {calendarMode === 'week'
+                ? (
+                  <WeekCalendarRow
+                    selectedDate={selectedDate} today={today} weekStart={weekStart}
+                    C={C} isDark={isDark} dateCompanyMap={dateCompanyMap} statusColorOf={statusColorOf}
+                    onDayPress={(ds) => { setSelectedDate(ds); setCalDaySelected(true); }}
+                    onDayDoubleTap={(ds) => { setSelectedDate(ds); setCalDaySelected(true); openAdd(ds); }}
+                  />
+                ) : (
               <ScrollView
                 ref={calScrollRef}
                 horizontal pagingEnabled
@@ -1680,6 +1835,7 @@ export default function App() {
                 contentOffset={{ x: screenWidth, y: 0 }}
                 style={{ flexGrow: 0, height: maxCalRows * 52 }}
               >
+
                 {[-1, 0, 1].map(offset => {
                   const d = new Date(currentCalDate.getFullYear(), currentCalDate.getMonth() + offset, 1);
                   const monthStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
@@ -1788,6 +1944,8 @@ export default function App() {
                   );
                 })}
               </ScrollView>
+                )}
+              </ReAnimated.View>
             )}
             <View style={[styles.todoArea, { backgroundColor: C.bg }]}>
               {!calDaySelected ? (
@@ -1927,6 +2085,70 @@ export default function App() {
 
             <Text style={{ paddingHorizontal: 16, fontSize: 11, color: '#999', marginBottom: 4 }}>{filteredSorted.length}社</Text>
 
+            {sortType === '手動' ? (
+              <DraggableFlatList
+                data={filteredSorted}
+                keyExtractor={item => item.id}
+                onDragEnd={({ data }) => {
+                  const newIds = data.map(item => item.id);
+                  setManualOrder(newIds);
+                  AsyncStorage.setItem(MANUAL_ORDER_KEY, JSON.stringify(newIds)).catch(() => {});
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                }}
+                contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 80 }}
+                ListEmptyComponent={
+                  <ReAnimated.View entering={FadeInDown.duration(400).springify()} style={{ alignItems: 'center', paddingTop: 60, gap: 8 }}>
+                    <Text style={{ fontSize: 44 }}>📭</Text>
+                    <Text style={[styles.emptyText, { color: C.text3 }]}>企業を追加してみましょう</Text>
+                  </ReAnimated.View>
+                }
+                renderItem={({ item, drag, isActive }: RenderItemParams<Schedule>) => {
+                  const sc = statusColorOf(item.status);
+                  const isInternal = item.status === '内定';
+                  const isInactive = INACTIVE.includes(item.status);
+                  const ns = nextStatus(item.status);
+                  const cdLabel = countdownLabel(item.date);
+                  return (
+                    <ScaleDecorator activeScale={1.02}>
+                      <SwipeableRow onDelete={() => deleteSchedule(item.id)}>
+                        <AnimatedCard
+                          style={[styles.listCard, {
+                            backgroundColor: isDark ? (isInactive ? '#2a2a2a' : isInternal ? '#2d0a0a' : C.card) : statusCardColor(item.status),
+                            borderColor: isActive ? ACCENT : (isDark ? C.border : statusCardBorder(item.status)),
+                          }]}
+                          onPress={() => openDetail(item)}>
+                          <View style={[styles.genreBand, { backgroundColor: sc }]} />
+                          <View style={{ flex: 1, paddingLeft: 10 }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                              <View style={[styles.rankBadge, { backgroundColor: rankColor(item.rank) }]}>
+                                <Text style={styles.rankText}>{item.rank}</Text>
+                              </View>
+                              <HighlightText text={item.company + (isInternal ? ' 🌸' : '')} query={searchQuery} style={[styles.itemTitle, { color: isInactive ? '#888' : C.text, flex: 1 }]} />
+                              {cdLabel && <View style={{ backgroundColor: cdLabel === '今日' ? '#e74c3c' : '#f39c12', borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2 }}>
+                                <Text style={{ color: '#fff', fontSize: 10, fontWeight: 'bold' }}>{cdLabel}</Text>
+                              </View>}
+                            </View>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                              <Text style={styles.dateText}>{item.date ? item.date.replace(/-/g, '/') + (timeStr(item.hour, item.minute) ? ' ' + timeStr(item.hour, item.minute) + '〜' : '') : '日付未定'}</Text>
+                            </View>
+                            {item.note ? <Text style={styles.notePreview} numberOfLines={1}>📝 {item.note}</Text> : null}
+                            {!isInactive && <MiniStepper status={item.status} statusColors={statusColors} isDark={isDark} animTrigger={advanceAnimMap[item.id] ?? 0} />}
+                          </View>
+                          <View style={{ alignItems: 'flex-end', gap: 6 }}>
+                            <TouchableOpacity onLongPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); drag(); }} delayLongPress={200} style={{ padding: 4 }}>
+                              <Text style={{ color: isDark ? '#555' : '#bbb', fontSize: 16 }}>⋮⋮</Text>
+                            </TouchableOpacity>
+                            <View style={[styles.statusBadge, { backgroundColor: sc }, isInactive && { backgroundColor: '#aaa' }]}>
+                              <Text style={styles.statusBadgeText}>{item.status}</Text>
+                            </View>
+                          </View>
+                        </AnimatedCard>
+                      </SwipeableRow>
+                    </ScaleDecorator>
+                  );
+                }}
+              />
+            ) : (
             <Animated.ScrollView style={{ flex: 1, paddingHorizontal: 16, opacity: listFadeAnim }}>
               {filteredSorted.length === 0
                 ? (
@@ -1945,7 +2167,7 @@ export default function App() {
                   const isInternal = item.status === '内定';
                   const isInactive = INACTIVE.includes(item.status);
                   const ns = nextStatus(item.status);
-                  const cdLabel = countdownLabel(item.date); // ⑪
+                  const cdLabel = countdownLabel(item.date);
                   return (
                     <ReAnimated.View
                       key={item.id}
@@ -1954,8 +2176,7 @@ export default function App() {
                       layout={LinearTransition.springify()}>
                     <SwipeableRow onDelete={() => deleteSchedule(item.id)}>
                       <AnimatedCard
-                        style={[styles.listCard,
-                        {
+                        style={[styles.listCard, {
                           backgroundColor: isDark ? (isInactive ? '#2a2a2a' : isInternal ? '#2d0a0a' : C.card) : statusCardColor(item.status),
                           borderColor: isDark ? C.border : statusCardBorder(item.status)
                         }]}
@@ -2001,7 +2222,6 @@ export default function App() {
                             </TouchableOpacity>
                           ) : null}
                           {item.note ? <Text style={styles.notePreview} numberOfLines={1}>📝 {item.note}</Text> : null}
-                          {/* ⑩ 選考ステッパー */}
                           {!isInactive && <MiniStepper status={item.status} statusColors={statusColors} isDark={isDark} animTrigger={advanceAnimMap[item.id] ?? 0} />}
                         </View>
                         <View style={{ alignItems: 'flex-end', gap: 6 }}>
@@ -2036,6 +2256,7 @@ export default function App() {
               }
               <View style={{ height: 80 }} />
             </Animated.ScrollView>
+            )}
             <Pressable
               style={styles.fab}
               onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); openAdd(); countAction(); }}
@@ -3010,9 +3231,7 @@ export default function App() {
                     <TouchableOpacity key={step}
                       style={[styles.checkRow, { borderColor: C.border2 }, checked && isInter && { backgroundColor: isDark ? '#2d0a0a' : '#fff0f0', borderRadius: 8 }]}
                       onPress={() => checkModalItem && toggleCheck(checkModalItem, step)}>
-                      <View style={[styles.checkbox, checked && { backgroundColor: isInter ? '#e74c3c' : TDU_BLUE, borderColor: isInter ? '#e74c3c' : TDU_BLUE }]}>
-                        {checked && <Text style={{ color: '#fff', fontSize: 12, fontWeight: 'bold' }}>✓</Text>}
-                      </View>
+                      <AnimatedCheckmark checked={checked} color={isInter ? '#e74c3c' : TDU_BLUE} />
                       <Text style={[styles.checkLabel, checked && { color: isInter ? '#e74c3c' : TDU_BLUE, fontWeight: 'bold' }]}>
                         {step}{isInter && checked ? ' 🌸' : ''}
                       </Text>
@@ -3027,10 +3246,8 @@ export default function App() {
                 )}
                 {(checkModalItem?.customChecklist ?? []).map(c => (
                   <View key={c.id} style={[styles.checkRow, { borderColor: C.border2 }]}>
-                    <TouchableOpacity
-                      style={[styles.checkbox, c.checked && { backgroundColor: '#27AE60', borderColor: '#27AE60' }]}
-                      onPress={() => checkModalItem && toggleCustomCheck(checkModalItem, c.id)}>
-                      {c.checked && <Text style={{ color: '#fff', fontSize: 12, fontWeight: 'bold' }}>✓</Text>}
+                    <TouchableOpacity onPress={() => checkModalItem && toggleCustomCheck(checkModalItem, c.id)}>
+                      <AnimatedCheckmark checked={c.checked} color="#27AE60" />
                     </TouchableOpacity>
                     <Text style={[styles.checkLabel, { flex: 1 }, c.checked && { color: '#27AE60', fontWeight: 'bold' }]}>{c.label}</Text>
                     <TouchableOpacity onPress={() => checkModalItem && deleteCustomCheck(checkModalItem, c.id)}
@@ -3106,6 +3323,7 @@ export default function App() {
 
       </View>
     </SafeAreaView>
+    </GestureHandlerRootView>
   );
 }
 
