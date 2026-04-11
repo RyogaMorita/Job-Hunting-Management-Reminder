@@ -69,12 +69,13 @@
 - `width`/`height` のアニメーションが必要な場合のみ `useNativeDriver: false`
 - スプリング設定の基本値: `damping: 15, stiffness: 150`
 - リストのスタガー遅延: 80〜120ms
-- `react-native-reanimated` は未インストール。アニメーションは React Native 標準の `Animated` API を使用すること
-  - インストールする場合は EAS ビルドが必要。事前にユーザーに確認すること
+- `react-native-reanimated` v3 インストール済み（build 78〜）。`useSharedValue`, `useAnimatedStyle`, `withSpring`, `withTiming`, `withSequence` を積極的に使う
+- `react-native-gesture-handler`, `react-native-draggable-flatlist`, `react-native-svg` もインストール済み
+- 新しいネイティブライブラリを追加する場合は EAS ビルドが必要。事前にユーザーに確認すること
 
 ## コーディング規則
 
 - **インラインスタイルでハードコードした色を使わない** — 必ず `C.xxx` / `TDU_BLUE` / `ACCENT` / `statusColors[status]` を参照
 - **汎用ヘルパーは作らない** — 1箇所でしか使わないなら直接書く
-- 既存のコンポーネント（SwipeableRow, MiniStepper, StatusStepper 等）を再利用する
+- 既存のコンポーネント（SwipeableRow, MiniStepper, StatusStepper, AnimatedCard, RippleButton, AnimatedCheckmark 等）を再利用する
 - 新機能追加時は既存のステート管理パターン（AsyncStorage + useState）に合わせる

@@ -1,0 +1,33 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "file=\"$CLAUDE_TOOL_INPUT_FILE_PATH\"; if [[ \"$file\" == *.ts || \"$file\" == *.tsx ]]; then matches=$(grep -n \"'#[0-9A-Fa-f]\\{6\\}'\\|\\\"#[0-9A-Fa-f]\\{6\\}\\\"\" \"$file\" 2>/dev/null | grep -v \"hex:\\|Color(hex:\\|backgroundColor.*#031659\\|// \" | head -3); if [ -n \"$matches\" ]; then echo \"[Hook] ⚠️ ハードコード色を検出しました。C.xxx / TDU_BLUE / ACCENT / statusColors[status] を使ってください:\\n$matches\" >&2; fi; fi"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "file=\"$CLAUDE_TOOL_INPUT_FILE_PATH\"; if [[ \"$file\" == *.ts || \"$file\" == *.tsx ]]; then matches=$(grep -n 'console\\.log' \"$file\" 2>/dev/null | head -3); if [ -n \"$matches\" ]; then echo \"[Hook] ⚠️ console.log が残っています。削除してください:\\n$matches\" >&2; fi; fi"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "file=\"$CLAUDE_TOOL_INPUT_FILE_PATH\"; if [[ \"$file\" == */app.json ]]; then buildNum=$(grep -o '\"buildNumber\": \"[0-9]*\"' \"$file\" | grep -o '[0-9]*'); echo \"[Hook] ℹ️ app.json を編集しました。現在の buildNumber: $buildNum\" >&2; fi"
+          }
+        ]
+      }
+    ]
+  }
+}
