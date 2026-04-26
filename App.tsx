@@ -132,6 +132,7 @@ interface Genre { id: string; name: string; color: string; }
 interface NotifySetting { daysBeforeList: string[]; hourStr: string; minuteStr: string; }
 interface Schedule {
   id: string; company: string; date: string; hour: string; minute: string;
+  endDate?: string;
   status: string; note: string; url: string; userId: string; password: string;
   rank: string; genreId: string; calendarColor?: string;
   checklist: Record<string, boolean>;
@@ -149,6 +150,27 @@ interface Schedule {
 
 type TabType = 'calendar' | 'list' | 'settings';
 type SortType = '登録順' | '直近順' | '五十音' | '志望度' | 'ステータス' | 'ジャンル' | '手動';
+
+const parseYmd = (ymd: string) => {
+  const [y, m, d] = ymd.split('-').map(Number);
+  return new Date(y, (m || 1) - 1, d || 1);
+};
+const formatYmd = (dt: Date) => {
+  const y = dt.getFullYear();
+  const m = String(dt.getMonth() + 1).padStart(2, '0');
+  const d = String(dt.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+};
+const addDaysYmd = (ymd: string, n: number) => {
+  const dt = parseYmd(ymd);
+  dt.setDate(dt.getDate() + n);
+  return formatYmd(dt);
+};
+const dateRangeStr = (s: Schedule) => {
+  const start = s.date.replace(/-/g, '/');
+  if (!s.endDate || s.endDate <= s.date) return start;
+  return `${start}〜${s.endDate.replace(/-/g, '/')}`;
+};
 
 // ─── デフォルトジャンル ───────────────────────────────────────────
 const DEFAULT_GENRES: Genre[] = [
@@ -971,6 +993,7 @@ export default function App() {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [selStatus, setSelStatus] = useState('検討中');
   const [selDate, setSelDate] = useState(new Date().toISOString().split('T')[0]);
+  const [selEndDate, setSelEndDate] = useState('');
   const [selHour, setSelHour] = useState('');
   const [selMinute, setSelMinute] = useState('');
   const [note, setNote] = useState('');
@@ -1024,11 +1047,17 @@ export default function App() {
 
   // 企業登録用ホイールピッカー
   const [showDateWheelPicker, setShowDateWheelPicker] = useState(false);
+  const [dateWheelTarget, setDateWheelTarget] = useState<'start' | 'end'>('start');
   const [wheelYear, setWheelYear] = useState(new Date().getFullYear());
   const [wheelMonth, setWheelMonth] = useState(new Date().getMonth() + 1); // 1-indexed
   const [wheelDay, setWheelDay] = useState(new Date().getDate());
 
   useEffect(() => { loadAll(); }, []);
+  useEffect(() => {
+    if (selDate && selEndDate && selEndDate < selDate) {
+      setSelEndDate(selDate);
+    }
+  }, [selDate, selEndDate]);
 
   // カレンダー高さアニメーション（週↔月切り替え・月変更）
   useEffect(() => {
@@ -1290,11 +1319,19 @@ export default function App() {
   const markedDates = useMemo(() => {
     const marks: Record<string, any> = {};
     schedules.forEach(s => {
-      if (!s.date) return; // ① 日付なしエントリを除外
+      if (!s.date) return;
       const col = s.calendarColor ?? statusColors[s.status] ?? TDU_BLUE;
-      if (!marks[s.date]) marks[s.date] = { dots: [] };
-      if (!marks[s.date].dots) marks[s.date].dots = [];
-      marks[s.date].dots.push({ color: col });
+      const start = s.date;
+      const end = s.endDate && s.endDate >= s.date ? s.endDate : s.date;
+      let cur = start;
+      let guard = 0;
+      while (cur <= end && guard < 120) {
+        if (!marks[cur]) marks[cur] = { dots: [] };
+        if (!marks[cur].dots) marks[cur].dots = [];
+        marks[cur].dots.push({ color: col });
+        cur = addDaysYmd(cur, 1);
+        guard += 1;
+      }
     });
     marks[selectedDate] = { ...(marks[selectedDate] || {}), selected: true, selectedColor: TDU_BLUE };
     return marks;
@@ -1319,7 +1356,19 @@ export default function App() {
 
   const dateCompanyMap = useMemo(() => {
     const map: Record<string, Schedule[]> = {};
-    schedules.forEach(s => { if (!s.date) return; if (!map[s.date]) map[s.date] = []; map[s.date].push(s); });
+    schedules.forEach(s => {
+      if (!s.date) return;
+      const start = s.date;
+      const end = s.endDate && s.endDate >= s.date ? s.endDate : s.date;
+      let cur = start;
+      let guard = 0;
+      while (cur <= end && guard < 120) {
+        if (!map[cur]) map[cur] = [];
+        map[cur].push(s);
+        cur = addDaysYmd(cur, 1);
+        guard += 1;
+      }
+    });
     Object.keys(map).forEach(d => {
       map[d].sort((a, b) => (STATUS_PRIORITY[b.status] ?? 0) - (STATUS_PRIORITY[a.status] ?? 0));
     });
@@ -1390,7 +1439,11 @@ export default function App() {
     return list;
   }, [deduplicatedSchedules, searchQuery, filterGenreIds, filterStatuses, sortType, sortAsc, manualOrder]); // ② 正しい依存配列
 
-  const filteredByDate = useMemo(() => schedules.filter(s => s.date && s.date === selectedDate), [schedules, selectedDate]);
+  const filteredByDate = useMemo(() => schedules.filter(s => {
+    if (!s.date) return false;
+    const end = s.endDate && s.endDate >= s.date ? s.endDate : s.date;
+    return s.date <= selectedDate && selectedDate <= end;
+  }), [schedules, selectedDate]);
 
   // カレンダーの行数を計算（現在月のみ）
   const maxCalRows = useMemo(() => {
@@ -1446,6 +1499,7 @@ export default function App() {
     const newSchedule: Schedule = {
       id: selectedItem ? selectedItem.id : Date.now().toString(),
       company: companyName.trim(), date: selDate,
+      endDate: selEndDate && selDate && selEndDate >= selDate ? selEndDate : undefined,
       hour: selHour, minute: selMinute,
       status: selStatus, note: note.trim(),
       url: url.trim(), userId: userId.trim(), password: password.trim(),
@@ -1488,6 +1542,7 @@ export default function App() {
   const closeModal = () => {
     setModalVisible(false); setDetailVisible(false); setSelectedItem(null);
     setCompanyName(''); setNote(''); setSelStatus('検討中');
+    setSelDate(new Date().toISOString().split('T')[0]); setSelEndDate('');
     setSelHour(''); setSelMinute(''); setUrl(''); setUserId(''); setPassword('');
     setRank('B'); setSelGenreId('other'); setChecklist({});
     setShowHourPicker(false); setShowMinutePicker(false); setShowDateWheelPicker(false);
@@ -1499,8 +1554,10 @@ export default function App() {
   const openAdd = (dateStr?: string) => {
     const ds = (typeof dateStr === 'string' && dateStr) ? dateStr : selectedDate;
     setSelDate(ds);
+    setSelEndDate('');
     const d = new Date(ds);
     setWheelYear(d.getFullYear()); setWheelMonth(d.getMonth() + 1); setWheelDay(d.getDate());
+    setDateWheelTarget('start');
     setItemNotifyEnabled(true);
     setNotifyDaysList(['1']); setNotifyHour('09'); setNotifyMinute('00');
     setModalVisible(true);
@@ -1509,6 +1566,7 @@ export default function App() {
   // 同名企業から情報引き継ぎして新規登録フォームを開く
   const openAddWithInherit = (prev: Schedule) => {
     setSelDate(selectedDate);
+    setSelEndDate('');
     setSelGenreId(prev.genreId ?? 'other');
     setUrl(prev.url ?? '');
     setUserId(prev.userId ?? '');
@@ -1520,6 +1578,7 @@ export default function App() {
     setMemoQuestions(prev.memoQuestions ?? '');
     // 引き継がないもの: status・date・通知設定
     setSelStatus('検討中');
+    setDateWheelTarget('start');
     setCompanyName(prev.company);
     setModalVisible(true);
   };
@@ -1564,6 +1623,7 @@ export default function App() {
   const openDetail = (item: Schedule) => {
     setSelectedItem(item); setCompanyName(item.company);
     setNote(item.note ?? ''); setSelStatus(item.status); setSelDate(item.date);
+    setSelEndDate(item.endDate ?? '');
     const _d = item.date ? new Date(item.date) : new Date();
     setWheelYear(_d.getFullYear()); setWheelMonth(_d.getMonth() + 1); setWheelDay(_d.getDate());
     setSelHour(item.hour ?? ''); setSelMinute(item.minute ?? '');
@@ -1581,6 +1641,7 @@ export default function App() {
     setMemoPR(item.memoPR ?? '');
     setMemoQuestions(item.memoQuestions ?? '');
     setActiveMemoTab(0);
+    setDateWheelTarget('start');
     setDetailVisible(true);
   };
 
@@ -1916,7 +1977,7 @@ export default function App() {
                                   lastTapRef.current = { ds, time: now };
                                 }
                               }}
-                              style={{ alignItems: 'center', width: 46, minHeight: 44, position: 'relative' }}>
+                              style={{ alignItems: 'center', width: '100%', minHeight: 44, position: 'relative' }}>
                               <View style={[
                                 { width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
                                 isSel && { backgroundColor: TDU_BLUE },
@@ -1953,7 +2014,27 @@ export default function App() {
                               })}
                               {items.slice(0, 2).map((item: Schedule, i: number) => {
                                 const sc = item.calendarColor ?? statusColorOf(item.status);
-                                return (
+                                const isSpan = !!(item.endDate && item.endDate > item.date);
+                                const isStart = isSpan && ds === item.date;
+                                const isEnd = isSpan && ds === item.endDate;
+                                const capL = !isSpan || isStart || isWeekRowStart;
+                                const capR = !isSpan || isEnd || isWeekRowEnd;
+                                const label = isStart || !isSpan ? item.company : '';
+                                return isSpan ? (
+                                  <View key={i} style={{
+                                    height: 12, marginTop: 2, alignSelf: 'stretch',
+                                    marginHorizontal: capL && capR ? 0 : capL ? -2 : capR ? -2 : -2,
+                                    backgroundColor: sc + '55',
+                                    borderLeftWidth: capL ? 2 : 0,
+                                    borderLeftColor: sc,
+                                    borderTopLeftRadius: capL ? 3 : 0,
+                                    borderBottomLeftRadius: capL ? 3 : 0,
+                                    borderTopRightRadius: capR ? 3 : 0,
+                                    borderBottomRightRadius: capR ? 3 : 0,
+                                  }}>
+                                    {label ? <Text style={[styles.calLabelText, { color: sc }]} numberOfLines={1}>{label}</Text> : null}
+                                  </View>
+                                ) : (
                                   <View key={i} style={[styles.calLabel, { backgroundColor: sc + '33', borderLeftColor: sc }]}>
                                     <Text style={[styles.calLabelText, { color: sc }]} numberOfLines={1}>{item.company}</Text>
                                   </View>
@@ -2153,7 +2234,7 @@ export default function App() {
                               </View>}
                             </View>
                             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                              <Text style={styles.dateText}>{item.date ? item.date.replace(/-/g, '/') + (timeStr(item.hour, item.minute) ? ' ' + timeStr(item.hour, item.minute) + '〜' : '') : '日付未定'}</Text>
+                              <Text style={styles.dateText}>{item.date ? dateRangeStr(item) + (timeStr(item.hour, item.minute) ? ' ' + timeStr(item.hour, item.minute) + '〜' : '') : '日付未定'}</Text>
                             </View>
                             {item.note ? <Text style={styles.notePreview} numberOfLines={1}>📝 {item.note}</Text> : null}
                             {!isInactive && <MiniStepper status={item.status} statusColors={statusColors} isDark={isDark} animTrigger={advanceAnimMap[item.id] ?? 0} />}
@@ -2221,7 +2302,7 @@ export default function App() {
                             </View>}
                           </View>
                           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                            <Text style={styles.dateText}>{item.date ? item.date.replace(/-/g, '/') + (timeStr(item.hour, item.minute) ? ' ' + timeStr(item.hour, item.minute) + '〜' : '') : '日付未定'}</Text>
+                            <Text style={styles.dateText}>{item.date ? dateRangeStr(item) + (timeStr(item.hour, item.minute) ? ' ' + timeStr(item.hour, item.minute) + '〜' : '') : '日付未定'}</Text>
                             {item.userId ? (
                               <TouchableOpacity onPress={() => { Clipboard.setString(item.userId); Alert.alert('コピー', 'IDをコピーしました'); }}
                                 style={{ backgroundColor: '#e8f0fe', borderRadius: 6, paddingHorizontal: 7, paddingVertical: 2 }}>
@@ -2845,7 +2926,7 @@ export default function App() {
                     <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
                       <TouchableOpacity
                         style={[styles.input, { flex: 1, backgroundColor: C.inputBg, justifyContent: 'center' }]}
-                        onPress={() => setShowDateWheelPicker(v => !v)}>
+                        onPress={() => { setDateWheelTarget('start'); setShowDateWheelPicker(v => !v); }}>
                         <Text style={{ fontSize: 15, color: selDate ? C.text : '#aaa' }}>{selDate || '日付なし'}</Text>
                       </TouchableOpacity>
                       {selDate ? <TouchableOpacity onPress={() => { setSelDate(''); setShowDateWheelPicker(false); }}
@@ -2870,7 +2951,7 @@ export default function App() {
                                 onPress={() => {
                                   setWheelYear(wYr);
                                   const nd = `${wYr}-${String(wheelMonth).padStart(2, '0')}-${String(wheelDay).padStart(2, '0')}`;
-                                  setSelDate(nd);
+                                  dateWheelTarget === 'start' ? setSelDate(nd) : setSelEndDate(nd);
                                 }}>
                                 <Text style={{ fontSize: 14, color: wheelYear === wYr ? '#fff' : C.text, fontWeight: wheelYear === wYr ? 'bold' : 'normal' }}>{wYr}</Text>
                               </TouchableOpacity>
@@ -2887,7 +2968,7 @@ export default function App() {
                                 onPress={() => {
                                   setWheelMonth(wMon);
                                   const nd = `${wheelYear}-${String(wMon).padStart(2, '0')}-${String(wheelDay).padStart(2, '0')}`;
-                                  setSelDate(nd);
+                                  dateWheelTarget === 'start' ? setSelDate(nd) : setSelEndDate(nd);
                                 }}>
                                 <Text style={{ fontSize: 14, color: wheelMonth === wMon ? '#fff' : C.text, fontWeight: wheelMonth === wMon ? 'bold' : 'normal' }}>{wMon}月</Text>
                               </TouchableOpacity>
@@ -2904,7 +2985,7 @@ export default function App() {
                                 onPress={() => {
                                   setWheelDay(wDay);
                                   const nd = `${wheelYear}-${String(wheelMonth).padStart(2, '0')}-${String(wDay).padStart(2, '0')}`;
-                                  setSelDate(nd);
+                                  dateWheelTarget === 'start' ? setSelDate(nd) : setSelEndDate(nd);
                                 }}>
                                 <Text style={{ fontSize: 14, color: wheelDay === wDay ? '#fff' : C.text, fontWeight: wheelDay === wDay ? 'bold' : 'normal' }}>{wDay}日</Text>
                               </TouchableOpacity>
@@ -2918,6 +2999,25 @@ export default function App() {
                         </TouchableOpacity>
                       </View>
                     )}
+                    {/* 終了日 */}
+                    <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center', marginTop: 6 }}>
+                      <Text style={{ fontSize: 12, color: C.text3, width: 36 }}>終了日</Text>
+                      <TouchableOpacity
+                        style={[styles.input, { flex: 1, backgroundColor: C.inputBg, justifyContent: 'center' }]}
+                        onPress={() => {
+                          if (selEndDate) {
+                            const ed = new Date(selEndDate);
+                            setWheelYear(ed.getFullYear()); setWheelMonth(ed.getMonth() + 1); setWheelDay(ed.getDate());
+                          }
+                          setDateWheelTarget('end');
+                          setShowDateWheelPicker(true);
+                        }}>
+                        <Text style={{ fontSize: 15, color: selEndDate ? C.text : '#aaa' }}>{selEndDate || '終了日なし'}</Text>
+                      </TouchableOpacity>
+                      {selEndDate ? <TouchableOpacity onPress={() => setSelEndDate('')} style={{ paddingHorizontal: 8, paddingVertical: 10 }}>
+                        <Text style={{ color: '#aaa', fontSize: 16 }}>✕</Text>
+                      </TouchableOpacity> : null}
+                    </View>
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={[styles.label, { color: C.text3 }]}>時間</Text>
@@ -3363,7 +3463,7 @@ const styles = StyleSheet.create({
   statNum: { fontSize: 18, fontWeight: 'bold', color: TDU_BLUE },
   statLabel: { fontSize: 9, color: TDU_BLUE },
 
-  calLabel: { borderLeftWidth: 2, borderRadius: 3, paddingHorizontal: 2, marginTop: 1, width: 44 },
+  calLabel: { borderLeftWidth: 2, borderRadius: 3, paddingHorizontal: 2, marginTop: 1, width: '100%' },
   calLabelText: { fontSize: 7, fontWeight: 'bold' },
   calMore: { fontSize: 7, color: '#999', marginTop: 1 },
 
