@@ -97,9 +97,9 @@ const MINUTES = ['00', '15', '30', '45'];
 const INACTIVE = ['内定辞退', '不合格'];
 
 const statusCardColor = (s: string) =>
-  s === '内定' ? '#fff0f0' : INACTIVE.includes(s) ? '#f0f0f0' : '#ffffff';
+  s === '内定' ? '#fffafb' : INACTIVE.includes(s) ? '#fafafa' : '#ffffff';
 const statusCardBorder = (s: string) =>
-  s === '内定' ? '#f5a0a0' : INACTIVE.includes(s) ? '#cccccc' : '#eeeeee';
+  s === '内定' ? '#f7c9d8' : INACTIVE.includes(s) ? '#dddddd' : '#eeeeee';
 
 // ─── 型定義 ───────────────────────────────────────────────────────
 interface Genre { id: string; name: string; color: string; }
@@ -1112,7 +1112,8 @@ export default function App() {
                               {items.slice(0, 2).map((item: Schedule, i: number) => {
                                 const sc = item.calendarColor ?? statusColorOf(item.status);
                                 return (
-                                  <View key={i} style={[styles.calLabel, { backgroundColor: sc + '33', borderLeftColor: sc }]}>
+                                  <View key={i} style={[styles.calLabel, { backgroundColor: sc + '18', borderColor: sc + '55' }]}>
+                                    <View style={[styles.calLabelDot, { backgroundColor: sc }]} />
                                     <Text style={[styles.calLabelText, { color: sc }]} numberOfLines={1}>{item.company}</Text>
                                   </View>
                                 );
@@ -1167,11 +1168,15 @@ export default function App() {
                         const sc = item.calendarColor ?? statusColorOf(item.status);
                         return (
                           <TouchableOpacity key={item.id}
-                            style={[styles.itemCard, { borderLeftColor: sc, borderLeftWidth: 3, borderColor: C.border2, backgroundColor: C.bg }]}
+                            style={[styles.itemCard, { borderColor: sc + '33', backgroundColor: isDark ? C.card : sc + '0F' }]}
                             onPress={() => openDetail(item)}>
+                            <View style={[styles.statusDot, { backgroundColor: sc }]} />
                             <View style={{ flex: 1 }}>
                               <Text style={[styles.itemTitle, { color: C.text }]}>{item.company}</Text>
-                              <Text style={[styles.itemStatus, { color: C.text2 }]}>{timeStr(item.hour, item.minute) ? timeStr(item.hour, item.minute) + '〜 · ' : ''}{item.status}</Text>
+                              <Text style={[styles.itemStatus, { color: C.text2 }]}>{timeStr(item.hour, item.minute) ? timeStr(item.hour, item.minute) + '〜' : '時間未定'}</Text>
+                            </View>
+                            <View style={[styles.statusBadgeSoft, { backgroundColor: sc + '1F' }]}>
+                              <Text style={[styles.statusBadgeSoftText, { color: sc }]}>{item.status}</Text>
                             </View>
                             <View style={[styles.rankBadge, { backgroundColor: rankColor(item.rank) }]}>
                               <Text style={styles.rankText}>{item.rank}</Text>
@@ -1280,12 +1285,12 @@ export default function App() {
                         }]}
                         onPress={() => openDetail(item)}
                         activeOpacity={0.9}>
-                        <View style={[styles.genreBand, { backgroundColor: sc }]} />
-                        <View style={{ flex: 1, paddingLeft: 10 }}>
+                        <View style={{ flex: 1 }}>
                           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                             <View style={[styles.rankBadge, { backgroundColor: rankColor(item.rank) }]}>
                               <Text style={styles.rankText}>{item.rank}</Text>
                             </View>
+                            <View style={[styles.statusDot, { backgroundColor: sc }]} />
                             <Text style={[styles.itemTitle, { color: isInactive ? '#888' : C.text, flex: 1 }]} numberOfLines={1}>
                               {item.company}{isInternal ? ' 🌸' : ''}
                             </Text>
@@ -1295,6 +1300,13 @@ export default function App() {
                           </View>
                           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                             <Text style={styles.dateText}>{item.date ? item.date.replace(/-/g, '/') + (timeStr(item.hour, item.minute) ? ' ' + timeStr(item.hour, item.minute) + '〜' : '') : '日付未定'}</Text>
+                            {genreOf(item.genreId) ? (
+                              <View style={[styles.genreChipSoft, { backgroundColor: (genreOf(item.genreId)?.color ?? '#95A5A6') + '18' }]}>
+                                <Text style={[styles.genreChipSoftText, { color: genreOf(item.genreId)?.color ?? '#95A5A6' }]} numberOfLines={1}>
+                                  {genreOf(item.genreId)?.name}
+                                </Text>
+                              </View>
+                            ) : null}
                             {item.userId ? (
                               <TouchableOpacity onPress={() => { Clipboard.setString(item.userId); Alert.alert('コピー', 'IDをコピーしました'); }}
                                 style={{ backgroundColor: '#e8f0fe', borderRadius: 6, paddingHorizontal: 7, paddingVertical: 2 }}>
@@ -1333,9 +1345,8 @@ export default function App() {
                           })()}
                         </View>
                         <View style={{ alignItems: 'flex-end', gap: 6 }}>
-                          <View style={[styles.statusBadge, { backgroundColor: sc },
-                          isInactive && { backgroundColor: '#aaa' }]}>
-                            <Text style={styles.statusBadgeText}>{item.status}</Text>
+                          <View style={[styles.statusBadgeSoft, { backgroundColor: isInactive ? '#eeeeee' : sc + '1F' }]}>
+                            <Text style={[styles.statusBadgeSoftText, { color: isInactive ? '#888' : sc }]}>{item.status}</Text>
                           </View>
                           {ns && !isInactive ? (
                             <TouchableOpacity
@@ -1631,23 +1642,47 @@ export default function App() {
 
         {/* 初回起動モーダル */}
         <Modal visible={firstLaunchModal} transparent animationType="fade" onRequestClose={() => setFirstLaunchModal(false)}>
-          <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', padding: 24 }}>
-            <View style={{ backgroundColor: C.bg, borderRadius: 20, padding: 24, width: '90%', gap: 14 }}>
-              <Text style={{ fontSize: 22, fontWeight: 'bold', color: isDark ? '#6ea8fe' : TDU_BLUE, textAlign: 'center' }}>ようこそ！🎉</Text>
-              <Text style={{ fontSize: 15, fontWeight: 'bold', color: C.text }}>就活管理リマインダーの使い方</Text>
-              <View style={{ gap: 8 }}>
-                <Text style={{ fontSize: 13, color: C.text2, lineHeight: 20 }}>📅 <Text style={{ fontWeight: 'bold', color: C.text }}>カレンダータブ</Text>{'\n'}日付をタップして企業を登録。ダブルタップで素早く追加できます。</Text>
-                <Text style={{ fontSize: 13, color: C.text2, lineHeight: 20 }}>👥 <Text style={{ fontWeight: 'bold', color: C.text }}>持ち駒タブ</Text>{'\n'}登録した企業の選考状況を一覧管理。「→」で次のステップへ進めます。</Text>
-                <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 6 }}>
-                  <Image source={ICONS.settings} style={{ width: 14, height: 14, tintColor: C.text3, marginTop: 2 }} />
-                  <Text style={{ fontSize: 13, color: C.text2, lineHeight: 20, flex: 1 }}><Text style={{ fontWeight: 'bold', color: C.text }}>設定タブ</Text>{'\n'}詳しい使い方は設定タブ下部の「ヘルプ・使い方」をご覧ください。</Text>
-                </View>
+          <View style={styles.onboardingOverlay}>
+            <View style={[styles.onboardingCard, { backgroundColor: C.bg, borderColor: C.border }]}>
+              <View style={[styles.onboardingIconWrap, { backgroundColor: isDark ? '#1c2333' : '#e8f0fe' }]}>
+                <Image source={ICONS.calendar} style={{ width: 30, height: 30, tintColor: isDark ? '#6ea8fe' : TDU_BLUE }} />
+              </View>
+              <Text style={[styles.onboardingTitle, { color: C.text }]}>選考予定を、迷わず整理</Text>
+              <Text style={[styles.onboardingLead, { color: C.text2 }]}>
+                まずは企業を1社登録しましょう。締切、面接、メモ、通知までひとつのカードで管理できます。
+              </Text>
+
+              <View style={styles.onboardingSteps}>
+                {[
+                  { icon: ICONS.company, title: '企業を登録', body: '会社名、ステータス、日付を入力' },
+                  { icon: ICONS.checklist, title: '進捗を更新', body: 'ES提出から内定までチェック' },
+                  { icon: ICONS.bell, title: '忘れない', body: '締切前にリマインド通知' },
+                ].map((step, i) => (
+                  <View key={step.title} style={[styles.onboardingStep, { backgroundColor: C.bg2, borderColor: C.border2 }]}>
+                    <View style={[styles.onboardingStepIcon, { backgroundColor: i === 0 ? '#e8f0fe' : i === 1 ? '#eaf7ef' : '#fff3cd' }]}>
+                      <Image source={step.icon} style={{ width: 16, height: 16, tintColor: i === 0 ? TDU_BLUE : i === 1 ? '#27AE60' : '#856404' }} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.onboardingStepTitle, { color: C.text }]}>{step.title}</Text>
+                      <Text style={[styles.onboardingStepBody, { color: C.text2 }]}>{step.body}</Text>
+                    </View>
+                  </View>
+                ))}
               </View>
               <TouchableOpacity
-                style={{ backgroundColor: isDark ? '#1c2333' : TDU_BLUE, borderRadius: 12, paddingVertical: 12, alignItems: 'center', marginTop: 4 }}
+                style={[styles.onboardingPrimary, { backgroundColor: isDark ? '#1c2333' : TDU_BLUE }]}
+                onPress={() => {
+                  setFirstLaunchModal(false);
+                  setTimeout(() => openAdd(), 250);
+                }}
+              >
+                <Text style={styles.onboardingPrimaryText}>最初の企業を登録する</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.onboardingSecondary}
                 onPress={() => setFirstLaunchModal(false)}
               >
-                <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 15 }}>はじめる</Text>
+                <Text style={[styles.onboardingSecondaryText, { color: C.text3 }]}>あとで始める</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -2348,8 +2383,9 @@ const styles = StyleSheet.create({
   statNum: { fontSize: 18, fontWeight: 'bold', color: TDU_BLUE },
   statLabel: { fontSize: 9, color: TDU_BLUE },
 
-  calLabel: { borderLeftWidth: 2, borderRadius: 3, paddingHorizontal: 2, marginTop: 1, width: 44 },
-  calLabelText: { fontSize: 7, fontWeight: 'bold' },
+  calLabel: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: 5, paddingHorizontal: 3, marginTop: 1, width: 44, minHeight: 11 },
+  calLabelDot: { width: 4, height: 4, borderRadius: 2, marginRight: 2 },
+  calLabelText: { flex: 1, fontSize: 7, fontWeight: 'bold' },
   calMore: { fontSize: 7, color: '#999', marginTop: 1 },
 
   upcomingCard: { flexDirection: 'row', alignItems: 'center', padding: 12, borderRadius: 10, marginBottom: 8 },
@@ -2358,7 +2394,7 @@ const styles = StyleSheet.create({
   subTitle: { fontSize: 15, fontWeight: 'bold', marginBottom: 10 },
   addButton: { backgroundColor: TDU_BLUE, paddingVertical: 6, paddingHorizontal: 12, borderRadius: 20 },
   addButtonText: { color: '#fff', fontSize: 11, fontWeight: 'bold' },
-  itemCard: { paddingVertical: 13, paddingHorizontal: 6, borderBottomWidth: 1, borderColor: '#f0f0f0', flexDirection: 'row', alignItems: 'center', gap: 8 },
+  itemCard: { paddingVertical: 12, paddingHorizontal: 12, borderWidth: 1, borderRadius: 12, marginBottom: 8, flexDirection: 'row', alignItems: 'center', gap: 8 },
   itemTitle: { fontSize: 15, fontWeight: 'bold' },
   itemStatus: { fontSize: 11, marginTop: 3 },
   itemArrow: { color: '#ccc', fontSize: 16 },
@@ -2387,12 +2423,25 @@ const styles = StyleSheet.create({
   swipeDeleteBtn: { flex: 1, justifyContent: 'center', alignItems: 'center', width: 80 },
   swipeDeleteText: { color: '#fff', fontSize: 11, fontWeight: 'bold', textAlign: 'center' },
 
-  listCard: { padding: 14, borderRadius: 12, flexDirection: 'row', alignItems: 'center', borderWidth: 1, elevation: 1, overflow: 'hidden' },
-  genreBand: { width: 4, borderRadius: 4, alignSelf: 'stretch' },
+  listCard: {
+    padding: 14,
+    borderRadius: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    elevation: 1,
+    shadowColor: '#000',
+    shadowOpacity: 0.04,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+  },
+  statusDot: { width: 9, height: 9, borderRadius: 5 },
   dateText: { fontSize: 11, color: '#999', marginTop: 4 },
   notePreview: { fontSize: 10, color: '#aaa', marginTop: 2 },
-  statusBadge: { backgroundColor: TDU_BLUE, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
-  statusBadgeText: { color: '#fff', fontSize: 9, fontWeight: 'bold' },
+  statusBadgeSoft: { paddingHorizontal: 9, paddingVertical: 5, borderRadius: 999 },
+  statusBadgeSoftText: { fontSize: 10, fontWeight: 'bold' },
+  genreChipSoft: { borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3, maxWidth: 110 },
+  genreChipSoftText: { fontSize: 10, fontWeight: 'bold' },
   rankBadge: { width: 22, height: 22, borderRadius: 6, alignItems: 'center', justifyContent: 'center' },
   rankText: { color: '#fff', fontSize: 10, fontWeight: 'bold' },
   checkBtn: { backgroundColor: '#f0f4ff', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
@@ -2425,6 +2474,21 @@ const styles = StyleSheet.create({
   tabImgActive: { opacity: 1, tintColor: TDU_BLUE },
   tabLabel: { fontSize: 9, color: '#ccc', marginTop: 3 },
   tabLabelActive: { fontWeight: 'bold', color: TDU_BLUE },
+
+  onboardingOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.56)', justifyContent: 'center', alignItems: 'center', padding: 24 },
+  onboardingCard: { width: '100%', maxWidth: 390, borderRadius: 22, padding: 22, borderWidth: 1, alignItems: 'stretch' },
+  onboardingIconWrap: { width: 58, height: 58, borderRadius: 18, alignItems: 'center', justifyContent: 'center', alignSelf: 'center', marginBottom: 16 },
+  onboardingTitle: { fontSize: 21, fontWeight: 'bold', textAlign: 'center', lineHeight: 28 },
+  onboardingLead: { fontSize: 13, lineHeight: 20, textAlign: 'center', marginTop: 8, marginBottom: 18 },
+  onboardingSteps: { gap: 8, marginBottom: 18 },
+  onboardingStep: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: 12, padding: 12 },
+  onboardingStepIcon: { width: 34, height: 34, borderRadius: 10, alignItems: 'center', justifyContent: 'center', marginRight: 10 },
+  onboardingStepTitle: { fontSize: 13, fontWeight: 'bold' },
+  onboardingStepBody: { fontSize: 11, marginTop: 2 },
+  onboardingPrimary: { borderRadius: 13, paddingVertical: 13, alignItems: 'center' },
+  onboardingPrimaryText: { color: '#fff', fontWeight: 'bold', fontSize: 15 },
+  onboardingSecondary: { paddingVertical: 12, alignItems: 'center' },
+  onboardingSecondaryText: { fontSize: 13, fontWeight: '500' },
 
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
   modalContent: { backgroundColor: '#fff', borderTopLeftRadius: 25, borderTopRightRadius: 25, padding: 24, maxHeight: '92%' },
