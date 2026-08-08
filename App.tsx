@@ -159,6 +159,9 @@ const MANUAL_ORDER_KEY = '@manual_order_v1';
 const HOURS = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0'));
 const MINUTES = ['00', '15', '30', '45'];
 const INACTIVE = ['内定辞退', '不合格', '完了'];
+// 取り返しがつきにくい変更。ここへ移すときだけ確認を挟み、
+// 通常の段階送りは即時反映＋取り消しにする（高頻度操作に毎回確認を出すと使えない）。
+const CONFIRM_STATUSES = ['内定', '内定承諾', '内定辞退', '不合格', '辞退'];
 
 // ─── 型定義 ───────────────────────────────────────────────────────
 interface Genre { id: string; name: string; color: string; }
@@ -196,6 +199,8 @@ interface Schedule {
 }
 
 type TabType = 'calendar' | 'list' | 'settings';
+// 設定タブ内の階層。null がトップの一覧
+type SettingsPage = 'genre' | 'status' | 'cal' | 'notify' | 'data' | 'help' | 'support' | null;
 // 月グリッド → 週1行 → 時間軸（バーチカル）の3モードを順に回す
 type CalendarMode = 'month' | 'week' | 'day';
 type SortType = '登録順' | '直近順' | '五十音' | '志望度' | 'ステータス' | 'ジャンル' | '手動';
@@ -1462,8 +1467,6 @@ export default function App() {
   const [activeMemoTab, setActiveMemoTab] = useState(0); // 0=研究, 1=PR, 2=質問
   const [internshipStart, setInternshipStart] = useState('');
   const [internshipEnd, setInternshipEnd] = useState('');
-  const [showAllGenres, setShowAllGenres] = useState(false);
-  const [showAllStatuses, setShowAllStatuses] = useState(false);
 
   // 会場（オンライン / 対面）
   const [selVenueType, setSelVenueType] = useState<VenueType | undefined>(undefined);
@@ -1481,6 +1484,16 @@ export default function App() {
 
   // チェックリストモーダル
   const [checkModalItem, setCheckModalItem] = useState<Schedule | null>(null);
+  const [settingsPage, setSettingsPage] = useState<SettingsPage>(null);
+  // ステータス変更の取り消しトースト
+  const [toast, setToast] = useState<{ text: string; undo: () => void } | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showToast = (text: string, undo: () => void) => {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    setToast({ text, undo });
+    toastTimer.current = setTimeout(() => setToast(null), 4000);
+  };
+  useEffect(() => () => { if (toastTimer.current) clearTimeout(toastTimer.current); }, []);
   const [newCheckLabel, setNewCheckLabel] = useState('');
 
   // ジャンル管理モーダル
@@ -1768,6 +1781,11 @@ export default function App() {
       // ウィジェットの同期失敗は本体の動作に影響しないため握りつぶす
     }
   };
+
+  // 取り消しトーストは後から実行されるので、閉じ込めた配列だと
+  // その間の他の変更まで巻き戻してしまう。常に最新を見る。
+  const schedulesRef = useRef<Schedule[]>([]);
+  useEffect(() => { schedulesRef.current = schedules; }, [schedules]);
 
   const saveSchedules = async (data: Schedule[]) => {
     setSchedules(data);
@@ -2421,10 +2439,28 @@ export default function App() {
   const advanceStatus = async (item: Schedule, target?: string) => {
     const ns = target ?? nextStatus(item.status, !!(item.webTestType || item.webTestDeadline));
     if (!ns) return;
+    // 内定・不合格・辞退のような後戻りしづらい変更だけ確認を挟む。
+    // 段階送りは1日に何度も使うので、即時反映して取り消せるようにする。
+    if (CONFIRM_STATUSES.includes(ns)) {
+      Alert.alert(ns, `「${item.company}」を${ns}にしますか？`, [
+        { text: 'キャンセル', style: 'cancel' },
+        {
+          text: ns,
+          style: ns === '内定' || ns === '内定承諾' ? 'default' : 'destructive',
+          onPress: () => applyStatus(item, ns, false),
+        },
+      ]);
+      return;
+    }
+    applyStatus(item, ns, true);
+  };
+
+  const applyStatus = async (item: Schedule, ns: string, undoable: boolean) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     const autoChecks = STATUS_TO_CHECKS[ns] ?? [];
     const initCL: Record<string, boolean> = { ...(item.checklist ?? {}) };
     CHECKLIST_STEPS.forEach(step => { if (autoChecks.includes(step)) initCL[step] = true; });
+    const before = schedules.find(s => s.id === item.id);
     const updated = schedules.map(s => s.id !== item.id ? s : {
       ...s, status: ns, checklist: initCL,
       calendarColor: statusColors[ns] ?? '#95A5A6',
@@ -2433,6 +2469,12 @@ export default function App() {
     });
     await saveSchedules(updated);
     setAdvanceAnimMap(prev => ({ ...prev, [item.id]: (prev[item.id] ?? 0) + 1 }));
+    if (undoable && before) {
+      showToast(`${item.company} を ${ns} にしました`, () => {
+        saveSchedules(schedulesRef.current.map(s => s.id === before.id ? before : s));
+        setToast(null);
+      });
+    }
   };
 
   // ─── ジャンル管理 ─────────────────────────────────────────────
@@ -2519,9 +2561,11 @@ export default function App() {
                 <PulseView active={overdueTodoCount > 0}>
                   <Image source={ICONS.checklist} style={{ width: 14, height: 14, tintColor: overdueTodoCount > 0 ? DANGER : C.text3 }} resizeMode="contain" />
                 </PulseView>
-                <Text style={{ fontSize: 13, color: overdueTodoCount > 0 ? DANGER : C.text2, flex: 1 }} numberOfLines={1}>
+                <Text style={{ fontSize: 13, color: C.text2, flex: 1 }} numberOfLines={1}>
                   やること {todos.length}件
-                  {overdueTodoCount > 0 ? `・期限切れ ${overdueTodoCount}` : ''}
+                  {overdueTodoCount > 0 ? (
+                    <Text style={{ color: DANGER, fontWeight: 'bold' }}>・期限切れ {overdueTodoCount}</Text>
+                  ) : null}
                 </Text>
                 <Text style={{ fontSize: 15, color: C.text3 }}>›</Text>
               </TouchableOpacity>
@@ -3055,12 +3099,16 @@ export default function App() {
                             <Text style={{ fontSize: 12, color: C.text3, fontFamily: 'IBMPlexSans_400Regular' }}>{item.rank}</Text>
                           </View>
 
-                          <Text style={{ fontSize: 13, color: C.text2 }} numberOfLines={1}>{item.status}</Text>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                            <Text style={{ fontSize: 11, color: C.text3 }}>現在</Text>
+                            <Text style={{ fontSize: 13, color: C.text2, flex: 1 }} numberOfLines={1}>{item.status}</Text>
+                          </View>
 
                           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                             <Text style={styles.dateText}>
                               {item.date
-                                ? dateRangeStr(item) + (timeStr(item.hour, item.minute) ? ' ' + timeStr(item.hour, item.minute) : '')
+                                ? dateRangeStr(item).replace(new RegExp(`${new Date().getFullYear()}/`, 'g'), '')
+                                  + (timeStr(item.hour, item.minute) ? ' ' + timeStr(item.hour, item.minute) : '')
                                 : '日付未定'}
                             </Text>
                             {cdLabel ? (
@@ -3082,9 +3130,7 @@ export default function App() {
                               style={{ alignSelf: 'flex-start', paddingVertical: 6, paddingRight: 12, marginTop: 1 }}
                               onPress={() => advanceStatus(item)}>
                               <Text style={{ fontSize: 13, color: ACCENT, fontWeight: 'bold' }}>
-                                {ns === 'インターン面接' ? '面接へ進める'
-                                  : ns === 'インターン確定' ? '参加確定にする'
-                                  : `${ns}へ進める`}
+                                次へ：{ns} →
                               </Text>
                             </TouchableOpacity>
                           ) : null}
@@ -3093,7 +3139,7 @@ export default function App() {
                               style={{ alignSelf: 'flex-start', paddingVertical: 6, paddingRight: 12, marginTop: 1 }}
                               onPress={() => completeStatus(item)}>
                               <Text style={{ fontSize: 13, color: ACCENT, fontWeight: 'bold' }}>
-                                {item.status}を完了にする
+                                次へ：完了 →
                               </Text>
                             </TouchableOpacity>
                           ) : null}
@@ -3142,7 +3188,12 @@ export default function App() {
 
         {/* ── 設定タブ ── */}
         {activeTab === 'settings' && (
-          <ScrollView style={{ flex: 1, padding: 20, backgroundColor: C.bg }}>
+          <ScrollView style={{ flex: 1, backgroundColor: C.bg }} contentContainerStyle={{ padding: 20 }}>
+            {/* 設定は「アプリの挙動を変える場所」。1本の長大なスクロールをやめ、
+                iOSの設定アプリと同じく 一覧 → 詳細 の階層にした。
+                遷移は translateX のスライドで表す（Modalの入れ子にはしない）。 */}
+            {settingsPage === null ? (
+              <ReAnimated.View entering={FadeInDown.duration(160)}>
             {/* 統計ダッシュボード */}
             <View style={{ backgroundColor: isDark ? '#1a2a3a' : '#eaf2ff', borderRadius: 10, padding: 16, marginBottom: 24, borderWidth: 1, borderColor: isDark ? '#2a3a4a' : '#c8ddf7' }}>
               <Text style={{ fontSize: 12, color: ACCENT, fontWeight: 'bold', marginBottom: 12 }}>就活ダッシュボード</Text>
@@ -3206,28 +3257,88 @@ export default function App() {
                 </Text>
               </View>
             </View>
-
-            <Text style={styles.settingSection}>ジャンル管理</Text>
-            {(showAllGenres ? genres : genres.slice(0, 5)).map(g => (
+              <TouchableOpacity style={[styles.formRow, { borderBottomWidth: 1, borderColor: C.border2 }]}
+                onPress={() => setSettingsPage('genre')}>
+                <Text style={[styles.formRowLabel, { color: C.text }]}>ジャンル管理</Text>
+                <Text style={{ fontSize: 14, color: C.text3 }}>{genres.length}</Text>
+                <Text style={{ fontSize: 15, color: C.text3, marginLeft: 6 }}>›</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.formRow, { borderBottomWidth: 1, borderColor: C.border2 }]}
+                onPress={() => setSettingsPage('status')}>
+                <Text style={[styles.formRowLabel, { color: C.text }]}>ステータス管理</Text>
+                <Text style={{ fontSize: 14, color: C.text3 }}>{statusOptions.length}</Text>
+                <Text style={{ fontSize: 15, color: C.text3, marginLeft: 6 }}>›</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.formRow, { borderBottomWidth: 1, borderColor: C.border2 }]}
+                onPress={() => setSettingsPage('cal')}>
+                <Text style={[styles.formRowLabel, { color: C.text }]}>カレンダー設定</Text>
+                {null}
+                <Text style={{ fontSize: 15, color: C.text3, marginLeft: 6 }}>›</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.formRow, { borderBottomWidth: 1, borderColor: C.border2 }]}
+                onPress={() => setSettingsPage('notify')}>
+                <Text style={[styles.formRowLabel, { color: C.text }]}>通知</Text>
+                {null}
+                <Text style={{ fontSize: 15, color: C.text3, marginLeft: 6 }}>›</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.formRow, { borderBottomWidth: 1, borderColor: C.border2 }]}
+                onPress={() => setSettingsPage('data')}>
+                <Text style={[styles.formRowLabel, { color: C.text }]}>データ管理</Text>
+                {null}
+                <Text style={{ fontSize: 15, color: C.text3, marginLeft: 6 }}>›</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.formRow, { borderBottomWidth: 1, borderColor: C.border2 }]}
+                onPress={() => setSettingsPage('help')}>
+                <Text style={[styles.formRowLabel, { color: C.text }]}>ヘルプ・使い方</Text>
+                {null}
+                <Text style={{ fontSize: 15, color: C.text3, marginLeft: 6 }}>›</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.formRow, { borderBottomWidth: 1, borderColor: C.border2 }]}
+                onPress={() => setSettingsPage('support')}>
+                <Text style={[styles.formRowLabel, { color: C.text }]}>開発者を支援する</Text>
+                {null}
+                <Text style={{ fontSize: 15, color: C.text3, marginLeft: 6 }}>›</Text>
+              </TouchableOpacity>
+                <View style={{ alignItems: 'center', marginTop: 24 }}>
+                  <Text style={{ fontSize: 12, color: C.text3 }}>就活管理リマインダー v1.3.0</Text>
+                </View>
+              </ReAnimated.View>
+            ) : (
+              <ReAnimated.View entering={FadeInDown.duration(160)}>
+                <TouchableOpacity
+                  style={{ flexDirection: 'row', alignItems: 'center', minHeight: 44, marginBottom: 4 }}
+                  onPress={() => setSettingsPage(null)}>
+                  <Text style={{ fontSize: 17, color: ACCENT }}>‹</Text>
+                  <Text style={{ fontSize: 15, color: ACCENT, marginLeft: 4 }}>設定</Text>
+                </TouchableOpacity>
+            {settingsPage === 'genre' && (
+              <>
+            {/* 独立したページなので折りたたまず全件出す。追加は右上の＋ */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
+              <Text style={[styles.settingSection, { flex: 1, marginBottom: 0 }]}>ジャンル</Text>
+              <TouchableOpacity onPress={() => openAddGenre()} style={{ minWidth: 44, minHeight: 44, alignItems: 'flex-end', justifyContent: 'center' }}>
+                <Text style={{ color: ACCENT, fontSize: 22, fontWeight: 'bold' }}>＋</Text>
+              </TouchableOpacity>
+            </View>
+            {genres.map(g => (
               <TouchableOpacity key={g.id} style={[styles.genreRow, { borderColor: C.border2 }]} onPress={() => openEditGenre(g)}>
                 <View style={[styles.genreColorDot, { backgroundColor: g.color }]} />
                 <Text style={[styles.settingLabel, { color: C.text }]}>{g.name}</Text>
-                <Text style={{ color: '#ccc' }}>›</Text>
+                <Text style={{ color: C.text3 }}>›</Text>
               </TouchableOpacity>
             ))}
-            {genres.length > 5 && (
-              <TouchableOpacity onPress={() => setShowAllGenres(v => !v)} style={{ paddingVertical: 8, alignItems: 'center' }}>
-                <Text style={{ color: ACCENT, fontSize: 13 }}>
-                  {showAllGenres ? '▲ 閉じる' : `▼ もっと見る（残り${genres.length - 5}件）`}
-                </Text>
-              </TouchableOpacity>
+              </>
             )}
-            <TouchableOpacity style={[styles.outlineButton, { borderColor: ACCENT }]} onPress={() => openAddGenre()}>
-              <Text style={[styles.outlineButtonText, { color: ACCENT }]}>+ ジャンルを追加</Text>
-            </TouchableOpacity>
-
-            <Text style={[styles.settingSection, { marginTop: 28 }]}>ステータス管理</Text>
-            {(showAllStatuses ? statusOptions : statusOptions.slice(0, 5)).map((st, idx) => {
+            {settingsPage === 'status' && (
+              <>
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
+              <Text style={[styles.settingSection, { flex: 1, marginBottom: 0 }]}>ステータス</Text>
+              <TouchableOpacity onPress={() => { setNewStatusName(''); setAddStatusModal(true); }}
+                style={{ minWidth: 44, minHeight: 44, alignItems: 'flex-end', justifyContent: 'center' }}>
+                <Text style={{ color: ACCENT, fontSize: 22, fontWeight: 'bold' }}>＋</Text>
+              </TouchableOpacity>
+            </View>
+            {statusOptions.map((st, idx) => {
               const sc = statusColors[st] ?? '#95A5A6';
               const isFixed = DEFAULT_STATUS_OPTIONS.includes(st);
               return (
@@ -3237,7 +3348,7 @@ export default function App() {
                 }}>
                   <View style={[styles.genreColorDot, { backgroundColor: sc }]} />
                   <Text style={[styles.settingLabel, { color: C.text }]}>{st}</Text>
-                  <Text style={{ color: '#ccc' }}>›</Text>
+                  <Text style={{ color: C.text3 }}>›</Text>
                   {!isFixed && (
                     <TouchableOpacity style={{ paddingHorizontal: 8, paddingVertical: 4 }} onPress={(e) => {
                       e.stopPropagation();
@@ -3246,25 +3357,17 @@ export default function App() {
                         { text: '削除', style: 'destructive', onPress: () => saveStatusOptions(statusOptions.filter(s => s !== st)) },
                       ]);
                     }}>
-                      <Text style={{ color: '#e74c3c', fontSize: 12 }}>削除</Text>
+                      <Text style={{ color: DANGER, fontSize: 12 }}>削除</Text>
                     </TouchableOpacity>
                   )}
                 </TouchableOpacity>
               );
             })}
-            {statusOptions.length > 5 && (
-              <TouchableOpacity onPress={() => setShowAllStatuses(v => !v)} style={{ paddingVertical: 8, alignItems: 'center' }}>
-                <Text style={{ color: ACCENT, fontSize: 13 }}>
-                  {showAllStatuses ? '▲ 閉じる' : `▼ もっと見る（残り${statusOptions.length - 5}件）`}
-                </Text>
-              </TouchableOpacity>
+
+              </>
             )}
-            <TouchableOpacity style={[styles.outlineButton, { marginTop: 8, borderColor: ACCENT }]}
-              onPress={() => { setNewStatusName(''); setAddStatusModal(true); }}>
-              <Text style={[styles.outlineButtonText, { color: ACCENT }]}>+ ステータスを追加</Text>
-            </TouchableOpacity>
-
-
+            {settingsPage === 'cal' && (
+              <>
             <Text style={[styles.settingSection, { marginTop: 28 }]}>カレンダー設定</Text>
             <View style={[styles.settingRow, { borderColor: C.border2 }]}>
               <Text style={[styles.settingLabel, { color: C.text }]}>週の始まり</Text>
@@ -3282,7 +3385,10 @@ export default function App() {
                 ))}
               </View>
             </View>
-
+              </>
+            )}
+            {settingsPage === 'notify' && (
+              <>
             <Text style={[styles.settingSection, { marginTop: 28 }]}>通知テスト</Text>
             <View style={[styles.settingRow, { borderColor: C.border2, flexDirection: 'column', alignItems: 'flex-start', gap: 8 }]}>
               <Text style={{ color: C.text2, fontSize: 13 }}>5秒後にテスト通知を送信します</Text>
@@ -3307,7 +3413,10 @@ export default function App() {
                 <Text style={[styles.outlineButtonText, { color: ACCENT }]}>テスト通知を送る</Text>
               </TouchableOpacity>
             </View>
-
+              </>
+            )}
+            {settingsPage === 'data' && (
+              <>
             <Text style={[styles.settingSection, { marginTop: 28 }]}>データ管理</Text>
             {/* ⑭ CSV エクスポート */}
             <TouchableOpacity style={[styles.outlineButton, { marginBottom: 12, borderColor: ACCENT }]} onPress={() => {
@@ -3330,7 +3439,7 @@ export default function App() {
             }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                 <Image source={ICONS.checklist} style={{ width: 14, height: 14, tintColor: ACCENT }} resizeMode="contain" />
-                <Text style={[styles.outlineButtonText, { color: ACCENT }]}>CSVをクリップボードにコピー</Text>
+                <Text style={[styles.outlineButtonText, { color: ACCENT }]}>データを書き出す（CSV）</Text>
               </View>
             </TouchableOpacity>
             <TouchableOpacity style={styles.dangerButton} onPress={() => {
@@ -3341,7 +3450,10 @@ export default function App() {
             }}>
               <Text style={styles.dangerButtonText}>全データを削除する</Text>
             </TouchableOpacity>
-            {/* ヘルプ */}
+              </>
+            )}
+            {settingsPage === 'help' && (
+              <>
             <Text style={[styles.settingSection, { marginTop: 28 }]}>ヘルプ・使い方</Text>
             {([
               {
@@ -3413,7 +3525,7 @@ export default function App() {
                 icon: ICONS.upload,
                 title: 'データ管理',
                 body: [
-                  '• 設定 → データ管理 →「CSVをクリップボードにコピー」でデータをエクスポート',
+                  '• 設定 → データ管理 →「データを書き出す」でCSVをコピーできます',
                   '• CSVはスプレッドシート（Excel / Google スプレッドシート）に貼り付けられます',
                   '• 含まれる項目：企業名・ステータス・日付・時間・志望度・ジャンル・メモ',
                   '• 「全データを削除する」は元に戻せないので注意してください',
@@ -3449,8 +3561,10 @@ export default function App() {
                 />
               </View>
             )}
-
-            {/* 開発者を支援 */}
+              </>
+            )}
+            {settingsPage === 'support' && (
+              <>
             <Text style={[styles.settingSection, { marginTop: 24 }]}>開発者を支援する</Text>
             <TouchableOpacity
               style={[styles.supportBtn, { backgroundColor: isDark ? '#1c2333' : '#e8f0fe', borderColor: isDark ? '#6ea8fe' : TDU_BLUE }]}
@@ -3475,6 +3589,11 @@ export default function App() {
             <View style={[styles.aboutBox, { backgroundColor: C.bg2, marginTop: 24 }]}>
               <Text style={[styles.aboutText, { color: C.text2 }]}>就活管理リマインダー v1.3.0</Text>
             </View>
+              </>
+            )}
+                <View style={{ height: 40 }} />
+              </ReAnimated.View>
+            )}
           </ScrollView>
         )}
 
@@ -3624,7 +3743,7 @@ export default function App() {
                 inactiveColor={isDark ? '#6e7681' : '#aaa'}
                 onPress={() => {
                   if (!isActive) Haptics.selectionAsync();
-                  setActiveTab(tab); setBannerKey(k => k + 1); countAction();
+                  setActiveTab(tab); setSettingsPage(null); setBannerKey(k => k + 1); countAction();
                 }}
               />
             );
@@ -3847,15 +3966,17 @@ export default function App() {
                     編集画面の大半を占めるわりに毎回いじる項目ではない。
                     普段は選択結果だけを見せ、触るときにシート／ピッカーを開く。
                     カードの入れ子も避け、区切り線だけの行にする。 */}
-                {itemNotifyEnabled && (
-                  <View style={{ marginBottom: 8 }}>
+                {/* OFFでも行は消さない。消すと「そんな設定は無い」と読めてしまう。
+                    操作できないことが分かる程度に落とすだけにする。 */}
+                <View style={{ marginBottom: 8, opacity: itemNotifyEnabled ? 1 : 0.4 }}>
                     <TouchableOpacity
+                      disabled={!itemNotifyEnabled}
                       style={styles.formRow}
                       onPress={() => setNotifyDaysSheet(true)}>
                       <Text style={[styles.formRowLabel, { color: C.text }]}>通知タイミング</Text>
                       <Text style={{ fontSize: 14, color: C.text3 }} numberOfLines={1}>
                         {notifyDaysList.length === 0
-                          ? 'なし'
+                          ? '未設定'
                           : [...notifyDaysList].sort((a, b) => Number(a) - Number(b))
                               .map(d => d === '0' ? '当日' : `${d}日前`).join('、')}
                       </Text>
@@ -3863,6 +3984,7 @@ export default function App() {
                     </TouchableOpacity>
                     <View style={{ height: 1, backgroundColor: C.border2 }} />
                     <TouchableOpacity
+                      disabled={!itemNotifyEnabled}
                       style={styles.formRow}
                       onPress={() => setNotifyTimeOpen(v => !v)}>
                       <Text style={[styles.formRowLabel, { color: C.text }]}>通知時刻</Text>
@@ -3871,7 +3993,7 @@ export default function App() {
                       </Text>
                       <Text style={{ fontSize: 15, color: C.text3, marginLeft: 6 }}>›</Text>
                     </TouchableOpacity>
-                    {notifyTimeOpen && (
+                    {notifyTimeOpen && itemNotifyEnabled && (
                       <WheelTimeField
                         hour={notifyHour} minute={notifyMinute}
                         onChange={(h, m) => { setNotifyHour(h); setNotifyMinute(m); setNotifyTimeOpen(false); }}
@@ -3879,8 +4001,7 @@ export default function App() {
                         autoOpen
                       />
                     )}
-                  </View>
-                )}
+                </View>
 
                 {/* ⑯ 内定承諾期限 */}
                 {(selStatus === '内定' || offerDeadline) && (
@@ -3975,6 +4096,23 @@ export default function App() {
             </Animated.View>
           </KeyboardAvoidingView>
         </Modal>
+
+        {/* ステータス変更の取り消し。確認ダイアログを毎回出す代わりにこれで戻せる */}
+        {toast && (
+          <ReAnimated.View
+            entering={FadeInDown.duration(180)}
+            style={{
+              position: 'absolute', left: 16, right: 16, bottom: 86,
+              flexDirection: 'row', alignItems: 'center', gap: 12,
+              backgroundColor: isDark ? '#21262d' : '#2c2c2e',
+              borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12,
+            }}>
+            <Text style={{ color: '#fff', fontSize: 13, flex: 1 }} numberOfLines={1}>{toast.text}</Text>
+            <TouchableOpacity onPress={toast.undo} style={{ minHeight: 44, justifyContent: 'center' }}>
+              <Text style={{ color: '#6ea8fe', fontSize: 13, fontWeight: 'bold' }}>元に戻す</Text>
+            </TouchableOpacity>
+          </ReAnimated.View>
+        )}
 
         {/* 通知タイミング選択シート。常時6チップを出す代わりに、触るときだけ開く */}
         <Modal visible={notifyDaysSheet} transparent animationType="slide"
