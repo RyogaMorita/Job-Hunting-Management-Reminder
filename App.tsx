@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import ReAnimated, {
-  useSharedValue, useAnimatedStyle, useAnimatedProps, withSpring, withTiming, withSequence,
+  useSharedValue, useAnimatedStyle, useAnimatedProps, withSpring, withTiming, withSequence, withRepeat,
   FadeInDown, FadeOutLeft, LinearTransition,
 } from 'react-native-reanimated';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -502,6 +502,66 @@ function WheelTimeField({
         </ReAnimated.View>
       )}
     </View>
+  );
+}
+
+// ─── 期限切れバッジ（控えめな脈動） ─────────────────────────────────
+// 動かすのは scale だけ。1.0 ⇄ 1.06 を往復させる。
+
+function PulseView({ active, children }: { active: boolean; children: React.ReactNode }) {
+  const scale = useSharedValue(1);
+
+  useEffect(() => {
+    if (active) {
+      scale.value = withRepeat(
+        withSequence(
+          withTiming(1.06, { duration: 620 }),
+          withTiming(1, { duration: 620 }),
+        ),
+        -1,
+        false,
+      );
+    } else {
+      scale.value = withTiming(1, { duration: 200 });
+    }
+  }, [active]);
+
+  const style = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
+  return <ReAnimated.View style={style}>{children}</ReAnimated.View>;
+}
+
+// ─── タブバーのボタン ───────────────────────────────────────────────
+// 選択中のアイコンだけ少し持ち上げて拡大する。
+// transform と opacity のみを動かすのでレイアウト再計算は起きない。
+
+function TabBarButton({ icon, label, isActive, activeColor, inactiveColor, onPress }: {
+  icon: ImageSourcePropType; label: string; isActive: boolean;
+  activeColor: string; inactiveColor: string; onPress: () => void;
+}) {
+  const scale = useSharedValue(isActive ? 1 : 0.92);
+  const lift = useSharedValue(isActive ? -2 : 0);
+
+  useEffect(() => {
+    scale.value = withSpring(isActive ? 1.12 : 0.92, { damping: 15, stiffness: 150 });
+    lift.value = withSpring(isActive ? -2 : 0, { damping: 15, stiffness: 150 });
+  }, [isActive]);
+
+  const iconStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: lift.value }, { scale: scale.value }] as const,
+  }));
+
+  return (
+    <TouchableOpacity style={styles.tabButton} onPress={onPress} activeOpacity={0.7}>
+      <ReAnimated.View style={iconStyle}>
+        <Image
+          source={icon}
+          style={[styles.tabImg, { tintColor: isActive ? activeColor : inactiveColor, opacity: isActive ? 1 : 0.7 }]}
+          resizeMode="contain" />
+      </ReAnimated.View>
+      <Text style={[styles.tabLabel, { color: isActive ? activeColor : inactiveColor, fontWeight: isActive ? 'bold' : 'normal' }]}>
+        {label}
+      </Text>
+    </TouchableOpacity>
   );
 }
 
@@ -1668,6 +1728,9 @@ export default function App() {
   };
 
   const doSave = async (deleteIds: string[]) => {
+    // selectedItem はモーダルを開いた時点のコピーなので、
+    // 保存時に触らない項目は保存先の最新値から拾う
+    const storedItem = selectedItem ? schedules.find(s => s.id === selectedItem.id) : undefined;
     const autoChecks = STATUS_TO_CHECKS[selStatus] ?? [];
     const initCL: Record<string, boolean> = {};
     CHECKLIST_STEPS.forEach(step => { initCL[step] = autoChecks.includes(step); });
@@ -1701,7 +1764,9 @@ export default function App() {
       url: url.trim(), userId: userId.trim(), password: password.trim(),
       rank, genreId: selGenreId,
       checklist: initCL,
-      customChecklist: selectedItem?.customChecklist ?? [],
+      // モーダルを開いた時点のスナップショットではなく現在値を使う。
+      // チェックリストや辞退連絡はモーダル外からも更新されるため。
+      customChecklist: storedItem?.customChecklist ?? selectedItem?.customChecklist ?? [],
       notifyEnabled: itemNotifyEnabled,
       notifySettings: { daysBeforeList: notifyDaysList, hourStr: notifyHour, minuteStr: notifyMinute },
       statusHistory: newHistory,
@@ -1718,7 +1783,7 @@ export default function App() {
       webTestDeadline: webTestDeadline || undefined,
       webTestBookedAt: webTestBookedAt || undefined,
       webTestVenue: webTestVenue.trim() || undefined,
-      declineContacted: selectedItem?.declineContacted,
+      declineContacted: storedItem?.declineContacted ?? selectedItem?.declineContacted,
       calendarColor: selectedItem
         ? (statusColors[selStatus] ?? selectedItem.calendarColor ?? '#95A5A6') // 編集時: 新ステータス色で更新
         : (statusColors[selStatus] ?? '#95A5A6'), // 新規: 登録時のステータス色で固定
@@ -1760,28 +1825,8 @@ export default function App() {
     const ds = (typeof dateStr === 'string' && dateStr) ? dateStr : selectedDate;
     setSelDate(ds);
     setSelEndDate('');
-    const d = new Date(ds);
     setItemNotifyEnabled(true);
     setNotifyDaysList(['1']); setNotifyHour('09'); setNotifyMinute('00');
-    setModalVisible(true);
-  };
-
-  // 同名企業から情報引き継ぎして新規登録フォームを開く
-  const openAddWithInherit = (prev: Schedule) => {
-    setSelDate(selectedDate);
-    setSelEndDate('');
-    setSelGenreId(prev.genreId ?? 'other');
-    setUrl(prev.url ?? '');
-    setUserId(prev.userId ?? '');
-    setPassword(prev.password ?? '');
-    setRank(prev.rank ?? 'B');
-    setNote(prev.note ?? '');
-    setMemoResearch(prev.memoResearch ?? '');
-    setMemoPR(prev.memoPR ?? '');
-    setMemoQuestions(prev.memoQuestions ?? '');
-    // 引き継がないもの: status・date・通知設定
-    setSelStatus('検討中');
-    setCompanyName(prev.company);
     setModalVisible(true);
   };
 
@@ -2094,7 +2139,9 @@ export default function App() {
                   borderColor: overdueTodoCount > 0 ? DANGER : 'transparent',
                 }}
                 onPress={() => setTodoModalVisible(true)}>
-                <Image source={ICONS.checklist} style={{ width: 15, height: 15, tintColor: overdueTodoCount > 0 ? DANGER : ACCENT }} resizeMode="contain" />
+                <PulseView active={overdueTodoCount > 0}>
+                  <Image source={ICONS.checklist} style={{ width: 15, height: 15, tintColor: overdueTodoCount > 0 ? DANGER : ACCENT }} resizeMode="contain" />
+                </PulseView>
                 <Text style={{ fontSize: 12, fontWeight: 'bold', color: overdueTodoCount > 0 ? DANGER : C.text, flex: 1 }} numberOfLines={1}>
                   やること {todos.length}件
                   {overdueTodoCount > 0 ? `（期限切れ ${overdueTodoCount}）` : ''}
@@ -2523,7 +2570,7 @@ export default function App() {
                   return (
                     <ReAnimated.View
                       key={item.id}
-                      entering={FadeInDown.delay(Math.min(index * 60, 400)).springify()}
+                      entering={FadeInDown.delay(Math.min(index * 80, 480)).springify()}
                       exiting={FadeOutLeft.duration(200)}
                       layout={LinearTransition.springify()}>
                     <SwipeableRow onDelete={() => deleteSchedule(item.id)}>
@@ -3064,17 +3111,18 @@ export default function App() {
             const isActive = activeTab === tab;
             const activeColor = isDark ? '#6ea8fe' : TDU_BLUE;
             return (
-              <TouchableOpacity key={tab} style={styles.tabButton} onPress={() => { setActiveTab(tab); setBannerKey(k => k + 1); countAction(); }}>
-                <Image
-                  source={imgSrcs[i]}
-                  style={[styles.tabImg,
-                    { tintColor: isActive ? activeColor : isDark ? '#6e7681' : '#aaa', opacity: isActive ? 1 : 0.7 }]}
-                  resizeMode="contain" />
-                <Text style={[styles.tabLabel,
-                  { color: isActive ? activeColor : isDark ? '#6e7681' : '#ccc', fontWeight: isActive ? 'bold' : 'normal' }]}>
-                  {labels[i]}
-                </Text>
-              </TouchableOpacity>
+              <TabBarButton
+                key={tab}
+                icon={imgSrcs[i]}
+                label={labels[i]}
+                isActive={isActive}
+                activeColor={activeColor}
+                inactiveColor={isDark ? '#6e7681' : '#aaa'}
+                onPress={() => {
+                  if (!isActive) Haptics.selectionAsync();
+                  setActiveTab(tab); setBannerKey(k => k + 1); countAction();
+                }}
+              />
             );
           })}
         </View>
@@ -3166,18 +3214,18 @@ export default function App() {
                     const sc = statusColors[opt] ?? '#95A5A6';
                     const isSel = selStatus === opt;
                     return (
-                      <TouchableOpacity key={opt}
+                      <RippleButton key={opt}
                         style={[styles.statusOption,
                         {
                           borderWidth: 1.5, borderColor: isSel ? sc : 'transparent',
-                          backgroundColor: isSel ? sc + '22' : '#f0f2f5'
+                          backgroundColor: isSel ? sc + '22' : CHIP_BG
                         }]}
-                        onPress={() => setSelStatus(opt)}>
+                        onPress={() => { Haptics.selectionAsync(); setSelStatus(opt); }}>
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
                           <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: sc }} />
                           <Text style={[styles.statusOptionText, { color: isSel ? sc : C.text2 }]}>{opt}</Text>
                         </View>
-                      </TouchableOpacity>
+                      </RippleButton>
                     );
                   })}
                 </View>
@@ -3578,7 +3626,7 @@ export default function App() {
                     const soon = t.daysLeft !== undefined && t.daysLeft >= 0 && t.daysLeft <= 2;
                     const item = schedules.find(s => s.id === t.scheduleId);
                     return (
-                      <ReAnimated.View key={t.key} entering={FadeInDown.delay(Math.min(i, 8) * 40).duration(240)}>
+                      <ReAnimated.View key={t.key} entering={FadeInDown.delay(Math.min(i, 6) * 80).duration(240)}>
                         <RippleButton
                           style={{
                             flexDirection: 'row', alignItems: 'center', gap: 8,
