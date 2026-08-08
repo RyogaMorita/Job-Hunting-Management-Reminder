@@ -1281,31 +1281,36 @@ const DARK = {
 };
 
 // カレンダーヘッダー
-function CalendarHeader({ isDark, C, currentDate, weekStart, onOpenDatePicker, calendarMode, onToggleMode }: {
+function CalendarHeader({ isDark, C, currentDate, weekStart, onOpenDatePicker, calendarMode, onSetMode }: {
   isDark: boolean; C: typeof LIGHT; currentDate: Date; weekStart: number; onOpenDatePicker: () => void;
-  calendarMode: CalendarMode; onToggleMode: () => void;
+  calendarMode: CalendarMode; onSetMode: (m: CalendarMode) => void;
 }) {
   const month = currentDate.getMonth() + 1;
   const year = currentDate.getFullYear();
-  const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
   return (
     <View style={{ paddingHorizontal: 20, paddingTop: 14, paddingBottom: 12, backgroundColor: C.bg, flexDirection: 'row', alignItems: 'center' }}>
       <TouchableOpacity onPress={onOpenDatePicker} activeOpacity={0.8} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
-        <Text style={{ fontSize: 28, fontWeight: '600', color: C.text, letterSpacing: -0.5 }}>
-          {String(month).padStart(2, '0')}
+        {/* 「08 / 2026 August」は同じ情報を3回言っていた */}
+        <Text style={{ fontSize: 22, fontWeight: '600', color: C.text, letterSpacing: -0.3 }}>
+          {year}年{month}月
         </Text>
-        <Text style={{ fontSize: 18, color: C.text3, fontWeight: '300' }}>/</Text>
-        <Text style={{ fontSize: 15, color: C.text3, fontWeight: '400', letterSpacing: 1 }}>{year}</Text>
-        <Text style={{ fontSize: 15, color: C.text2, fontWeight: '300' }}>{monthNames[currentDate.getMonth()]}</Text>
         <Text style={{ fontSize: 10, color: C.text3, marginLeft: 2 }}>▾</Text>
       </TouchableOpacity>
-      <TouchableOpacity
-        onPress={onToggleMode}
-        style={{ backgroundColor: isDark ? '#1e3a5f' : '#e8f0fe', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5 }}>
-        <Text style={{ fontSize: 12, fontWeight: 'bold', color: ACCENT }}>
-          {calendarMode === 'month' ? '週' : calendarMode === 'week' ? '時間' : '月'}
-        </Text>
-      </TouchableOpacity>
+      <View style={[styles.segmented, { marginBottom: 0, borderColor: C.border }]}>
+        {(['month', 'week', 'day'] as CalendarMode[]).map((m, i) => (
+          <TouchableOpacity key={m}
+            accessibilityRole="button"
+            accessibilityState={{ selected: calendarMode === m }}
+            style={[styles.segment, { minWidth: 40, minHeight: 30 },
+              i > 0 && { borderLeftWidth: 1, borderLeftColor: C.border },
+              calendarMode === m && { backgroundColor: ACCENT }]}
+            onPress={() => onSetMode(m)}>
+            <Text style={{ fontSize: 12, fontWeight: 'bold', color: calendarMode === m ? '#fff' : C.text2 }}>
+              {m === 'month' ? '月' : m === 'week' ? '週' : '時間'}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
     </View>
   );
 }
@@ -1419,23 +1424,8 @@ export default function App() {
 
   const calHeightStyle = useAnimatedStyle(() => ({ height: calHeight.value }));
 
-  const modalTranslateY = useRef(new Animated.Value(600)).current;
+
   const modalScrollY = useRef(0);
-  const modalPanResponder = useRef(PanResponder.create({
-    onStartShouldSetPanResponder: () => true,
-    onMoveShouldSetPanResponder: (_, g) => g.dy > 3 && Math.abs(g.dy) > Math.abs(g.dx),
-    onPanResponderMove: (_, g) => { if (g.dy > 0) modalTranslateY.setValue(g.dy); },
-    onPanResponderRelease: (_, g) => {
-      if (g.dy > 80 || g.vy > 0.5) {
-        Animated.timing(modalTranslateY, { toValue: 800, duration: 200, useNativeDriver: true }).start(() => {
-          modalTranslateY.setValue(0);
-          closeModal();
-        });
-      } else {
-        modalTranslateY.setValue(0);
-      }
-    },
-  })).current;
 
   // 登録/編集モーダル
   const [isModalVisible, setModalVisible] = useState(false);
@@ -1485,6 +1475,10 @@ export default function App() {
   // チェックリストモーダル
   const [checkModalItem, setCheckModalItem] = useState<Schedule | null>(null);
   const [settingsPage, setSettingsPage] = useState<SettingsPage>(null);
+  const [sortSheet, setSortSheet] = useState(false);
+  const [analyticsVisible, setAnalyticsVisible] = useState(false);
+  const [genreSheet, setGenreSheet] = useState(false);
+  const [statusSheet, setStatusSheet] = useState(false);
   const settingsScrollRef = useRef<ScrollView | null>(null);
   const settingsTopOffset = useRef(0);
   const settingsTitleRef = useRef<Text | null>(null);
@@ -1836,12 +1830,6 @@ export default function App() {
   const EXCLUDE_FROM_COUNT = [...OFFER_STATUSES, '内定辞退', '不合格', '完了', ...EVENT_STATUSES, ...INTERN_STATUSES];
   const activeCount = useMemo(() => schedules.filter(s => !EXCLUDE_FROM_COUNT.includes(s.status)).length, [schedules]);
   const internalCount = useMemo(() => schedules.filter(s => OFFER_STATUSES.includes(s.status)).length, [schedules]);
-  const passRate = useMemo(() => {
-    const offer = schedules.filter(s => OFFER_STATUSES.includes(s.status) || s.status === '内定辞退').length;
-    const reject = schedules.filter(s => s.status === '不合格').length;
-    if (offer + reject === 0) return null;
-    return Math.round(offer / (offer + reject) * 100);
-  }, [schedules]);
 
   const upcomingSchedules = useMemo(() => {
     const today = new Date().toISOString().split('T')[0];
@@ -2047,9 +2035,9 @@ export default function App() {
     () => weeklyActivity(schedules, todayYmd, weekStart),
     [schedules, todayYmd, weekStart],
   );
-  // 段階の色は代表ステータスの色を借りる（新しい色を足さない）
-  const STAGE_COLOR_SOURCE: Record<string, string> = {
-    considering: '検討中', document: 'ES提出済', interview: '1次面接', offer: '内定',
+  // グラフの色。青は操作・選択専用にしたので、チャートには使わない。
+  const CHART_PALETTE: Record<string, string> = {
+    considering: NEUTRAL_GRAY, document: '#7E57C2', interview: '#26A69A', offer: '#EC407A',
   };
   // 辞退を決めたのに連絡できていない企業（調査では内々定保有者の57.4%が該当）
   const declinePendingCount = todos.filter(t => t.kind === 'decline').length;
@@ -2584,7 +2572,14 @@ export default function App() {
               {activeTab === 'calendar' ? 'カレンダー' : activeTab === 'list' ? '持ち駒' : '設定'}
             </Text>
             {activeTab === 'list' ? (
-              <Text style={{ fontSize: 13, color: C.text3 }}>{activeCount}社</Text>
+              <>
+                <Text style={{ fontSize: 13, color: C.text3 }}>選考中 {activeCount}社</Text>
+                <TouchableOpacity onPress={() => setAnalyticsVisible(true)}
+                  accessibilityRole="button" accessibilityLabel="就活の状況"
+                  style={{ minHeight: 44, justifyContent: 'center', paddingLeft: 10 }}>
+                  <Text style={{ fontSize: 13, color: ACCENT, fontWeight: 'bold' }}>分析</Text>
+                </TouchableOpacity>
+              </>
             ) : null}
           </View>
 
@@ -2628,7 +2623,7 @@ export default function App() {
               isDark={isDark} C={C} currentDate={currentCalDate} weekStart={weekStart}
               onOpenDatePicker={() => setDatePickerVisible(true)}
               calendarMode={calendarMode}
-              onToggleMode={() => setCalendarMode('month')} />
+              onSetMode={setCalendarMode} />
             {/* 日移動 */}
             <View style={{
               flexDirection: 'row', alignItems: 'center', gap: 8,
@@ -2675,7 +2670,7 @@ export default function App() {
         {activeTab === 'calendar' && calendarMode !== 'day' && (
           <View style={{ flex: 1, backgroundColor: C.bg, position: 'relative' }}
             onLayout={(e) => setScreenWidth(e.nativeEvent.layout.width)}>
-            <CalendarHeader isDark={isDark} C={C} currentDate={currentCalDate} weekStart={weekStart} onOpenDatePicker={() => setDatePickerVisible(true)} calendarMode={calendarMode} onToggleMode={() => setCalendarMode(m => m === 'month' ? 'week' : m === 'week' ? 'day' : 'month')} />
+            <CalendarHeader isDark={isDark} C={C} currentDate={currentCalDate} weekStart={weekStart} onOpenDatePicker={() => setDatePickerVisible(true)} calendarMode={calendarMode} onSetMode={setCalendarMode} />
             <WeekdayHeader C={C} weekStart={weekStart} />
             {screenWidth > 0 && (
               <ReAnimated.View style={[calHeightStyle, { overflow: 'hidden' }]}>
@@ -2889,7 +2884,7 @@ export default function App() {
               {!calDaySelected ? (
                 <>
                   <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10, gap: 6 }}>
-                    <Image source={require('./assets/icon_pin.png')} style={{ width: 20, height: 20 }} resizeMode="contain" />
+                    <Image source={ICONS.pin} style={{ width: 15, height: 15, tintColor: C.text3 }} resizeMode="contain" />
                     <Text style={[styles.subTitle, { marginBottom: 0, color: C.text }]}>直近の予定</Text>
                   </View>
                   <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }}>
@@ -2929,7 +2924,7 @@ export default function App() {
                               <Text style={[styles.itemTitle, { color: C.text }]}>{item.company}</Text>
                               <Text style={[styles.itemStatus, { color: C.text2 }]}>{timeStr(item.hour, item.minute) ? timeStr(item.hour, item.minute) + '〜 · ' : ''}{item.status}</Text>
                             </View>
-                            <Text style={{ fontSize: 12, color: C.text3, fontFamily: 'IBMPlexSans_400Regular' }}>{item.rank}</Text>
+                            <Text style={{ fontSize: 12, color: C.text2, fontFamily: 'IBMPlexSans_400Regular' }}>{item.rank}</Text>
                             <Text style={styles.itemArrow}>›</Text>
                           </TouchableOpacity>
                         );
@@ -2960,7 +2955,8 @@ export default function App() {
                 value={searchQuery} onChangeText={setSearchQuery} clearButtonMode="while-editing" />
             </View>
 
-            {/* ツールバー */}
+            {/* ツールバー。7個のチップを常時見せて毎回6択を判断させていたのをやめ、
+                「絞り込み」と現在の並び順の2操作に畳んだ。 */}
             <View style={styles.listToolbar}>
               <TouchableOpacity
                 style={[styles.filterBtn, isFilterActive && styles.filterBtnActive]}
@@ -2969,20 +2965,23 @@ export default function App() {
                   絞り込み{isFilterActive ? ` (${filterGenreIds.length + filterStatuses.length})` : ''}
                 </Text>
               </TouchableOpacity>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flex: 1, marginLeft: 8 }}>
-                <View style={{ flexDirection: 'row', gap: 4, alignItems: 'center' }}>
-                  {SORT_OPTIONS.map(opt => (
-                    <TouchableOpacity key={opt}
-                      style={[styles.miniChip, sortType === opt && styles.miniChipActive]}
-                      onPress={async () => { setSortType(opt as SortType); await AsyncStorage.setItem('@sort_type', opt); }}>
-                      <Text style={[styles.miniChipText, sortType === opt && { color: '#fff' }]}>{opt}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </ScrollView>
-              <TouchableOpacity style={styles.ascBtn} onPress={() => setSortAsc(v => !v)}>
-                <Text style={styles.ascBtnText}>{sortAsc ? '↑' : '↓'}</Text>
+              <View style={{ flex: 1 }} />
+              <TouchableOpacity
+                style={{ flexDirection: 'row', alignItems: 'center', gap: 4, minHeight: 44, paddingHorizontal: 4 }}
+                accessibilityRole="button"
+                accessibilityLabel={`並び順 ${sortType}`}
+                onPress={() => setSortSheet(true)}>
+                <Text style={{ fontSize: 13, color: ACCENT, fontWeight: 'bold' }}>{sortType}</Text>
+                <Text style={{ fontSize: 10, color: ACCENT }}>⌄</Text>
               </TouchableOpacity>
+              {sortType !== '手動' ? (
+                <TouchableOpacity
+                  style={{ minWidth: 32, minHeight: 44, alignItems: 'center', justifyContent: 'center' }}
+                  accessibilityLabel={sortAsc ? '昇順' : '降順'}
+                  onPress={() => setSortAsc(v => !v)}>
+                  <Text style={{ fontSize: 14, color: ACCENT }}>{sortAsc ? '↑' : '↓'}</Text>
+                </TouchableOpacity>
+              ) : null}
             </View>
 
             {/* 絞り込みパネル */}
@@ -3017,7 +3016,10 @@ export default function App() {
               </View>
             )}
 
-            <Text style={{ paddingHorizontal: 16, fontSize: 11, color: '#999', marginBottom: 4 }}>{filteredSorted.length}社</Text>
+            {/* ヘッダーの社数は「選考中」、ここは表示中の件数。区別が付かず矛盾に見えていた */}
+            <Text style={{ paddingHorizontal: 16, fontSize: 11, color: C.text3, marginBottom: 4 }}>
+              表示 {filteredSorted.length}社 / 登録 {deduplicatedSchedules.length}社
+            </Text>
 
             {sortType === '手動' ? (
               <DraggableFlatList
@@ -3056,7 +3058,7 @@ export default function App() {
                             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                               <View style={[styles.statusDot, { backgroundColor: sc }]} />
                               <HighlightText text={item.company + (isInternal ? ' 🌸' : '')} query={searchQuery} style={[styles.itemTitle, { color: C.text, flex: 1 }]} />
-                              <Text style={{ fontSize: 12, color: C.text3, fontFamily: 'IBMPlexSans_400Regular' }}>{item.rank}</Text>
+                              <Text style={{ fontSize: 12, color: C.text2, fontFamily: 'IBMPlexSans_400Regular' }}>{item.rank}</Text>
                               {hasConflict(item) && <View style={{ backgroundColor: DANGER, borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2 }}>
                                 <Text style={{ color: '#fff', fontSize: 10, fontWeight: 'bold' }}>日程重複</Text>
                               </View>}
@@ -3132,11 +3134,11 @@ export default function App() {
                             {item.pinned ? (
                               <Image source={ICONS.pin} style={{ width: 12, height: 12, tintColor: ACCENT }} />
                             ) : null}
-                            <Text style={{ fontSize: 12, color: C.text3, fontFamily: 'IBMPlexSans_400Regular' }}>{item.rank}</Text>
+                            <Text style={{ fontSize: 12, color: C.text2, fontFamily: 'IBMPlexSans_400Regular' }}>{item.rank}</Text>
                           </View>
 
                           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                            <Text style={{ fontSize: 11, color: C.text3 }}>現在</Text>
+                            <Text style={{ fontSize: 11, color: C.text2 }}>現在</Text>
                             <Text style={{ fontSize: 13, color: C.text2, flex: 1 }} numberOfLines={1}>{item.status}</Text>
                           </View>
 
@@ -3235,69 +3237,6 @@ export default function App() {
                 遷移は translateX のスライドで表す（Modalの入れ子にはしない）。 */}
             {settingsPage === null ? (
               <ReAnimated.View key="settings-top" entering={SlideInLeft.duration(200)}>
-            {/* 統計ダッシュボード */}
-            <View style={{ backgroundColor: isDark ? '#1a2a3a' : '#eaf2ff', borderRadius: 10, padding: 16, marginBottom: 24, borderWidth: 1, borderColor: isDark ? '#2a3a4a' : '#c8ddf7' }}>
-              <Text style={{ fontSize: 12, color: ACCENT, fontWeight: 'bold', marginBottom: 12 }}>就活ダッシュボード</Text>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-around' }}>
-                <View style={{ alignItems: 'center' }}>
-                  <Text style={{ fontSize: 28, fontWeight: 'bold', color: C.text }}>{activeCount}</Text>
-                  <Text style={{ fontSize: 11, color: C.text3, marginTop: 2 }}>応募中</Text>
-                </View>
-                <View style={{ width: 1, backgroundColor: isDark ? '#2a3a4a' : '#c8ddf7' }} />
-                <View style={{ alignItems: 'center' }}>
-                  <Text style={{ fontSize: 28, fontWeight: 'bold', color: '#E91E8C' }}>{internalCount}</Text>
-                  <Text style={{ fontSize: 11, color: C.text3, marginTop: 2 }}>内定</Text>
-                </View>
-                <View style={{ width: 1, backgroundColor: isDark ? '#2a3a4a' : '#c8ddf7' }} />
-                <View style={{ alignItems: 'center' }}>
-                  <Text style={{ fontSize: 28, fontWeight: 'bold', color: passRate !== null ? (passRate >= 50 ? '#27AE60' : '#E67E22') : C.text3 }}>
-                    {passRate !== null ? `${passRate}%` : '-'}
-                  </Text>
-                  <Text style={{ fontSize: 11, color: C.text3, marginTop: 2 }}>通過率</Text>
-                </View>
-              </View>
-
-              {/* 選考段階の分布。内定が出る前でもここは毎週動く */}
-              <Text style={{ fontSize: 11, color: C.text3, marginTop: 18, marginBottom: 6 }}>選考段階</Text>
-              <View style={{ flexDirection: 'row', height: 10, borderRadius: 5, overflow: 'hidden', backgroundColor: C.bg3 }}>
-                {stageTotal === 0
-                  ? null
-                  : stages.filter(s => s.count > 0).map(s => (
-                    <View key={s.key} style={{
-                      flex: s.count,
-                      backgroundColor: statusColors[STAGE_COLOR_SOURCE[s.key]] ?? NEUTRAL_GRAY,
-                    }} />
-                  ))}
-              </View>
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginTop: 8 }}>
-                {stages.map(s => (
-                  <View key={s.key} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                    <View style={{
-                      width: 7, height: 7, borderRadius: 4,
-                      backgroundColor: statusColors[STAGE_COLOR_SOURCE[s.key]] ?? NEUTRAL_GRAY,
-                    }} />
-                    <Text style={{ fontSize: 11, color: C.text2 }}>{s.label}</Text>
-                    <Text style={{ fontSize: 11, color: C.text, fontWeight: 'bold' }}>{s.count}</Text>
-                  </View>
-                ))}
-              </View>
-
-              {/* カードの入れ子を避け、区切り線だけの行で並べる */}
-              <View style={{ height: 1, backgroundColor: isDark ? '#2a3a4a' : '#c8ddf7', marginTop: 16 }} />
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingTop: 12 }}>
-                <Text style={{ fontSize: 12, color: C.text3 }}>今週の動き</Text>
-                <Text style={{ fontSize: 12, color: C.text, fontWeight: 'bold' }}>
-                  追加 {weekMoves.added} ／ 前進 {weekMoves.advanced}
-                </Text>
-              </View>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingTop: 8 }}>
-                <Text style={{ fontSize: 12, color: C.text3 }}>やること</Text>
-                <Text style={{ fontSize: 12, fontWeight: 'bold', color: overdueTodoCount > 0 ? DANGER : C.text }}>
-                  残り {todos.length}
-                  {overdueTodoCount > 0 ? `（期限切れ ${overdueTodoCount}）` : ''}
-                </Text>
-              </View>
-            </View>
               <TouchableOpacity accessibilityRole="button" style={[styles.formRow, { borderBottomWidth: 1, borderColor: C.border2 }]}
                 onPress={() => openSettingsPage('genre')}>
                 <Text style={[styles.formRowLabel, { color: C.text }]}>ジャンル管理</Text>
@@ -3790,31 +3729,36 @@ export default function App() {
           })}
         </View>
 
-        {/* ── 企業登録/編集モーダル ── */}
-        <Modal visible={isModalVisible || isDetailVisible} animationType="none" transparent onRequestClose={closeModal} onShow={() => {
-          modalScrollY.current = 0;
-          modalTranslateY.setValue(600);
-          Animated.spring(modalTranslateY, { toValue: 0, tension: 65, friction: 11, useNativeDriver: true }).start();
-        }}>
-          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
-            <TouchableOpacity style={StyleSheet.absoluteFillObject} onPress={() => closeModal()} activeOpacity={1} />
-            <Animated.View style={[styles.modalContent, { backgroundColor: C.bg, transform: [{ translateY: modalTranslateY }] }]}>
-              <View style={styles.dragHandleContainer} {...modalPanResponder.panHandlers}>
-                <View style={styles.dragHandleBar} />
-              </View>
-              <ScrollView ref={modalScrollRef} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" onScroll={(e) => { modalScrollY.current = e.nativeEvent.contentOffset.y; }} scrollEventThrottle={16}>
-                <View style={styles.modalHeader}>
-                  <Text style={[styles.modalTitle, { color: C.text }]}>{isDetailVisible ? '詳細・編集' : '新規企業登録'}</Text>
-                  {isDetailVisible && (
-                    <TouchableOpacity onPress={() => deleteSchedule(selectedItem!.id)}>
-                      <Text style={styles.deleteText}>削除</Text>
-                    </TouchableOpacity>
-                  )}
-                </View>
-
-                {isDetailVisible && (
-                  <StatusStepper status={selStatus} statusColors={statusColors} isDark={isDark} />
-                )}
+        {/* ── 企業登録/編集（フルスクリーン） ──
+            日程・実施形式・Webテスト・URL/ID/PW・通知・インターン期間・メモ・履歴まであり、
+            シートで扱う「ちょっとした編集」の規模ではなくなった。
+            上部固定のナビゲーションバーにキャンセル／保存を置き、
+            長いフォームの末尾までスクロールしなくても終了できるようにする。
+            削除は保存と同じ領域で競わせず、最下部へ移した。 */}
+        <Modal visible={isModalVisible || isDetailVisible} animationType="slide"
+          presentationStyle="fullScreen" onRequestClose={closeModal}>
+          <SafeAreaView style={{ flex: 1, backgroundColor: C.bg }}>
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
+            <View style={{
+              flexDirection: 'row', alignItems: 'center',
+              paddingHorizontal: 16, paddingVertical: 10,
+              borderBottomWidth: 1, borderColor: C.border,
+            }}>
+              <TouchableOpacity onPress={() => closeModal()} style={{ minHeight: 44, justifyContent: 'center' }}>
+                <Text style={{ fontSize: 15, color: ACCENT }}>キャンセル</Text>
+              </TouchableOpacity>
+              <Text accessibilityRole="header" numberOfLines={1}
+                style={{ flex: 1, textAlign: 'center', fontSize: 16, fontWeight: '700', color: C.text, marginHorizontal: 8 }}>
+                {isDetailVisible ? (selectedItem?.company || '編集') : '新規企業登録'}
+              </Text>
+              <TouchableOpacity onPress={() => handleSave()} disabled={!companyName.trim()}
+                style={{ minHeight: 44, justifyContent: 'center' }}>
+                <Text style={{ fontSize: 15, fontWeight: 'bold', color: companyName.trim() ? ACCENT : C.text3 }}>保存</Text>
+              </TouchableOpacity>
+            </View>
+            <ScrollView ref={modalScrollRef} style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 12 }}
+              showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled"
+              onScroll={(e) => { modalScrollY.current = e.nativeEvent.contentOffset.y; }} scrollEventThrottle={16}>
 
                 <Text style={[styles.label, { color: C.text3 }]}>企業名 *</Text>
                 <View style={{ position: 'relative', zIndex: 10 }}>
@@ -3847,50 +3791,42 @@ export default function App() {
                   )}
                 </View>
 
-                <Text style={[styles.label, { color: C.text3 }]}>ジャンル</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                  <View style={{ flexDirection: 'row', gap: 6 }}>
-                    {genres.map(g => (
-                      <TouchableOpacity key={g.id}
-                        style={[styles.genreChip, { borderColor: g.color }, selGenreId === g.id && { backgroundColor: g.color }]}
-                        onPress={() => setSelGenreId(g.id)}>
-                        <Text style={[styles.genreChipText, { color: selGenreId === g.id ? '#fff' : g.color }]}>{g.name}</Text>
-                      </TouchableOpacity>
-                    ))}
+                {/* ジャンル16個・ステータス19個のチップを常時並べると編集画面の
+                    最初の1画面が埋まる。単一選択なので現在値だけ見せてシートで選ばせる。
+                    志望度は4択なのでセグメンテッドのまま。 */}
+                <View style={{ height: 1, backgroundColor: C.border2, marginTop: 8 }} />
+                <TouchableOpacity style={styles.formRow} onPress={() => setGenreSheet(true)}>
+                  <Text style={[styles.formRowLabel, { color: C.text }]}>ジャンル</Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: genres.find(g => g.id === selGenreId)?.color ?? NEUTRAL_GRAY }} />
+                    <Text style={{ fontSize: 14, color: C.text3 }}>{genres.find(g => g.id === selGenreId)?.name ?? '未設定'}</Text>
                   </View>
-                </ScrollView>
+                  <Text style={{ fontSize: 15, color: C.text3, marginLeft: 6 }}>›</Text>
+                </TouchableOpacity>
+                <View style={{ height: 1, backgroundColor: C.border2 }} />
+                <TouchableOpacity style={styles.formRow} onPress={() => setStatusSheet(true)}>
+                  <Text style={[styles.formRowLabel, { color: C.text }]}>選考ステータス</Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: statusColors[selStatus] ?? NEUTRAL_GRAY }} />
+                    <Text style={{ fontSize: 14, color: C.text3 }}>{selStatus}</Text>
+                  </View>
+                  <Text style={{ fontSize: 15, color: C.text3, marginLeft: 6 }}>›</Text>
+                </TouchableOpacity>
+                <View style={{ height: 1, backgroundColor: C.border2, marginBottom: 12 }} />
 
                 <Text style={[styles.label, { color: C.text3 }]}>志望度</Text>
-                <View style={{ flexDirection: 'row', gap: 8 }}>
-                  {RANK_OPTIONS.map(r => (
+                <View style={styles.segmented}>
+                  {RANK_OPTIONS.map((r, i) => (
                     <TouchableOpacity key={r}
-                      style={[styles.rankOption, { backgroundColor: rank === r ? rankColor(r) : '#f0f2f5' }]}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: rank === r }}
+                      style={[styles.segment,
+                        i > 0 && { borderLeftWidth: 1, borderLeftColor: C.border },
+                        rank === r && { backgroundColor: ACCENT }]}
                       onPress={() => setRank(r)}>
-                      <Text style={{ color: rank === r ? '#fff' : '#666', fontWeight: 'bold', fontSize: 14 }}>{r}</Text>
+                      <Text style={{ color: rank === r ? '#fff' : C.text2, fontWeight: 'bold', fontSize: 14 }}>{r}</Text>
                     </TouchableOpacity>
                   ))}
-                </View>
-
-                <Text style={[styles.label, { color: C.text3 }]}>選考ステータス</Text>
-                <View style={styles.statusContainer}>
-                  {statusOptions.map(opt => {
-                    const sc = statusColors[opt] ?? '#95A5A6';
-                    const isSel = selStatus === opt;
-                    return (
-                      <RippleButton key={opt}
-                        style={[styles.statusOption,
-                        {
-                          borderWidth: 1.5, borderColor: isSel ? sc : 'transparent',
-                          backgroundColor: isSel ? sc + '22' : CHIP_BG
-                        }]}
-                        onPress={() => { Haptics.selectionAsync(); setSelStatus(opt); }}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                          <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: sc }} />
-                          <Text style={[styles.statusOptionText, { color: isSel ? sc : C.text2 }]}>{opt}</Text>
-                        </View>
-                      </RippleButton>
-                    );
-                  })}
                 </View>
 
                 {/* iOSのホイールは幅を詰めるとクリップされるので、
@@ -4075,7 +4011,7 @@ export default function App() {
                         closeModal();
                         setTimeout(() => setCheckModalItem(target), 300);
                       }}>
-                      <Text style={[styles.formRowLabel, { color: C.text }]}>やること・選考ステップ</Text>
+                      <Text style={[styles.formRowLabel, { color: C.text }]}>やることを追加・編集</Text>
                       {(() => {
                         const cl = selectedItem.customChecklist ?? [];
                         return cl.length > 0 ? (
@@ -4125,16 +4061,18 @@ export default function App() {
                   </>
                 )}
 
-                <View style={styles.modalButtons}>
-                  <TouchableOpacity onPress={() => closeModal()}><Text style={styles.cancelText}>戻る</Text></TouchableOpacity>
-                  <TouchableOpacity style={[styles.saveButton, !companyName.trim() && styles.saveButtonDisabled]} onPress={() => handleSave()}>
-                    <Text style={styles.saveButtonText}>保存</Text>
+                {/* 削除は保存と同じ領域で競わせず最下部に置く */}
+                {isDetailVisible && (
+                  <TouchableOpacity
+                    style={{ minHeight: 44, alignItems: 'center', justifyContent: 'center', marginTop: 24 }}
+                    onPress={() => deleteSchedule(selectedItem!.id)}>
+                    <Text style={{ fontSize: 15, color: DANGER }}>この企業を削除</Text>
                   </TouchableOpacity>
-                </View>
-                <View style={{ height: 20 }} />
+                )}
+                <View style={{ height: 40 }} />
               </ScrollView>
-            </Animated.View>
           </KeyboardAvoidingView>
+          </SafeAreaView>
         </Modal>
 
         {/* ステータス変更の取り消し。確認ダイアログを毎回出す代わりにこれで戻せる */}
@@ -4153,6 +4091,155 @@ export default function App() {
             </TouchableOpacity>
           </ReAnimated.View>
         )}
+
+        {/* 就活の状況。「設定はアプリの挙動を変える場所」という方針に反するため
+            設定タブから外し、持ち駒の分析として開く。 */}
+        <Modal visible={analyticsVisible} transparent animationType="slide" onRequestClose={() => setAnalyticsVisible(false)}>
+          <View style={styles.pickerOverlay}>
+            <TouchableOpacity style={StyleSheet.absoluteFillObject} activeOpacity={1} onPress={() => setAnalyticsVisible(false)} />
+            <View style={[styles.modalContent, { maxHeight: '85%', backgroundColor: C.bg }]} onStartShouldSetResponder={() => true}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                <Text accessibilityRole="header" style={[styles.modalTitle, { color: C.text, flex: 1, marginBottom: 0 }]}>就活の状況</Text>
+                <TouchableOpacity onPress={() => setAnalyticsVisible(false)} style={{ minHeight: 44, justifyContent: 'center', paddingHorizontal: 8 }}>
+                  <Text style={{ fontSize: 15, color: ACCENT, fontWeight: 'bold' }}>完了</Text>
+                </TouchableOpacity>
+              </View>
+              <ScrollView>
+            {/* 統計ダッシュボード */}
+            <View style={{ backgroundColor: isDark ? '#1a2a3a' : '#eaf2ff', borderRadius: 10, padding: 16, marginBottom: 24, borderWidth: 1, borderColor: isDark ? '#2a3a4a' : '#c8ddf7' }}>
+              <Text style={{ fontSize: 12, color: ACCENT, fontWeight: 'bold', marginBottom: 12 }}>就活ダッシュボード</Text>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-around' }}>
+                <View style={{ alignItems: 'center' }}>
+                  <Text style={{ fontSize: 28, fontWeight: 'bold', color: C.text }}>{activeCount}</Text>
+                  <Text style={{ fontSize: 11, color: C.text3, marginTop: 2 }}>応募中</Text>
+                </View>
+                <View style={{ width: 1, backgroundColor: isDark ? '#2a3a4a' : '#c8ddf7' }} />
+                <View style={{ alignItems: 'center' }}>
+                  <Text style={{ fontSize: 28, fontWeight: 'bold', color: '#E91E8C' }}>{internalCount}</Text>
+                  <Text style={{ fontSize: 11, color: C.text3, marginTop: 2 }}>内定</Text>
+                </View>
+                <View style={{ width: 1, backgroundColor: isDark ? '#2a3a4a' : '#c8ddf7' }} />
+                <View style={{ alignItems: 'center' }}>
+                  <Text style={{ fontSize: 28, fontWeight: 'bold', color: C.text }}>
+                    {stages.find(x => x.key === 'interview')?.count ?? 0}
+                  </Text>
+                  <Text style={{ fontSize: 11, color: C.text3, marginTop: 2 }}>面接中</Text>
+                </View>
+              </View>
+
+              {/* 選考段階の分布。内定が出る前でもここは毎週動く */}
+              <Text style={{ fontSize: 11, color: C.text3, marginTop: 18, marginBottom: 6 }}>選考段階</Text>
+              <View style={{ flexDirection: 'row', height: 10, borderRadius: 5, overflow: 'hidden', backgroundColor: C.bg3 }}>
+                {stageTotal === 0
+                  ? null
+                  : stages.filter(s => s.count > 0).map(s => (
+                    <View key={s.key} style={{
+                      flex: s.count,
+                      backgroundColor: CHART_PALETTE[s.key] ?? NEUTRAL_GRAY,
+                    }} />
+                  ))}
+              </View>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginTop: 8 }}>
+                {stages.map(s => (
+                  <View key={s.key} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                    <View style={{
+                      width: 7, height: 7, borderRadius: 4,
+                      backgroundColor: CHART_PALETTE[s.key] ?? NEUTRAL_GRAY,
+                    }} />
+                    <Text style={{ fontSize: 11, color: C.text2 }}>{s.label}</Text>
+                    <Text style={{ fontSize: 11, color: C.text, fontWeight: 'bold' }}>{s.count}</Text>
+                  </View>
+                ))}
+              </View>
+
+              {/* カードの入れ子を避け、区切り線だけの行で並べる */}
+              <View style={{ height: 1, backgroundColor: isDark ? '#2a3a4a' : '#c8ddf7', marginTop: 16 }} />
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingTop: 12 }}>
+                <Text style={{ fontSize: 12, color: C.text3 }}>今週の動き</Text>
+                <Text style={{ fontSize: 12, color: C.text, fontWeight: 'bold' }}>
+                  追加 {weekMoves.added} ／ 前進 {weekMoves.advanced}
+                </Text>
+              </View>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingTop: 8 }}>
+                <Text style={{ fontSize: 12, color: C.text3 }}>やること</Text>
+                <Text style={{ fontSize: 12, fontWeight: 'bold', color: overdueTodoCount > 0 ? DANGER : C.text }}>
+                  残り {todos.length}
+                  {overdueTodoCount > 0 ? `（期限切れ ${overdueTodoCount}）` : ''}
+                </Text>
+              </View>
+            </View>
+                <View style={{ height: 20 }} />
+              </ScrollView>
+            </View>
+          </View>
+        </Modal>
+
+        {/* ジャンル選択シート */}
+        <Modal visible={genreSheet} transparent animationType="slide" onRequestClose={() => setGenreSheet(false)}>
+          <View style={styles.pickerOverlay}>
+            <TouchableOpacity style={StyleSheet.absoluteFillObject} activeOpacity={1} onPress={() => setGenreSheet(false)} />
+            <View style={[styles.modalContent, { maxHeight: '75%', backgroundColor: C.bg }]} onStartShouldSetResponder={() => true}>
+              <Text accessibilityRole="header" style={[styles.modalTitle, { color: C.text }]}>ジャンル</Text>
+              <ScrollView>
+                {genres.map(g => (
+                  <TouchableOpacity key={g.id}
+                    style={{ flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 44, borderBottomWidth: 1, borderColor: C.border2 }}
+                    onPress={() => { setSelGenreId(g.id); setGenreSheet(false); }}>
+                    <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: g.color }} />
+                    <Text style={{ fontSize: 15, color: C.text, flex: 1 }}>{g.name}</Text>
+                    {selGenreId === g.id ? <Text style={{ fontSize: 16, color: ACCENT, fontWeight: 'bold' }}>✓</Text> : null}
+                  </TouchableOpacity>
+                ))}
+                <View style={{ height: 12 }} />
+              </ScrollView>
+            </View>
+          </View>
+        </Modal>
+
+        {/* 選考ステータス選択シート */}
+        <Modal visible={statusSheet} transparent animationType="slide" onRequestClose={() => setStatusSheet(false)}>
+          <View style={styles.pickerOverlay}>
+            <TouchableOpacity style={StyleSheet.absoluteFillObject} activeOpacity={1} onPress={() => setStatusSheet(false)} />
+            <View style={[styles.modalContent, { maxHeight: '75%', backgroundColor: C.bg }]} onStartShouldSetResponder={() => true}>
+              <Text accessibilityRole="header" style={[styles.modalTitle, { color: C.text }]}>選考ステータス</Text>
+              <ScrollView>
+                {statusOptions.map(opt => (
+                  <TouchableOpacity key={opt}
+                    style={{ flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 44, borderBottomWidth: 1, borderColor: C.border2 }}
+                    onPress={() => { Haptics.selectionAsync(); setSelStatus(opt); setStatusSheet(false); }}>
+                    <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: statusColors[opt] ?? NEUTRAL_GRAY }} />
+                    <Text style={{ fontSize: 15, color: C.text, flex: 1 }}>{opt}</Text>
+                    {selStatus === opt ? <Text style={{ fontSize: 16, color: ACCENT, fontWeight: 'bold' }}>✓</Text> : null}
+                  </TouchableOpacity>
+                ))}
+                <View style={{ height: 12 }} />
+              </ScrollView>
+            </View>
+          </View>
+        </Modal>
+
+        {/* 並び順シート */}
+        <Modal visible={sortSheet} transparent animationType="slide" onRequestClose={() => setSortSheet(false)}>
+          <View style={styles.pickerOverlay}>
+            <TouchableOpacity style={StyleSheet.absoluteFillObject} activeOpacity={1} onPress={() => setSortSheet(false)} />
+            <View style={[styles.modalContent, { backgroundColor: C.bg }]} onStartShouldSetResponder={() => true}>
+              <Text accessibilityRole="header" style={[styles.modalTitle, { color: C.text }]}>並び順</Text>
+              {SORT_OPTIONS.map(opt => (
+                <TouchableOpacity key={opt}
+                  style={{ flexDirection: 'row', alignItems: 'center', minHeight: 44, borderBottomWidth: 1, borderColor: C.border2 }}
+                  onPress={async () => {
+                    setSortType(opt as SortType);
+                    await AsyncStorage.setItem('@sort_type', opt);
+                    setSortSheet(false);
+                  }}>
+                  <Text style={{ fontSize: 15, color: C.text, flex: 1 }}>{opt}</Text>
+                  {sortType === opt ? <Text style={{ fontSize: 16, color: ACCENT, fontWeight: 'bold' }}>✓</Text> : null}
+                </TouchableOpacity>
+              ))}
+              <View style={{ height: 12 }} />
+            </View>
+          </View>
+        </Modal>
 
         {/* 通知タイミング選択シート。常時6チップを出す代わりに、触るときだけ開く */}
         <Modal visible={notifyDaysSheet} transparent animationType="slide"
@@ -4192,7 +4279,10 @@ export default function App() {
               onPress={() => { setCheckModalItem(null); setNewCheckLabel(''); }} />
             <View style={[styles.modalContent, { maxHeight: '85%', backgroundColor: C.bg }]} onStartShouldSetResponder={() => true}>
               <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                <Text style={[styles.modalTitle, { color: C.text, flex: 1, marginBottom: 0 }]}>{checkModalItem?.company}</Text>
+                <View style={{ flex: 1 }}>
+                  <Text accessibilityRole="header" style={[styles.modalTitle, { color: C.text, marginBottom: 0 }]}>やること</Text>
+                  <Text style={{ fontSize: 12, color: C.text3 }}>{checkModalItem?.company}</Text>
+                </View>
                 <TouchableOpacity
                   style={{ minHeight: 44, justifyContent: 'center', paddingHorizontal: 8 }}
                   onPress={() => { setCheckModalItem(null); setNewCheckLabel(''); }}>
@@ -4200,7 +4290,7 @@ export default function App() {
                 </TouchableOpacity>
               </View>
               <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-                <Text style={[styles.label, { marginTop: 8, color: C.text3 }]}>選考ステップ</Text>
+                <Text style={[styles.label, { marginTop: 12, color: C.text3 }]}>選考ステップから追加</Text>
                 {CHECKLIST_STEPS.map(step => {
                   const checked = (checkModalItem?.checklist ?? {})[step] ?? false;
                   const isInter = step === '内定';
@@ -4239,7 +4329,7 @@ export default function App() {
                   </>
                 )}
 
-                <Text style={[styles.label, { color: C.text3 }]}>カスタム項目</Text>
+                <Text style={[styles.label, { color: C.text3 }]}>自分で追加した項目</Text>
                 {(checkModalItem?.customChecklist ?? []).length === 0 && (
                   <Text style={{ fontSize: 12, color: '#bbb', marginBottom: 8, paddingLeft: 8 }}>追加した項目がここに表示されます</Text>
                 )}
@@ -4268,7 +4358,7 @@ export default function App() {
                 ))}
                 <View style={styles.customAddRow}>
                   <TextInput style={[styles.customAddInput, { backgroundColor: C.inputBg, color: C.text }]}
-                    placeholder="項目を追加" placeholderTextColor={C.text3}
+                    placeholder="新しいやること" placeholderTextColor={C.text3}
                     value={newCheckLabel} onChangeText={setNewCheckLabel}
                     returnKeyType="done"
                     onSubmitEditing={() => checkModalItem && addCustomCheck(checkModalItem)} />
@@ -4458,7 +4548,7 @@ const styles = StyleSheet.create({
 
   // 角丸は チップ6 / カード10 / モーダル18 の3段だけに絞る。
   // 淡い影と境界線の二重装飾はやめ、境界線だけで面を分ける。
-  listCard: { padding: 14, borderRadius: 10, flexDirection: 'row', alignItems: 'center', borderWidth: 1, overflow: 'hidden' },
+  listCard: { paddingVertical: 10, paddingHorizontal: 14, borderRadius: 10, flexDirection: 'row', alignItems: 'center', borderWidth: 1, overflow: 'hidden' },
   // 左の色縦線はやめ、企業名の頭に置く小さな色ドットにした
   statusDot: { width: 8, height: 8, borderRadius: 4 },
   dateText: { fontSize: 11, color: '#999', marginTop: 4, fontFamily: 'IBMPlexSans_400Regular' },
@@ -4513,6 +4603,9 @@ const styles = StyleSheet.create({
   statusSelected: { backgroundColor: TDU_BLUE },
   statusOptionText: { fontSize: 11, color: '#666' },
   rankOption: { width: 40, height: 40, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  // 単一選択のセグメンテッド。個別のピルを並べない
+  segmented: { flexDirection: 'row', borderRadius: 8, overflow: 'hidden', borderWidth: 1, borderColor: LIGHT.border, marginBottom: 6 },
+  segment: { flex: 1, minHeight: 36, alignItems: 'center', justifyContent: 'center' },
   genreChip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, borderWidth: 1, borderColor: '#ddd', marginRight: 6 },
   genreChipText: { fontSize: 11, color: '#666' },
   modalButtons: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 24 },
