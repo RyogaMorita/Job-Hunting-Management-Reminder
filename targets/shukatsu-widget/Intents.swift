@@ -1,5 +1,5 @@
 import AppIntents
-import WidgetKit
+
 
 // MARK: - AppIntent（iOS 17+ インタラクティブウィジェット）
 //
@@ -16,7 +16,7 @@ import WidgetKit
 /// 2回目以降のタップは expected が古くなるため no-op になり、段飛ばしを防げる。
 struct AdvanceStatusIntent: AppIntent {
     static var title: LocalizedStringResource = "選考を次の段階へ進める"
-    static var description = IntentDescription("企業の選考ステータスを次の段階へ進めます。")
+    static var description: IntentDescription? = IntentDescription("企業の選考ステータスを次の段階へ進めます。")
     /// ウィジェット内部の操作なのでショートカットAppには出さない
     static var isDiscoverable: Bool { false }
 
@@ -51,7 +51,7 @@ struct AdvanceStatusIntent: AppIntent {
 /// 表示月を移動する（ウィジェットはスワイプを扱えないため ◀▶ ボタンで代替）
 struct ShiftMonthIntent: AppIntent {
     static var title: LocalizedStringResource = "表示月を変える"
-    static var description = IntentDescription("カレンダーウィジェットの表示月を前後に移動します。")
+    static var description: IntentDescription? = IntentDescription("カレンダーウィジェットの表示月を前後に移動します。")
     /// ウィジェット内部の操作なのでショートカットAppには出さない
     static var isDiscoverable: Bool { false }
 

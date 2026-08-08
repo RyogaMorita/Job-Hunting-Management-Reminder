@@ -25,9 +25,9 @@ struct MonthCalendarProvider: TimelineProvider {
     private func makeEntry(
         at date: Date, offset: Int, context: Context, schedules: [WidgetSchedule]
     ) -> MonthCalendarEntry {
-        // 段数を決めるために週数だけ先に求める（空配列なのでレーン計算は走らない）
-        let probe = CalendarLayout.build(schedules: [], monthOffset: offset, maxLanes: 1, now: date)
-        let lanes = maxLanes(for: context, rows: probe.weeks.count)
+        // 段数はその月の行数で決まるので、レイアウトを組む前に行数だけ求める
+        let rows = CalendarLayout.weekCount(monthOffset: offset, now: date)
+        let lanes = maxLanes(for: context, rows: rows)
         let layout = CalendarLayout.build(schedules: schedules, monthOffset: offset, maxLanes: lanes, now: date)
         return MonthCalendarEntry(date: date, layout: layout)
     }
@@ -71,9 +71,10 @@ struct MonthCalendarView: View {
     private var laneSpacing: CGFloat { isLarge ? 1.5 : 1 }
 
     /// 帯を描く領域の高さ。全週で同じにして行の高さを揃える。
+    /// 高さ0の採寸行のぶん、verticalSpacing が1つ余分に入る点を足している。
     private var barsAreaHeight: CGFloat {
         let n = CGFloat(entry.layout.laneCount)
-        return n * laneHeight + max(0, n - 1) * laneSpacing
+        return n * laneHeight + n * laneSpacing
     }
 
     /// accented（iOS18のホーム画面色変更）と vibrant（ロック画面）では
@@ -148,7 +149,7 @@ struct MonthCalendarView: View {
         // 週の開始曜日（アプリ本体の設定）に合わせてラベルを回す
         return HStack(spacing: 0) {
             ForEach(0..<7, id: \.self) { col in
-                let weekday = (entry.layout.weekStartsOn + col) % 7
+                let weekday = ((entry.layout.weekStartsOn % 7) + col) % 7
                 Text(symbols[weekday])
                     .font(.system(size: isLarge ? 9 : 8, weight: .medium))
                     .foregroundStyle(weekdayColor(weekday).opacity(0.75))
@@ -169,20 +170,34 @@ struct MonthCalendarView: View {
     private func weekRow(_ week: WeekRow) -> some View {
         VStack(spacing: laneSpacing) {
             HStack(spacing: 0) {
-                ForEach(week.days, id: \.ymd) { day in
-                    dayNumber(day)
+                ForEach(Array(week.days.enumerated()), id: \.element.ymd) { i, day in
+                    dayNumber(day, overflow: week.overflow.indices.contains(i) ? week.overflow[i] : 0)
                         .frame(maxWidth: .infinity)
                 }
             }
             // Grid の gridCellColumns が colspan として働くので、
             // セル幅の手計算なしに複数日バーが連続して描かれる。
-            Grid(horizontalSpacing: 1, verticalSpacing: laneSpacing) {
+            // spacing は 0。上の日付行（HStack spacing 0）と列位置を合わせるため。
+            Grid(horizontalSpacing: 0, verticalSpacing: laneSpacing) {
+                // 列幅を7等分に確定させるための不可視行。
+                // gridCellColumns を持つセルは列幅の決定に寄与しないため、これが無いと
+                // 帯・日付・タップ領域の列がずれる。
+                GridRow {
+                    ForEach(0..<7, id: \.self) { _ in
+                        Color.clear
+                            .frame(height: 0)
+                            .gridCellUnsizedAxes(.vertical)
+                    }
+                }
                 ForEach(Array(week.lanes.enumerated()), id: \.offset) { _, lane in
                     GridRow {
                         ForEach(lane) { cell in
                             // gridCellColumns は GridRow の直接の子に付ける必要があるため
-                            // ViewBuilder の中ではなくここで適用する
-                            laneCell(cell).gridCellColumns(cell.columns)
+                            // ViewBuilder の中ではなくここで適用する。
+                            // gridCellUnsizedAxes は企業名の長さが列幅を決めないようにするため。
+                            laneCell(cell)
+                                .gridCellColumns(cell.columns)
+                                .gridCellUnsizedAxes(.horizontal)
                         }
                     }
                 }
@@ -209,7 +224,7 @@ struct MonthCalendarView: View {
         }
     }
 
-    private func dayNumber(_ day: DayCell) -> some View {
+    private func dayNumber(_ day: DayCell, overflow: Int) -> some View {
         let size: CGFloat = isLarge ? 18 : 14
         return ZStack {
             if day.isToday {
@@ -232,6 +247,15 @@ struct MonthCalendarView: View {
                 .foregroundStyle(dayNumberColor(day))
         }
         .frame(height: size)
+        .overlay(alignment: .trailing) {
+            // 段に入りきらなかった件数。帯の下に埋もれた予定もここで拾う
+            if isLarge && overflow > 0 {
+                Text("+\(overflow)")
+                    .font(.system(size: 7, weight: .bold))
+                    .monospacedDigit()
+                    .foregroundStyle(.white.opacity(0.55))
+            }
+        }
         .opacity(day.isCurrentMonth ? 1 : 0.28)
     }
 
@@ -253,13 +277,6 @@ struct MonthCalendarView: View {
         switch cell {
         case .empty:
             Color.clear.frame(height: laneHeight)
-
-        case .more(_, let count):
-            Text("+\(count)")
-                .font(.system(size: 7, weight: .bold))
-                .foregroundStyle(.white.opacity(0.6))
-                .frame(maxWidth: .infinity, minHeight: laneHeight)
-
         case .event(let seg):
             eventBar(seg)
         }

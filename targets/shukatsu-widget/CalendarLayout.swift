@@ -24,13 +24,11 @@ struct EventSegment: Hashable {
 /// 週の1レーン（＝1段）を構成するセル
 enum LaneCell: Identifiable, Hashable {
     case event(EventSegment)
-    case more(index: Int, count: Int)
     case empty(index: Int)
 
     var id: String {
         switch self {
         case .event(let s): return "e_\(s.scheduleID)_\(s.cols)"
-        case .more(let i, _): return "m_\(i)"
         case .empty(let i): return "x_\(i)"
         }
     }
@@ -55,6 +53,8 @@ struct WeekRow: Identifiable, Hashable {
     let id: String          // 週頭のymd
     let days: [DayCell]     // 常に7件
     let lanes: [[LaneCell]] // レーン（段）ごとのセル列
+    /// 段に入りきらず描けなかった件数（列ごと・常に7件）。日付の横に "+N" として出す
+    let overflow: [Int]
 }
 
 /// 1ヶ月ぶんのレイアウト結果
@@ -69,6 +69,18 @@ struct MonthLayout: Hashable {
 }
 
 enum CalendarLayout {
+
+    /// その月がカレンダー上で何行になるか（段数を決めるために先に必要）
+    static func weekCount(monthOffset: Int, now: Date = Date()) -> Int {
+        let cal = Fmt.jaCalendar
+        let base = cal.date(byAdding: .month, value: monthOffset, to: now) ?? now
+        guard let firstOfMonth = cal.date(from: cal.dateComponents([.year, .month], from: base))
+        else { return 6 }
+        let firstWeekday = cal.component(.weekday, from: firstOfMonth) - 1
+        let leadingBlanks = (firstWeekday - AppGroupHelper.weekStart + 7) % 7
+        let daysInMonth = cal.range(of: .day, in: .month, for: firstOfMonth)?.count ?? 30
+        return Int(ceil(Double(leadingBlanks + daysInMonth) / 7.0))
+    }
 
     static func build(
         schedules: [WidgetSchedule],
@@ -116,10 +128,12 @@ enum CalendarLayout {
                 ))
             }
             guard days.count == 7 else { continue }
+            let packed = packLanes(weekDays: days.map(\.ymd), schedules: dated, maxLanes: maxLanes)
             weeks.append(WeekRow(
                 id: days[0].ymd,
                 days: days,
-                lanes: packLanes(weekDays: days.map(\.ymd), schedules: dated, maxLanes: maxLanes)
+                lanes: packed.lanes,
+                overflow: packed.overflow
             ))
         }
 
@@ -138,8 +152,11 @@ enum CalendarLayout {
     // 段を跨いだ位置合わせのため「その週で既に描いたイベント」を記録し、
     // 複数日イベントは開始列でのみ描画して cols で伸ばす。
 
-    static func packLanes(weekDays: [String], schedules: [WidgetSchedule], maxLanes: Int) -> [[LaneCell]] {
-        guard weekDays.count == 7, maxLanes > 0 else { return [] }
+    static func packLanes(
+        weekDays: [String], schedules: [WidgetSchedule], maxLanes: Int
+    ) -> (lanes: [[LaneCell]], overflow: [Int]) {
+        let noOverflow = [Int](repeating: 0, count: 7)
+        guard weekDays.count == 7, maxLanes > 0 else { return ([], noOverflow) }
         let weekStart = weekDays[0]
         let weekEnd = weekDays[6]
 
@@ -150,7 +167,7 @@ enum CalendarLayout {
                 byDay[ymd, default: []].append(s)
             }
         }
-        guard !byDay.isEmpty else { return [] }
+        guard !byDay.isEmpty else { return ([], noOverflow) }
 
         // 長い予定を上の段に寄せると見た目が安定する
         for key in byDay.keys {
@@ -166,45 +183,41 @@ enum CalendarLayout {
         var placed = Set<String>()
         var lanes: [[LaneCell]] = []
 
+        // 各周回で必ず「列が進む」か「byDayの要素が1つ減る」ので終了は保証されている。
+        // これは無限ループの保険で、正常時に到達することはない。
+        let guardLimit = 7 + schedules.count * 7 + 8
+
         for lane in 0..<maxLanes {
             var cells: [LaneCell] = []
             var col = 0
             var guardCounter = 0
 
-            while col < 7 && guardCounter < 256 {
+            while col < 7 && guardCounter < guardLimit {
                 guardCounter += 1
                 let ymd = weekDays[col]
 
-                // 上の段で既に帯を描いた予定を取り除く。
-                // これをしないと複数日予定が "+N" に二重計上される。
-                if var pending = byDay[ymd], pending.contains(where: { placed.contains($0.id) }) {
-                    pending.removeAll { placed.contains($0.id) }
-                    byDay[ymd] = pending
-                }
-                let remaining = byDay[ymd]?.count ?? 0
+                // 上の段で既に帯を描いた予定を取り除く
+                var bucket = byDay[ymd] ?? []
+                bucket.removeAll { placed.contains($0.id) }
 
-                guard remaining > 0 else {
+                guard let candidate = bucket.first else {
+                    byDay[ymd] = bucket
                     cells.append(.empty(index: col))
                     col += 1
                     continue
                 }
 
-                // 最終レーンで溢れる場合は "+N" にまとめる。
-                // 1段しか無いサイズ（systemMedium）は帯だけの密度表示なので、
-                // "+N" のテキストを出さずそのまま帯を描く。
-                if maxLanes > 1 && lane == maxLanes - 1 && remaining > 1 {
-                    cells.append(.more(index: col, count: remaining))
-                    col += 1
+                // この列で始まらない予定（前の列から続く帯）は、この段では描けない。
+                // 取り除いて同じ列をもう一度見る（列は進めない）。
+                if !cells.isEmpty && candidate.date != ymd {
+                    bucket.removeFirst()
+                    byDay[ymd] = bucket
                     continue
                 }
 
-                let event = byDay[ymd]!.removeFirst()
-
-                // この列で始まらない予定（前の列から続く帯）は飛ばす。列は進めない。
-                let startsHere = event.date == ymd
-                if !cells.isEmpty && !startsHere {
-                    continue
-                }
+                bucket.removeFirst()
+                byDay[ymd] = bucket
+                let event = candidate
 
                 let segEnd = min(event.effectiveEnd, weekEnd)
                 let cols = min(dayCount(from: ymd, to: segEnd), 7 - col)
@@ -237,7 +250,13 @@ enum CalendarLayout {
             }
         }
 
-        return lanes
+        // 段に入りきらなかったぶんを列ごとに数える。
+        // 帯の下に埋もれて描けなかった予定もここに含まれるので、取りこぼしが出ない。
+        let overflow = weekDays.map { ymd in
+            (byDay[ymd] ?? []).filter { !placed.contains($0.id) }.count
+        }
+
+        return (lanes, overflow)
     }
 
     /// 両端を含む日数（同日なら1）

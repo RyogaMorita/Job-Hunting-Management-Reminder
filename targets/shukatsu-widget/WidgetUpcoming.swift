@@ -14,9 +14,17 @@ struct UpcomingProvider: TimelineProvider {
 
     private func makeEntry(at date: Date, schedules: [WidgetSchedule]) -> UpcomingEntry {
         let today = Ymd.string(date)
+        // 同着の並びが揺れるとタイムラインのエントリごとに並び替わって見えるので、
+        // 時刻・企業名・IDまで見て順序を確定させる
         let list = schedules
             .filter { !INACTIVE_STATUSES.contains($0.status) && !$0.date.isEmpty && $0.effectiveEnd >= today }
-            .sorted { $0.date < $1.date }
+            .sorted { a, b in
+                if a.date != b.date { return a.date < b.date }
+                let ta = a.hour + a.minute, tb = b.hour + b.minute
+                if ta != tb { return ta < tb }
+                if a.company != b.company { return a.company < b.company }
+                return a.id < b.id
+            }
         return UpcomingEntry(date: date, schedules: list, today: today)
     }
 
@@ -45,10 +53,13 @@ struct UpcomingAllView: View {
     var body: some View {
         switch family {
         case .accessoryRectangular:
+            // ロック画面のウィジェットもDynamic Typeで拡大され、スクロールで逃げられない
             UpcomingRectangularView(entry: entry)
+                .dynamicTypeSize(.large ... .xxLarge)
                 .containerBackground(for: .widget) { EmptyView() }
         case .accessoryCircular:
             UpcomingCircularView(entry: entry)
+                .dynamicTypeSize(.large ... .xxLarge)
                 .containerBackground(for: .widget) { EmptyView() }
         default:
             UpcomingHomeView(entry: entry)
@@ -144,11 +155,13 @@ struct UpcomingHomeView: View {
 
             Spacer(minLength: 2)
 
-            Text(formatDateRange(s) + (s.hour.isEmpty ? "" : " \(s.hour):\(s.minute)"))
+            // 小サイズは幅が足りない。時刻を省き、fixedSize も外して企業名を残す
+            Text(formatDateRange(s) + (isSmall || s.hour.isEmpty ? "" : " \(s.hour):\(s.minute)"))
                 .font(.system(size: 9, weight: isToday ? .bold : .regular))
                 .foregroundStyle(isToday ? color : .white.opacity(0.7))
                 .lineLimit(1)
-                .fixedSize()
+                .minimumScaleFactor(isSmall ? 0.8 : 1)
+                .layoutPriority(isSmall ? 0 : 1)
 
             // 小サイズは幅が足りないのでボタンを出さない
             if !isSmall, let next = nextStatus(s.status) {

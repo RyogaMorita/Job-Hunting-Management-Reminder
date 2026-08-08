@@ -8,10 +8,11 @@ struct ListEntry: TimelineEntry {
     let schedules: [WidgetSchedule]
 }
 
-/// 選考段階が進んでいるものを上に
+/// 選考段階が進んでいるものを上に。
+/// 内定・不合格などは activeSchedules の時点で除外されるので含めない。
 private let STATUS_ORDER = [
     "最終面接", "2次面接", "1次面接", "GD", "ES締切", "ES提出済", "説明会", "検討中",
-    "インターン面接", "インターンES締切", "インターン確定", "🌸インターン確定", "内定",
+    "インターン面接", "インターンES締切", "インターン確定", "🌸インターン確定",
 ]
 
 struct ListProvider: TimelineProvider {

@@ -1,5 +1,4 @@
 import SwiftUI
-import WidgetKit
 
 // MARK: - Data Models
 
@@ -12,6 +11,41 @@ struct WidgetSchedule: Codable, Identifiable, Hashable {
     let minute: String
     let status: String
     let calendarColor: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, company, date, endDate, hour, minute, status, calendarColor
+    }
+
+    /// 1件でも欠けたフィールドがあると配列全体のデコードが失敗し、
+    /// 4つのウィジェットが同時に真っ白になる。欠損・型違いは空文字で受ける。
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        func str(_ key: CodingKeys) -> String {
+            if let s = try? c.decode(String.self, forKey: key) { return s }
+            if let n = try? c.decode(Int.self, forKey: key) { return String(n) }
+            return ""
+        }
+        id = str(.id)
+        company = str(.company)
+        date = str(.date)
+        endDate = try? c.decode(String.self, forKey: .endDate)
+        hour = str(.hour)
+        minute = str(.minute)
+        status = str(.status)
+        calendarColor = try? c.decode(String.self, forKey: .calendarColor)
+    }
+
+    init(id: String, company: String, date: String, endDate: String?,
+         hour: String, minute: String, status: String, calendarColor: String?) {
+        self.id = id
+        self.company = company
+        self.date = date
+        self.endDate = endDate
+        self.hour = hour
+        self.minute = minute
+        self.status = status
+        self.calendarColor = calendarColor
+    }
 
     /// 終了日（未設定・不正な場合は開始日）
     var effectiveEnd: String {
@@ -50,13 +84,6 @@ enum Fmt {
         let f = DateFormatter()
         f.locale = Locale(identifier: "ja_JP")
         f.dateFormat = "M/d(EEE)"
-        return f
-    }()
-
-    static let monthDay: DateFormatter = {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "ja_JP")
-        f.dateFormat = "M月d日"
         return f
     }()
 
@@ -266,7 +293,9 @@ extension Color {
         case 3: (a, r, g, b) = (255, (int >> 8) * 17, (int >> 4 & 0xF) * 17, (int & 0xF) * 17)
         case 6: (a, r, g, b) = (255, int >> 16, int >> 8 & 0xFF, int & 0xFF)
         case 8: (a, r, g, b) = (int >> 24, int >> 16 & 0xFF, int >> 8 & 0xFF, int & 0xFF)
-        default: (a, r, g, b) = (1, 1, 1, 0)
+        // 想定外の文字列は透明にせずグレー（#95A5A6）で描く。
+        // 透明にすると帯が消えて予定が無いように見えてしまうため。
+        default: (a, r, g, b) = (255, 149, 165, 166)
         }
         self.init(.sRGB, red: Double(r) / 255, green: Double(g) / 255, blue: Double(b) / 255, opacity: Double(a) / 255)
     }
