@@ -402,7 +402,20 @@ function WheelDateField({
   placeholder?: string; minimumDate?: Date; clearable?: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const current = value ? parseYmd(value) : new Date();
+  // iOSのスピナーはスクロール中ずっと onChange を撃つ。
+  // 直接 onChange に流すと1回のスクロールで数十回保存が走るので、
+  // ここで持っておき「完了」でだけ確定させる。
+  const [draft, setDraft] = useState<Date | null>(null);
+
+  const initial = value ? parseYmd(value) : new Date();
+  // minimumDate より前は選べないので、初期値も合わせておく
+  const current = draft ?? (minimumDate && minimumDate > initial ? minimumDate : initial);
+
+  const commit = () => {
+    onChange(formatYmd(current));
+    setDraft(null);
+    setOpen(false);
+  };
 
   return (
     <View style={{ marginBottom: 6 }}>
@@ -410,13 +423,13 @@ function WheelDateField({
         {label ? <Text style={{ fontSize: 12, color: C.text3, width: 52 }}>{label}</Text> : null}
         <RippleButton
           style={[styles.input, { flex: 1, backgroundColor: C.inputBg, justifyContent: 'center' }]}
-          onPress={() => setOpen(v => !v)}>
+          onPress={() => { setDraft(null); setOpen(v => !v); }}>
           <Text style={{ fontSize: 15, color: value ? C.text : '#aaa' }}>
             {value ? value.replace(/-/g, '/') : placeholder}
           </Text>
         </RippleButton>
         {clearable && value ? (
-          <TouchableOpacity onPress={() => { onChange(''); setOpen(false); }}
+          <TouchableOpacity onPress={() => { onChange(''); setDraft(null); setOpen(false); }}
             style={{ paddingHorizontal: 8, paddingVertical: 10 }}>
             <Text style={{ color: '#aaa', fontSize: 16 }}>✕</Text>
           </TouchableOpacity>
@@ -433,12 +446,12 @@ function WheelDateField({
             locale="ja-JP"
             minimumDate={minimumDate}
             themeVariant={C === DARK ? 'dark' : 'light'}
-            onChange={(_e, d) => { if (d) onChange(formatYmd(d)); }}
+            onChange={(_e, d) => { if (d) setDraft(d); }}
             style={{ height: 180 }}
           />
           <RippleButton
             style={{ margin: 8, backgroundColor: TDU_BLUE, borderRadius: 8, padding: 10, alignItems: 'center' }}
-            onPress={() => { if (!value) onChange(formatYmd(current)); setOpen(false); }}>
+            onPress={commit}>
             <Text style={{ color: '#fff', fontWeight: 'bold' }}>完了</Text>
           </RippleButton>
         </ReAnimated.View>
@@ -454,9 +467,19 @@ function WheelTimeField({
   onChange: (h: string, m: string) => void; C: typeof LIGHT;
 }) {
   const [open, setOpen] = useState(false);
-  const current = new Date();
-  current.setHours(Number(hour || 9), Number(minute || 0), 0, 0);
+  // 日付側と同じく、スクロール中の連続 onChange を確定させない
+  const [draft, setDraft] = useState<Date | null>(null);
+
+  const base = new Date();
+  base.setHours(Number(hour || 9), Number(minute || 0), 0, 0);
+  const current = draft ?? base;
   const shown = hour ? `${hour}:${minute || '00'}` : '';
+
+  const commit = () => {
+    onChange(String(current.getHours()).padStart(2, '0'), String(current.getMinutes()).padStart(2, '0'));
+    setDraft(null);
+    setOpen(false);
+  };
 
   return (
     <View style={{ marginBottom: 6 }}>
@@ -464,11 +487,11 @@ function WheelTimeField({
         {label ? <Text style={{ fontSize: 12, color: C.text3, width: 52 }}>{label}</Text> : null}
         <RippleButton
           style={[styles.input, { flex: 1, backgroundColor: C.inputBg, justifyContent: 'center' }]}
-          onPress={() => setOpen(v => !v)}>
+          onPress={() => { setDraft(null); setOpen(v => !v); }}>
           <Text style={{ fontSize: 15, color: shown ? C.text : '#aaa' }}>{shown || '時刻を設定'}</Text>
         </RippleButton>
         {shown ? (
-          <TouchableOpacity onPress={() => { onChange('', ''); setOpen(false); }}
+          <TouchableOpacity onPress={() => { onChange('', ''); setDraft(null); setOpen(false); }}
             style={{ paddingHorizontal: 8, paddingVertical: 10 }}>
             <Text style={{ color: '#aaa', fontSize: 16 }}>✕</Text>
           </TouchableOpacity>
@@ -485,18 +508,12 @@ function WheelTimeField({
             locale="ja-JP"
             minuteInterval={5}
             themeVariant={C === DARK ? 'dark' : 'light'}
-            onChange={(_e, d) => {
-              if (!d) return;
-              onChange(String(d.getHours()).padStart(2, '0'), String(d.getMinutes()).padStart(2, '0'));
-            }}
+            onChange={(_e, d) => { if (d) setDraft(d); }}
             style={{ height: 180 }}
           />
           <RippleButton
             style={{ margin: 8, backgroundColor: TDU_BLUE, borderRadius: 8, padding: 10, alignItems: 'center' }}
-            onPress={() => {
-              if (!hour) onChange(String(current.getHours()).padStart(2, '0'), String(current.getMinutes()).padStart(2, '0'));
-              setOpen(false);
-            }}>
+            onPress={commit}>
             <Text style={{ color: '#fff', fontWeight: 'bold' }}>完了</Text>
           </RippleButton>
         </ReAnimated.View>
@@ -1284,6 +1301,13 @@ export default function App() {
     }
   }, [selDate, selEndDate]);
 
+  // インターン期間も同様に、終了日が開始日より前にならないようにする
+  useEffect(() => {
+    if (internshipStart && internshipEnd && internshipEnd < internshipStart) {
+      setInternshipEnd(internshipStart);
+    }
+  }, [internshipStart, internshipEnd]);
+
   // AppStateリスナーは一度しか張らないので、最新の色をrefで参照する
   const statusColorsRef = useRef(statusColors);
   useEffect(() => { statusColorsRef.current = statusColors; }, [statusColors]);
@@ -1422,7 +1446,7 @@ export default function App() {
         // 説明会・GDで日付が昨日以前のものを自動完了
         const today = new Date().toISOString().split('T')[0];
         const autoCompleted = parsed.map(item =>
-          (['説明会', 'GD'].includes(item.status) && item.date && item.date < today)
+          (EVENT_STATUSES.includes(item.status) && item.date && item.date < today)
             ? { ...item, status: '完了', calendarColor: loadedColors['完了'] ?? '#95A5A6' }
             : item
         );
@@ -1534,11 +1558,13 @@ export default function App() {
   };
 
   // ─── 統計 ──────────────────────────────────────────────────────
-  const EXCLUDE_FROM_COUNT = ['内定', '内定辞退', '不合格', '完了', '説明会', 'GD', ...INTERN_STATUSES];
+  // 内定・内定承諾は選考が動かないので持ち駒には数えない
+  const OFFER_STATUSES = ['内定', '内定承諾'];
+  const EXCLUDE_FROM_COUNT = [...OFFER_STATUSES, '内定辞退', '不合格', '完了', ...EVENT_STATUSES, ...INTERN_STATUSES];
   const activeCount = useMemo(() => schedules.filter(s => !EXCLUDE_FROM_COUNT.includes(s.status)).length, [schedules]);
-  const internalCount = useMemo(() => schedules.filter(s => s.status === '内定').length, [schedules]);
+  const internalCount = useMemo(() => schedules.filter(s => OFFER_STATUSES.includes(s.status)).length, [schedules]);
   const passRate = useMemo(() => {
-    const offer = schedules.filter(s => s.status === '内定' || s.status === '内定辞退').length;
+    const offer = schedules.filter(s => OFFER_STATUSES.includes(s.status) || s.status === '内定辞退').length;
     const reject = schedules.filter(s => s.status === '不合格').length;
     if (offer + reject === 0) return null;
     return Math.round(offer / (offer + reject) * 100);
@@ -1667,19 +1693,43 @@ export default function App() {
   );
 
   // 同日に物理的に両立しない予定がないか。対面が絡む場合は移動時間ぶん広く見る。
-  const conflictIds = useMemo(
-    () => findConflicts(
-      schedules
-        .filter(s => s.date && s.hour && !['不合格', '完了', '内定辞退'].includes(s.status))
-        .map(s => ({ id: s.id, company: s.company, date: s.date, hour: s.hour, minute: s.minute, venueType: s.venueType }))
-    ),
-    [schedules]
-  );
+  // 一覧は同名企業を1行に畳むため、IDだけで判定すると代表行以外の衝突が見えない。
+  // 「企業名__トラック」のキーでも引けるようにしておく。
+  const conflictIds = useMemo(() => {
+    const targets = schedules
+      .filter(s => s.date && s.hour && !['不合格', '完了', '内定辞退'].includes(s.status));
+    const hit = findConflicts(targets.map(s => ({
+      id: s.id, company: s.company, date: s.date, endDate: s.endDate,
+      hour: s.hour, minute: s.minute, venueType: s.venueType,
+    })));
+    const keys = new Set(hit);
+    targets.forEach(s => {
+      if (hit.has(s.id)) keys.add(`${s.company}__${trackGroup(s.status)}`);
+    });
+    return keys;
+  }, [schedules]);
+
+  /// 一覧の行が日程重複を含むか（畳まれた同名企業ぶんも見る）
+  const hasConflict = (s: Schedule) =>
+    conflictIds.has(s.id) || conflictIds.has(`${s.company}__${trackGroup(s.status)}`);
 
   // 全企業横断の「やること」。締切が近い順。
+  // 日付を依存に入れないと、アプリを開いたまま日を跨いだときに
+  // 「今日 / 明日 / あとN日」が前日のまま固定されてしまう。
+  const [todayYmd, setTodayYmd] = useState(() => formatYmd(new Date()));
+  useEffect(() => {
+    const tick = () => setTodayYmd(prev => {
+      const now = formatYmd(new Date());
+      return now === prev ? prev : now;
+    });
+    const sub = AppState.addEventListener('change', st => { if (st === 'active') tick(); });
+    const timer = setInterval(tick, 60_000);
+    return () => { sub.remove(); clearInterval(timer); };
+  }, []);
+
   const todos = useMemo(
-    () => collectTodos(schedules, formatYmd(new Date())),
-    [schedules]
+    () => collectTodos(schedules, todayYmd),
+    [schedules, todayYmd]
   );
   const overdueTodoCount = todos.filter(t => t.daysLeft !== undefined && t.daysLeft < 0).length;
   // 辞退を決めたのに連絡できていない企業（調査では内々定保有者の57.4%が該当）
@@ -1736,9 +1786,9 @@ export default function App() {
     CHECKLIST_STEPS.forEach(step => { initCL[step] = autoChecks.includes(step); });
     // 既存のチェックと合成（既にチェック済みのものは保持）
     // ただしステータスが下がった場合は、新ステータスより上のステージのチェックをリセット
-    const existingCL = selectedItem?.checklist ?? {};
+    const existingCL = storedItem?.checklist ?? selectedItem?.checklist ?? {};
     const newStage = STATUS_TO_STAGE[selStatus] ?? 0;
-    const oldStage = STATUS_TO_STAGE[selectedItem?.status ?? selStatus] ?? 0;
+    const oldStage = STATUS_TO_STAGE[storedItem?.status ?? selectedItem?.status ?? selStatus] ?? 0;
     const statusLowered = selectedItem && newStage < oldStage;
     CHECKLIST_STEPS.forEach((step, i) => {
       if (statusLowered && i >= newStage) {
@@ -1749,8 +1799,8 @@ export default function App() {
     });
 
     // ⑬ ステータス変更履歴を更新
-    const prevHistory = selectedItem?.statusHistory ?? [];
-    const statusChanged = selectedItem ? selectedItem.status !== selStatus : true;
+    const prevHistory = storedItem?.statusHistory ?? selectedItem?.statusHistory ?? [];
+    const statusChanged = selectedItem ? (storedItem?.status ?? selectedItem.status) !== selStatus : true;
     const newHistory = statusChanged
       ? [...prevHistory, { status: selStatus, changedAt: new Date().toISOString() }]
       : prevHistory;
@@ -2520,7 +2570,7 @@ export default function App() {
                                 <Text style={styles.rankText}>{item.rank}</Text>
                               </View>
                               <HighlightText text={item.company + (isInternal ? ' 🌸' : '')} query={searchQuery} style={[styles.itemTitle, { color: isInactive ? '#888' : C.text, flex: 1 }]} />
-                              {conflictIds.has(item.id) && <View style={{ backgroundColor: DANGER, borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2 }}>
+                              {hasConflict(item) && <View style={{ backgroundColor: DANGER, borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2 }}>
                                 <Text style={{ color: '#fff', fontSize: 10, fontWeight: 'bold' }}>日程重複</Text>
                               </View>}
                               {cdLabel && <View style={{ backgroundColor: cdLabel === '今日' ? DANGER : '#f39c12', borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2 }}>
@@ -2591,7 +2641,7 @@ export default function App() {
                               query={searchQuery}
                               style={[styles.itemTitle, { color: isInactive ? '#888' : C.text, flex: 1 }]}
                             />
-                            {conflictIds.has(item.id) && <View style={{ backgroundColor: DANGER, borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2 }}>
+                            {hasConflict(item) && <View style={{ backgroundColor: DANGER, borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2 }}>
                                 <Text style={{ color: '#fff', fontSize: 10, fontWeight: 'bold' }}>日程重複</Text>
                               </View>}
                               {cdLabel && <View style={{ backgroundColor: cdLabel === '今日' ? DANGER : '#f39c12', borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2 }}>
@@ -2612,6 +2662,20 @@ export default function App() {
                                 <Text style={{ fontSize: 10, color: '#c0392b', fontWeight: 'bold' }}>PWコピー</Text>
                               </TouchableOpacity>
                             ) : null}
+                            {/* チェックリストへの入口。準備テンプレート・期限設定はここから開く */}
+                            {!isInactive ? (() => {
+                              const cl = item.customChecklist ?? [];
+                              const done = cl.filter(c => c.checked).length;
+                              return (
+                                <TouchableOpacity
+                                  style={[styles.checkBtn, { backgroundColor: C.bg3 }]}
+                                  onPress={() => setCheckModalItem(item)}>
+                                  <Text style={styles.checkBtnText}>
+                                    {cl.length > 0 ? `やること ${done}/${cl.length}` : 'やること'}
+                                  </Text>
+                                </TouchableOpacity>
+                              );
+                            })() : null}
                           </View>
                           {item.url ? (
                             <TouchableOpacity
@@ -3632,7 +3696,11 @@ export default function App() {
                             flexDirection: 'row', alignItems: 'center', gap: 8,
                             paddingVertical: 11, borderBottomWidth: 0.5, borderBottomColor: C.border2,
                           }}
-                          onPress={() => { setTodoModalVisible(false); if (item) openDetail(item); }}>
+                          onPress={() => {
+                            setTodoModalVisible(false);
+                            // 前のモーダルが閉じきる前に次を出すと表示されないことがある
+                            if (item) setTimeout(() => openDetail(item), 300);
+                          }}>
                           <View style={{
                             paddingHorizontal: 6, paddingVertical: 3, borderRadius: 5,
                             backgroundColor: (statusColors[item?.status ?? ''] ?? NEUTRAL_GRAY) + '22',

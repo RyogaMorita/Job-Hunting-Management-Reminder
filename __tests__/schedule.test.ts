@@ -292,3 +292,26 @@ describe('準備テンプレート', () => {
     }
   });
 });
+
+describe('複数日の予定の重複検知', () => {
+  const span = (id: string, date: string, endDate: string, hour: string) =>
+    ({ id, company: id, date, endDate, hour, minute: '00', venueType: 'online' as const });
+
+  test('期間が重なっていれば開始日が違っても衝突する', () => {
+    const a = span('a', '2026-05-09', '2026-05-12', '10');
+    const b = { id: 'b', company: 'b', date: '2026-05-11', hour: '10', minute: '00', venueType: 'online' as const };
+    expect(eventsConflict(a, b)).toBe(true);
+  });
+
+  test('期間が重ならなければ衝突しない', () => {
+    const a = span('a', '2026-05-09', '2026-05-10', '10');
+    const b = { id: 'b', company: 'b', date: '2026-05-12', hour: '10', minute: '00', venueType: 'online' as const };
+    expect(eventsConflict(a, b)).toBe(false);
+  });
+
+  test('期間が重なっても時刻が離れていれば衝突しない', () => {
+    const a = span('a', '2026-05-09', '2026-05-12', '10');
+    const b = { id: 'b', company: 'b', date: '2026-05-11', hour: '15', minute: '00', venueType: 'online' as const };
+    expect(eventsConflict(a, b)).toBe(false);
+  });
+});

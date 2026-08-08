@@ -89,6 +89,7 @@ export type TimedEvent = {
   id: string;
   company: string;
   date: string;
+  endDate?: string;
   hour: string;
   minute: string;
   venueType?: VenueType;
@@ -107,8 +108,11 @@ const minutesOf = (e: TimedEvent): number | null => {
 };
 
 /// 2件がぶつかるか。時刻未定のものは判定できないので false。
+/// 複数日の予定は期間が重なっていれば同日扱いにする。
 export const eventsConflict = (a: TimedEvent, b: TimedEvent): boolean => {
-  if (a.id === b.id || !a.date || a.date !== b.date) return false;
+  if (a.id === b.id || !a.date || !b.date) return false;
+  // 期間が1日でも重なっていなければ衝突しない
+  if (a.date > effectiveEnd(b) || b.date > effectiveEnd(a)) return false;
   const sa = minutesOf(a), sb = minutesOf(b);
   if (sa === null || sb === null) return false;
   // どちらかが対面なら移動時間を見る
