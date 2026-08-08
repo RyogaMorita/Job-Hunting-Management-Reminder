@@ -136,6 +136,61 @@ export const findConflicts = (events: TimedEvent[]): Set<string> => {
   return hit;
 };
 
+// ─── バーチカル（時間軸）表示の配置計算 ────────────────────────
+//
+// 重なった予定は横に並べないと読めない。
+// 重なりの連鎖ごとに束ね、束の中で列を割り当てる。
+// 描画側で計算すると再レンダリングのたびに走るので、ここで済ませて結果だけ渡す。
+
+export type PlacedEvent<T> = {
+  event: T;
+  /// 0時からの分
+  startMin: number;
+  endMin: number;
+  /// 何列目か（0始まり）と、その重なりの束が何列あるか
+  col: number;
+  cols: number;
+};
+
+export const layoutDayEvents = <T extends TimedEvent>(events: T[]): PlacedEvent<T>[] => {
+  type Item = { event: T; startMin: number; endMin: number };
+  const timed: Item[] = [];
+  for (const e of events) {
+    const s = minutesOf(e);
+    if (s === null) continue;
+    timed.push({ event: e, startMin: s, endMin: s + EVENT_DURATION_MIN });
+  }
+  timed.sort((a, b) => a.startMin - b.startMin || a.endMin - b.endMin);
+
+  const out: PlacedEvent<T>[] = [];
+  let cluster: Item[] = [];
+  let clusterEnd = -1;
+
+  const flush = () => {
+    if (cluster.length === 0) return;
+    // 各列の「最後に埋まっている終了時刻」を持ち、空いた列から詰める
+    const colEnds: number[] = [];
+    const placed = cluster.map(item => {
+      let col = colEnds.findIndex(end => end <= item.startMin);
+      if (col === -1) { col = colEnds.length; colEnds.push(item.endMin); }
+      else colEnds[col] = item.endMin;
+      return { ...item, col, cols: 0 };
+    });
+    for (const p of placed) p.cols = colEnds.length;
+    out.push(...placed);
+    cluster = [];
+    clusterEnd = -1;
+  };
+
+  for (const item of timed) {
+    if (cluster.length > 0 && item.startMin >= clusterEnd) flush();
+    cluster.push(item);
+    clusterEnd = Math.max(clusterEnd, item.endMin);
+  }
+  flush();
+  return out;
+};
+
 // ─── 全企業横断の「やること」集約 ──────────────────────────────
 //
 // 締切は企業カードの中に散らばっていて、期限順に並べて見る手段が無かった。

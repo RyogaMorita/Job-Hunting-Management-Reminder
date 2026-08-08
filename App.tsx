@@ -39,7 +39,7 @@ import { LISTED_COMPANIES, CompanyEntry } from './companies_v2';
 import {
   addDaysYmd, collectTodos, formatYmd, parseYmd, coversDate, dateRangeStr, expandDateRange,
   findConflicts, nextStatus, PREP_TEMPLATES,
-  stageDistribution, weeklyActivity,
+  stageDistribution, weeklyActivity, layoutDayEvents, TRAVEL_BUFFER_MIN,
 } from './lib/schedule';
 import type { TodoItem, VenueType } from './lib/schedule';
 
@@ -199,6 +199,8 @@ interface Schedule {
 }
 
 type TabType = 'calendar' | 'list' | 'settings';
+// 月グリッド → 週1行 → 時間軸（バーチカル）の3モードを順に回す
+type CalendarMode = 'month' | 'week' | 'day';
 type SortType = '登録順' | '直近順' | '五十音' | '志望度' | 'ステータス' | 'ジャンル' | '手動';
 
 // ─── デフォルトジャンル ───────────────────────────────────────────
@@ -297,6 +299,167 @@ function SwipeableRow({ children, onDelete }: { children: React.ReactNode; onDel
         <ReAnimated.View style={rowStyle}>{children}</ReAnimated.View>
       </GestureDetector>
     </View>
+  );
+}
+
+// ─── バーチカル（時間軸）表示 ────────────────────────────────────
+//
+// 一次はWeb・最終は対面という組み合わせが増えると、同じ日に入れた予定が
+// 物理的に両立しないことが起きる。月グリッドでは重なりが見えないので、
+// 時間軸に並べて「入らない」を目で分かるようにする。
+// 重なりの列割り当ては lib/schedule.ts の layoutDayEvents で済ませてある。
+
+const VT_HOUR_H = 56;   // 1時間ぶんの高さ
+const VT_GUTTER = 46;   // 左の時刻ラベル幅
+
+function DayTimeline({
+  items, C, isDark, statusColorOf, hasConflict, onPressItem, nowMin,
+}: {
+  items: Schedule[]; C: typeof LIGHT; isDark: boolean;
+  statusColorOf: (s: string) => string;
+  hasConflict: (s: Schedule) => boolean;
+  onPressItem: (s: Schedule) => void;
+  /// 今日を見ているときだけ現在時刻（0時からの分）。それ以外は null
+  nowMin: number | null;
+}) {
+  const placed = useMemo(() => layoutDayEvents(items), [items]);
+  const allDay = useMemo(() => items.filter(s => !s.hour), [items]);
+
+  // 既定は8〜21時。範囲外に予定があればそこまで広げる
+  const { fromHour, toHour } = useMemo(() => {
+    let from = 8, to = 21;
+    for (const p of placed) {
+      // 対面は移動時間ぶんも描くので、その余白まで入る範囲にする
+      const onsite = p.event.venueType === 'onsite';
+      const pad = onsite ? TRAVEL_BUFFER_MIN : 0;
+      from = Math.min(from, Math.floor((p.startMin - pad) / 60));
+      to = Math.max(to, Math.ceil((p.endMin + pad) / 60));
+    }
+    return { fromHour: Math.max(0, from), toHour: Math.min(24, to) };
+  }, [placed]);
+
+  const hours = useMemo(
+    () => Array.from({ length: toHour - fromHour + 1 }, (_, i) => fromHour + i),
+    [fromHour, toHour],
+  );
+  const topOf = (min: number) => ((min - fromHour * 60) / 60) * VT_HOUR_H;
+  const bodyH = (toHour - fromHour) * VT_HOUR_H;
+
+  return (
+    <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 90 }}>
+      {/* 時刻未定・終日 */}
+      {allDay.length > 0 && (
+        <View style={{
+          flexDirection: 'row', flexWrap: 'wrap', gap: 6,
+          paddingHorizontal: 16, paddingTop: 8, paddingBottom: 10,
+          borderBottomWidth: 1, borderColor: C.border,
+        }}>
+          {allDay.map(s => {
+            const sc = s.calendarColor ?? statusColorOf(s.status);
+            return (
+              <TouchableOpacity key={s.id} onPress={() => onPressItem(s)}
+                style={{
+                  flexDirection: 'row', alignItems: 'center', gap: 4,
+                  backgroundColor: blendHex(sc, C.bg, 0.16),
+                  borderLeftWidth: 3, borderLeftColor: sc,
+                  borderRadius: 6, paddingHorizontal: 8, paddingVertical: 5,
+                }}>
+                <Text style={{ fontSize: 11, fontWeight: 'bold', color: C.text }} numberOfLines={1}>{s.company}</Text>
+                <Text style={{ fontSize: 10, color: sc }}>{s.status}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      )}
+
+      <View style={{ flexDirection: 'row', paddingTop: 8 }}>
+        {/* 時刻の目盛り */}
+        <View style={{ width: VT_GUTTER, height: bodyH }}>
+          {hours.map(h => (
+            <Text key={h} style={{
+              position: 'absolute', top: topOf(h * 60) - 6, right: 8,
+              fontSize: 10, color: C.text3, fontVariant: ['tabular-nums'],
+            }}>{String(h).padStart(2, '0')}:00</Text>
+          ))}
+        </View>
+
+        <View style={{ flex: 1, height: bodyH, position: 'relative', marginRight: 12 }}>
+          {/* 横罫線 */}
+          {hours.map(h => (
+            <View key={h} style={{
+              position: 'absolute', left: 0, right: 0, top: topOf(h * 60),
+              height: 1, backgroundColor: C.border,
+            }} />
+          ))}
+
+          {/* 対面の移動時間。予定の下に敷く */}
+          {placed.filter(p => p.event.venueType === 'onsite').map(p => {
+            const sc = p.event.calendarColor ?? statusColorOf(p.event.status);
+            return (
+              <View key={`buf_${p.event.id}`} style={{
+                position: 'absolute',
+                top: topOf(p.startMin - TRAVEL_BUFFER_MIN),
+                height: (p.endMin - p.startMin + TRAVEL_BUFFER_MIN * 2) / 60 * VT_HOUR_H,
+                left: `${(p.col / p.cols) * 100}%`,
+                width: `${100 / p.cols}%`,
+                borderRadius: 6,
+                backgroundColor: blendHex(sc, C.bg, 0.07),
+              }} />
+            );
+          })}
+
+          {/* 予定 */}
+          {placed.map(p => {
+            const s = p.event;
+            const sc = s.calendarColor ?? statusColorOf(s.status);
+            const conflict = hasConflict(s);
+            return (
+              <TouchableOpacity
+                key={s.id}
+                onPress={() => onPressItem(s)}
+                style={{
+                  position: 'absolute',
+                  top: topOf(p.startMin) + 1,
+                  height: ((p.endMin - p.startMin) / 60) * VT_HOUR_H - 2,
+                  left: `${(p.col / p.cols) * 100}%`,
+                  width: `${100 / p.cols}%`,
+                  paddingHorizontal: 6, paddingVertical: 4,
+                  borderRadius: 6,
+                  borderLeftWidth: 3, borderLeftColor: sc,
+                  borderWidth: conflict ? 1.5 : 0,
+                  borderColor: conflict ? DANGER : 'transparent',
+                  backgroundColor: blendHex(sc, C.bg, 0.2),
+                }}>
+                <Text style={{ fontSize: 11, fontWeight: 'bold', color: C.text }} numberOfLines={1}>
+                  {s.pinned ? '📌 ' : ''}{s.company}
+                </Text>
+                <Text style={{ fontSize: 9, color: sc }} numberOfLines={1}>
+                  {s.status}
+                  {s.venueType === 'onsite' ? ' ・対面' : s.venueType === 'online' ? ' ・オンライン' : ''}
+                </Text>
+                {conflict ? (
+                  <Text style={{ fontSize: 9, color: DANGER, fontWeight: 'bold' }} numberOfLines={1}>日程重複</Text>
+                ) : null}
+              </TouchableOpacity>
+            );
+          })}
+
+          {/* 現在時刻 */}
+          {nowMin !== null && nowMin >= fromHour * 60 && nowMin <= toHour * 60 && (
+            <View style={{ position: 'absolute', left: -4, right: 0, top: topOf(nowMin), flexDirection: 'row', alignItems: 'center' }}>
+              <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: DANGER }} />
+              <View style={{ flex: 1, height: 1.5, backgroundColor: DANGER }} />
+            </View>
+          )}
+        </View>
+      </View>
+
+      {placed.length === 0 && allDay.length === 0 && (
+        <Text style={{ textAlign: 'center', color: C.text3, fontSize: 12, marginTop: 24 }}>
+          この日の予定はありません
+        </Text>
+      )}
+    </ScrollView>
   );
 }
 
@@ -1111,7 +1274,7 @@ const DARK = {
 // カレンダーヘッダー
 function CalendarHeader({ isDark, C, currentDate, weekStart, onOpenDatePicker, calendarMode, onToggleMode }: {
   isDark: boolean; C: typeof LIGHT; currentDate: Date; weekStart: number; onOpenDatePicker: () => void;
-  calendarMode: 'week' | 'month'; onToggleMode: () => void;
+  calendarMode: CalendarMode; onToggleMode: () => void;
 }) {
   const month = currentDate.getMonth() + 1;
   const year = currentDate.getFullYear();
@@ -1131,7 +1294,7 @@ function CalendarHeader({ isDark, C, currentDate, weekStart, onOpenDatePicker, c
         onPress={onToggleMode}
         style={{ backgroundColor: isDark ? '#1e3a5f' : '#e8f0fe', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5 }}>
         <Text style={{ fontSize: 12, fontWeight: 'bold', color: ACCENT }}>
-          {calendarMode === 'month' ? '週' : '月'}
+          {calendarMode === 'month' ? '週' : calendarMode === 'week' ? '時間' : '月'}
         </Text>
       </TouchableOpacity>
     </View>
@@ -1183,7 +1346,7 @@ export default function App() {
   const C = isDark ? DARK : LIGHT;
   const ACCENT = isDark ? '#6ea8fe' : TDU_BLUE;
   const [currentCalDate, setCurrentCalDate] = useState(new Date());
-  const [calendarMode, setCalendarMode] = useState<'week' | 'month'>('month');
+  const [calendarMode, setCalendarMode] = useState<CalendarMode>('month');
   const [manualOrder, setManualOrder] = useState<string[]>([]);
 
   const [fontsLoaded] = useFonts({
@@ -1805,11 +1968,17 @@ export default function App() {
   // 日付を依存に入れないと、アプリを開いたまま日を跨いだときに
   // 「今日 / 明日 / あとN日」が前日のまま固定されてしまう。
   const [todayYmd, setTodayYmd] = useState(() => formatYmd(new Date()));
+  // バーチカル表示の現在時刻ライン用（0時からの分）
+  const [nowMin, setNowMin] = useState(() => new Date().getHours() * 60 + new Date().getMinutes());
   useEffect(() => {
-    const tick = () => setTodayYmd(prev => {
-      const now = formatYmd(new Date());
-      return now === prev ? prev : now;
-    });
+    const tick = () => {
+      setTodayYmd(prev => {
+        const now = formatYmd(new Date());
+        return now === prev ? prev : now;
+      });
+      const d = new Date();
+      setNowMin(d.getHours() * 60 + d.getMinutes());
+    };
     const sub = AppState.addEventListener('change', st => { if (st === 'active') tick(); });
     const timer = setInterval(tick, 60_000);
     return () => { sub.remove(); clearInterval(timer); };
@@ -2333,11 +2502,61 @@ export default function App() {
           )}
         </View>
 
+        {/* ── カレンダータブ（バーチカル表示） ── */}
+        {activeTab === 'calendar' && calendarMode === 'day' && (
+          <View style={{ flex: 1, backgroundColor: C.bg }}>
+            <CalendarHeader
+              isDark={isDark} C={C} currentDate={currentCalDate} weekStart={weekStart}
+              onOpenDatePicker={() => setDatePickerVisible(true)}
+              calendarMode={calendarMode}
+              onToggleMode={() => setCalendarMode('month')} />
+            {/* 日移動 */}
+            <View style={{
+              flexDirection: 'row', alignItems: 'center', gap: 8,
+              paddingHorizontal: 16, paddingBottom: 10,
+            }}>
+              <RippleButton
+                style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, backgroundColor: C.bg3 }}
+                onPress={() => setSelectedDate(d => addDaysYmd(d, -1))}>
+                <Text style={{ color: ACCENT, fontWeight: 'bold' }}>◀</Text>
+              </RippleButton>
+              <Text style={{ flex: 1, textAlign: 'center', fontSize: 15, fontWeight: 'bold', color: C.text }}>
+                {selectedDate.replace(/-/g, '/')}（{['日', '月', '火', '水', '木', '金', '土'][parseYmd(selectedDate).getDay()]}）
+              </Text>
+              <RippleButton
+                style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, backgroundColor: C.bg3 }}
+                onPress={() => setSelectedDate(d => addDaysYmd(d, 1))}>
+                <Text style={{ color: ACCENT, fontWeight: 'bold' }}>▶</Text>
+              </RippleButton>
+              {selectedDate !== todayYmd ? (
+                <RippleButton
+                  style={{ paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, backgroundColor: C.bg3 }}
+                  onPress={() => setSelectedDate(todayYmd)}>
+                  <Text style={{ color: ACCENT, fontSize: 12, fontWeight: 'bold' }}>今日</Text>
+                </RippleButton>
+              ) : null}
+            </View>
+            <DayTimeline
+              items={filteredByDate}
+              C={C} isDark={isDark}
+              statusColorOf={statusColorOf}
+              hasConflict={hasConflict}
+              onPressItem={openDetail}
+              nowMin={selectedDate === todayYmd ? nowMin : null}
+            />
+            <Pressable
+              style={styles.fab}
+              onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); openAdd(selectedDate); countAction(); }}>
+              <Text style={styles.fabText}>＋</Text>
+            </Pressable>
+          </View>
+        )}
+
         {/* ── カレンダータブ ── */}
-        {activeTab === 'calendar' && (
+        {activeTab === 'calendar' && calendarMode !== 'day' && (
           <View style={{ flex: 1, backgroundColor: C.bg, position: 'relative' }}
             onLayout={(e) => setScreenWidth(e.nativeEvent.layout.width)}>
-            <CalendarHeader isDark={isDark} C={C} currentDate={currentCalDate} weekStart={weekStart} onOpenDatePicker={() => setDatePickerVisible(true)} calendarMode={calendarMode} onToggleMode={() => setCalendarMode(m => m === 'month' ? 'week' : 'month')} />
+            <CalendarHeader isDark={isDark} C={C} currentDate={currentCalDate} weekStart={weekStart} onOpenDatePicker={() => setDatePickerVisible(true)} calendarMode={calendarMode} onToggleMode={() => setCalendarMode(m => m === 'month' ? 'week' : m === 'week' ? 'day' : 'month')} />
             <WeekdayHeader C={C} weekStart={weekStart} />
             {screenWidth > 0 && (
               <ReAnimated.View style={[calHeightStyle, { overflow: 'hidden' }]}>

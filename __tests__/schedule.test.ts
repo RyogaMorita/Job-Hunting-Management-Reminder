@@ -3,7 +3,7 @@ import {
   coversDate, expandDateRange, nextStatus, MAX_SPAN_DAYS,
   eventsConflict, findConflicts, collectTodos, daysBetween,
   EVENT_DURATION_MIN, TRAVEL_BUFFER_MIN, PREP_TEMPLATES, PROGRESS_FLOW,
-  stageDistribution, startOfWeekYmd, weeklyActivity, STAGE_BUCKETS,
+  stageDistribution, startOfWeekYmd, weeklyActivity, STAGE_BUCKETS, layoutDayEvents,
 } from '../lib/schedule';
 
 describe('日付ユーティリティ', () => {
@@ -377,5 +377,58 @@ describe('今週の動き', () => {
   test('履歴が無いものは無視する', () => {
     const r = weeklyActivity([{ status: '検討中' }], '2026-08-08', 1);
     expect(r).toEqual({ added: 0, advanced: 0 });
+  });
+});
+
+describe('バーチカル表示の配置', () => {
+  const at = (id: string, hour: string, minute = '00') =>
+    ({ id, company: id, date: '2026-05-09', hour, minute });
+
+  test('重ならない予定は全て1列', () => {
+    const r = layoutDayEvents([at('a', '10'), at('b', '13'), at('c', '15')]);
+    expect(r).toHaveLength(3);
+    expect(r.every(p => p.cols === 1 && p.col === 0)).toBe(true);
+  });
+
+  test('重なる2件は2列に分かれる', () => {
+    const r = layoutDayEvents([at('a', '10', '00'), at('b', '10', '30')]);
+    expect(r.map(p => p.col)).toEqual([0, 1]);
+    expect(r.every(p => p.cols === 2)).toBe(true);
+  });
+
+  test('別々の重なりは列数を共有しない', () => {
+    // 朝に2件重なり、夕方は1件だけ
+    const r = layoutDayEvents([at('a', '10', '00'), at('b', '10', '30'), at('c', '18')]);
+    const byId = Object.fromEntries(r.map(p => [p.event.id, p]));
+    expect(byId.a.cols).toBe(2);
+    expect(byId.b.cols).toBe(2);
+    expect(byId.c.cols).toBe(1);
+  });
+
+  test('空いた列は使い回す', () => {
+    // a:10:00-11:00, b:10:30-11:30, c:11:00-12:00 → c は a の列に入る
+    const r = layoutDayEvents([at('a', '10', '00'), at('b', '10', '30'), at('c', '11', '00')]);
+    const byId = Object.fromEntries(r.map(p => [p.event.id, p]));
+    expect(byId.a.col).toBe(0);
+    expect(byId.b.col).toBe(1);
+    expect(byId.c.col).toBe(0);
+  });
+
+  test('時刻のない予定は除外される', () => {
+    const r = layoutDayEvents([at('a', ''), at('b', '10')]);
+    expect(r.map(p => p.event.id)).toEqual(['b']);
+  });
+
+  test('開始と終了は分で返る', () => {
+    const r = layoutDayEvents([at('a', '09', '30')]);
+    expect(r[0].startMin).toBe(570);
+    expect(r[0].endMin).toBe(570 + 60);
+  });
+
+  test('入力の順番によらず結果が同じ', () => {
+    const fwd = layoutDayEvents([at('a', '10', '00'), at('b', '10', '30')]);
+    const rev = layoutDayEvents([at('b', '10', '30'), at('a', '10', '00')]);
+    const key = (r: typeof fwd) => r.map(p => `${p.event.id}:${p.col}/${p.cols}`).sort().join(',');
+    expect(key(fwd)).toBe(key(rev));
   });
 });
