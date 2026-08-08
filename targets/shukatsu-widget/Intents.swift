@@ -40,7 +40,7 @@ struct AdvanceStatusIntent: AppIntent {
 
         // 連打・古いスナップショットからのタップは無視する
         guard current.status == expectedStatus else { return .result() }
-        guard let next = nextStatus(current.status) else { return .result() }
+        guard let next = nextStatus(current.status, hasWebTest: current.hasWebTest) else { return .result() }
 
         // アプリ本体が次回フォアグラウンド時に取り込むまでの待ち行列に積む
         AppGroupHelper.appendPending(id: scheduleID, status: next)

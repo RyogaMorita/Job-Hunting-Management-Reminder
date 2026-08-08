@@ -378,6 +378,19 @@ function AnimatedCheckmark({ checked, color }: { checked: boolean; color: string
   );
 }
 
+/// やること1件の期限表示。期限切れ・当日・翌日は言葉にする。
+const todoDueLabel = (t: TodoItem): string => {
+  if (t.daysLeft === undefined) return '';
+  if (t.daysLeft < 0) return `${-t.daysLeft}日超過`;
+  if (t.daysLeft === 0) return '今日';
+  if (t.daysLeft === 1) return '明日';
+  return `あと${t.daysLeft}日`;
+};
+
+const TODO_KIND_LABEL: Record<TodoItem['kind'], string> = {
+  es: 'ES', webtest: 'Webテスト', offer: '内定', decline: '辞退連絡', custom: 'メモ',
+};
+
 // ─── 日付・時刻ピッカー（iOS標準のホイール） ─────────────────────────
 // 自作のScrollViewピッカーは操作感がiOS標準と違うため、
 // @react-native-community/datetimepicker の spinner に統一している。
@@ -965,6 +978,8 @@ const LIGHT = {
 // StyleSheet.create は静的で C（ダーク/ライト）を参照できないため、
 // ここにライトの既定値を置き、ダーク時は各所で C.xxx をインラインで重ねる。
 const DANGER = '#e74c3c';        // 削除・警告
+const NEUTRAL_GRAY = '#95A5A6';  // ステータス未設定時のフォールバック
+const SUCCESS = '#27AE60';       // 完了・チェック済み
 const CHIP_BG = '#f0f2f5';       // チップ/ピッカーの背景
 const ACCENT_BORDER = '#dde8ff'; // ACCENT の淡い枠線
 const SURFACE_MUTED = '#f8f8f8'; // 沈めた面
@@ -1425,6 +1440,8 @@ export default function App() {
         minute: s.minute,
         status: s.status,
         calendarColor: s.calendarColor ?? colors[s.status] ?? null,
+        // ウィジェットの→ボタンの遷移先をアプリ側と揃えるために渡す
+        hasWebTest: !!(s.webTestType || s.webTestDeadline),
       }));
       await SharedGroupPreferences.setItem(
         WIDGET_SCHEDULES_KEY,
@@ -1588,6 +1605,25 @@ export default function App() {
     () => schedules.filter(s => coversDate(s, selectedDate)),
     [schedules, selectedDate]
   );
+
+  // 同日に物理的に両立しない予定がないか。対面が絡む場合は移動時間ぶん広く見る。
+  const conflictIds = useMemo(
+    () => findConflicts(
+      schedules
+        .filter(s => s.date && s.hour && !['不合格', '完了', '内定辞退'].includes(s.status))
+        .map(s => ({ id: s.id, company: s.company, date: s.date, hour: s.hour, minute: s.minute, venueType: s.venueType }))
+    ),
+    [schedules]
+  );
+
+  // 全企業横断の「やること」。締切が近い順。
+  const todos = useMemo(
+    () => collectTodos(schedules, formatYmd(new Date())),
+    [schedules]
+  );
+  const overdueTodoCount = todos.filter(t => t.daysLeft !== undefined && t.daysLeft < 0).length;
+  // 辞退を決めたのに連絡できていない企業（調査では内々定保有者の57.4%が該当）
+  const declinePendingCount = todos.filter(t => t.kind === 'decline').length;
 
   // カレンダーの行数を計算（現在月のみ）
   const maxCalRows = useMemo(() => {
@@ -1854,7 +1890,8 @@ export default function App() {
           identifier: notifId,
           content: {
             title: `${item.company}`,
-            body: `${item.status}の予定が${day === '0' ? '今日' : day + '日後'}です（${item.date}${item.hour ? ' ' + item.hour + ':' + item.minute : ''}）`,
+            body: `${item.status}の予定が${day === '0' ? '今日' : day + '日後'}です（${item.date}${item.hour ? ' ' + item.hour + ':' + item.minute : ''}）`
+              + (item.venueType === 'onsite' ? `\n対面${item.venue ? '：' + item.venue : ''}` : item.venueType === 'online' ? '\nオンライン' : ''),
             sound: true,
           },
           trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: notifyDate },
@@ -1910,13 +1947,33 @@ export default function App() {
     setCheckModalItem(updated.find(s => s.id === item.id) ?? null);
   };
 
-  const addCustomCheck = async (item: Schedule) => {
-    if (!newCheckLabel.trim()) return;
-    const newC = { id: Date.now().toString(), label: newCheckLabel.trim(), checked: false };
+  const addCustomCheck = async (item: Schedule, label?: string, due?: string) => {
+    const text = (label ?? newCheckLabel).trim();
+    if (!text) return;
+    // 同じ内容を二重に足さない（テンプレートの連打対策）
+    if ((item.customChecklist ?? []).some(c => c.label === text && !c.checked)) return;
+    const newC = { id: `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, label: text, checked: false, due };
     const updated = schedules.map(s => s.id !== item.id ? s : { ...s, customChecklist: [...(s.customChecklist ?? []), newC] });
     await saveSchedules(updated);
     setCheckModalItem(updated.find(s => s.id === item.id) ?? null);
-    setNewCheckLabel('');
+    if (!label) setNewCheckLabel('');
+  };
+
+  /// チェック項目の期限を設定する
+  const setCustomCheckDue = async (item: Schedule, id: string, due: string) => {
+    const updated = schedules.map(s => s.id !== item.id ? s : {
+      ...s,
+      customChecklist: (s.customChecklist ?? []).map(c => c.id === id ? { ...c, due: due || undefined } : c),
+    });
+    await saveSchedules(updated);
+    setCheckModalItem(updated.find(s => s.id === item.id) ?? null);
+  };
+
+  /// 辞退の連絡を済ませたことを記録する
+  const markDeclineContacted = async (item: Schedule) => {
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    const updated = schedules.map(s => s.id !== item.id ? s : { ...s, declineContacted: true });
+    await saveSchedules(updated);
   };
 
   const deleteCustomCheck = async (item: Schedule, id: string) => {
@@ -2024,6 +2081,30 @@ export default function App() {
               <Text style={[styles.statLabel, { color: '#856404' }]}>内定</Text>
             </View>
           </View>
+
+          {/* やること：締切が企業カードに散らばるので、横断で1本にまとめて出す */}
+          {todos.length > 0 && (
+            <ReAnimated.View entering={FadeInDown.duration(260)} style={{ paddingHorizontal: 12, paddingBottom: 6 }}>
+              <RippleButton
+                style={{
+                  flexDirection: 'row', alignItems: 'center', gap: 8,
+                  backgroundColor: overdueTodoCount > 0 ? (isDark ? '#3a1414' : '#fdecea') : C.bg3,
+                  borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8,
+                  borderWidth: 1,
+                  borderColor: overdueTodoCount > 0 ? DANGER : 'transparent',
+                }}
+                onPress={() => setTodoModalVisible(true)}>
+                <Image source={ICONS.checklist} style={{ width: 15, height: 15, tintColor: overdueTodoCount > 0 ? DANGER : ACCENT }} resizeMode="contain" />
+                <Text style={{ fontSize: 12, fontWeight: 'bold', color: overdueTodoCount > 0 ? DANGER : C.text, flex: 1 }} numberOfLines={1}>
+                  やること {todos.length}件
+                  {overdueTodoCount > 0 ? `（期限切れ ${overdueTodoCount}）` : ''}
+                  {declinePendingCount > 0 ? `・辞退連絡 ${declinePendingCount}` : ''}
+                </Text>
+                <Text style={{ fontSize: 11, color: C.text3 }}>{todos[0].company} {todoDueLabel(todos[0])}</Text>
+              </RippleButton>
+            </ReAnimated.View>
+          )}
+
           {/* 2行目：広告（課金済みなら非表示→カレンダーが自動で上に移動） */}
           {!adFree && (
             <View style={{ width: '100%', height: 60, alignItems: 'center', justifyContent: 'center' }}>
@@ -2392,7 +2473,10 @@ export default function App() {
                                 <Text style={styles.rankText}>{item.rank}</Text>
                               </View>
                               <HighlightText text={item.company + (isInternal ? ' 🌸' : '')} query={searchQuery} style={[styles.itemTitle, { color: isInactive ? '#888' : C.text, flex: 1 }]} />
-                              {cdLabel && <View style={{ backgroundColor: cdLabel === '今日' ? '#e74c3c' : '#f39c12', borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2 }}>
+                              {conflictIds.has(item.id) && <View style={{ backgroundColor: DANGER, borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2 }}>
+                                <Text style={{ color: '#fff', fontSize: 10, fontWeight: 'bold' }}>日程重複</Text>
+                              </View>}
+                              {cdLabel && <View style={{ backgroundColor: cdLabel === '今日' ? DANGER : '#f39c12', borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2 }}>
                                 <Text style={{ color: '#fff', fontSize: 10, fontWeight: 'bold' }}>{cdLabel}</Text>
                               </View>}
                             </View>
@@ -2460,7 +2544,10 @@ export default function App() {
                               query={searchQuery}
                               style={[styles.itemTitle, { color: isInactive ? '#888' : C.text, flex: 1 }]}
                             />
-                            {cdLabel && <View style={{ backgroundColor: cdLabel === '今日' ? '#e74c3c' : '#f39c12', borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2 }}>
+                            {conflictIds.has(item.id) && <View style={{ backgroundColor: DANGER, borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2 }}>
+                                <Text style={{ color: '#fff', fontSize: 10, fontWeight: 'bold' }}>日程重複</Text>
+                              </View>}
+                              {cdLabel && <View style={{ backgroundColor: cdLabel === '今日' ? DANGER : '#f39c12', borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2 }}>
                               <Text style={{ color: '#fff', fontSize: 10, fontWeight: 'bold' }}>{cdLabel}</Text>
                             </View>}
                           </View>
@@ -2508,11 +2595,19 @@ export default function App() {
                               }</Text>
                             </RippleButton>
                           ) : null}
-                          {['説明会', 'GD'].includes(item.status) && !isInactive ? (
+                          {EVENT_STATUSES.includes(item.status) && !isInactive ? (
                             <RippleButton
-                              style={[styles.nextStatusBtn, { borderColor: '#95A5A6' }]}
+                              style={[styles.nextStatusBtn, { borderColor: NEUTRAL_GRAY }]}
                               onPress={() => completeStatus(item)}>
-                              <Text style={[styles.nextStatusBtnText, { color: '#95A5A6' }]}>完了 →</Text>
+                              <Text style={[styles.nextStatusBtnText, { color: NEUTRAL_GRAY }]}>完了 →</Text>
+                            </RippleButton>
+                          ) : null}
+                          {/* 辞退を決めたのに連絡できていない企業を目立たせる */}
+                          {item.status === '内定辞退' && !item.declineContacted ? (
+                            <RippleButton
+                              style={[styles.nextStatusBtn, { borderColor: DANGER, backgroundColor: DANGER + '14' }]}
+                              onPress={() => markDeclineContacted(item)}>
+                              <Text style={[styles.nextStatusBtnText, { color: DANGER }]} numberOfLines={1}>連絡済にする</Text>
                             </RippleButton>
                           ) : null}
                         </View>
@@ -3347,21 +3442,53 @@ export default function App() {
                   );
                 })}
 
-                <View style={{ borderTopWidth: 1, borderColor: '#f0f0f0', marginTop: 16, marginBottom: 4 }} />
+                <View style={{ borderTopWidth: 1, borderColor: LIGHT.border2, marginTop: 16, marginBottom: 4 }} />
+
+                {/* 現在のステータスに応じた準備テンプレート */}
+                {checkModalItem && (PREP_TEMPLATES[checkModalItem.status]?.length ?? 0) > 0 && (
+                  <>
+                    <Text style={[styles.label, { color: C.text3 }]}>
+                      {checkModalItem.status}の準備（タップで追加）
+                    </Text>
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+                      {PREP_TEMPLATES[checkModalItem.status].map(tpl => {
+                        const already = (checkModalItem.customChecklist ?? []).some(c => c.label === tpl);
+                        return (
+                          <RippleButton key={tpl}
+                            style={[styles.miniChip, already && { opacity: 0.35 }]}
+                            onPress={() => { if (!already) { Haptics.selectionAsync(); addCustomCheck(checkModalItem, tpl); } }}>
+                            <Text style={styles.miniChipText}>{already ? '✓ ' : '＋ '}{tpl}</Text>
+                          </RippleButton>
+                        );
+                      })}
+                    </View>
+                  </>
+                )}
+
                 <Text style={[styles.label, { color: C.text3 }]}>カスタム項目</Text>
                 {(checkModalItem?.customChecklist ?? []).length === 0 && (
                   <Text style={{ fontSize: 12, color: '#bbb', marginBottom: 8, paddingLeft: 8 }}>追加した項目がここに表示されます</Text>
                 )}
                 {(checkModalItem?.customChecklist ?? []).map(c => (
-                  <View key={c.id} style={[styles.checkRow, { borderColor: C.border2 }]}>
-                    <TouchableOpacity onPress={() => checkModalItem && toggleCustomCheck(checkModalItem, c.id)}>
-                      <AnimatedCheckmark checked={c.checked} color="#27AE60" />
-                    </TouchableOpacity>
-                    <Text style={[styles.checkLabel, { flex: 1 }, c.checked && { color: '#27AE60', fontWeight: 'bold' }]}>{c.label}</Text>
-                    <TouchableOpacity onPress={() => checkModalItem && deleteCustomCheck(checkModalItem, c.id)}
-                      style={{ paddingHorizontal: 8, paddingVertical: 4 }}>
-                      <Text style={{ color: '#ccc', fontSize: 16 }}>✕</Text>
-                    </TouchableOpacity>
+                  <View key={c.id} style={{ borderBottomWidth: 1, borderColor: C.border2, paddingVertical: 4 }}>
+                    <View style={[styles.checkRow, { borderColor: 'transparent', borderBottomWidth: 0 }]}>
+                      <TouchableOpacity onPress={() => checkModalItem && toggleCustomCheck(checkModalItem, c.id)}>
+                        <AnimatedCheckmark checked={c.checked} color={SUCCESS} />
+                      </TouchableOpacity>
+                      <Text style={[styles.checkLabel, { flex: 1 }, c.checked && { color: SUCCESS, fontWeight: 'bold' }]}>{c.label}</Text>
+                      <TouchableOpacity onPress={() => checkModalItem && deleteCustomCheck(checkModalItem, c.id)}
+                        style={{ paddingHorizontal: 8, paddingVertical: 4 }}>
+                        <Text style={{ color: '#ccc', fontSize: 16 }}>✕</Text>
+                      </TouchableOpacity>
+                    </View>
+                    {!c.checked && (
+                      <View style={{ paddingLeft: 34, paddingRight: 8, paddingBottom: 4 }}>
+                        <WheelDateField
+                          label="期限" value={c.due ?? ''} C={C} placeholder="なし"
+                          onChange={ymd => checkModalItem && setCustomCheckDue(checkModalItem, c.id, ymd)}
+                        />
+                      </View>
+                    )}
                   </View>
                 ))}
                 <View style={styles.customAddRow}>
@@ -3427,6 +3554,68 @@ export default function App() {
               </View>
             </View>
           </KeyboardAvoidingView>
+        </Modal>
+
+        {/* ── やること一覧（全企業横断） ───────────────────────────── */}
+        <Modal visible={todoModalVisible} animationType="slide" transparent onRequestClose={() => setTodoModalVisible(false)}>
+          <View style={styles.modalOverlay}>
+            <View style={[styles.modalContent, { backgroundColor: C.card, maxHeight: '85%' }]}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }}>
+                <Text style={[styles.modalTitle, { color: C.text, flex: 1 }]}>やること</Text>
+                <TouchableOpacity onPress={() => setTodoModalVisible(false)} style={{ padding: 6 }}>
+                  <Text style={{ fontSize: 18, color: C.text3 }}>✕</Text>
+                </TouchableOpacity>
+              </View>
+
+              {todos.length === 0 ? (
+                <Text style={{ fontSize: 13, color: C.text3, textAlign: 'center', paddingVertical: 24 }}>
+                  期限のあるやることはありません
+                </Text>
+              ) : (
+                <ScrollView>
+                  {todos.map((t, i) => {
+                    const overdue = t.daysLeft !== undefined && t.daysLeft < 0;
+                    const soon = t.daysLeft !== undefined && t.daysLeft >= 0 && t.daysLeft <= 2;
+                    const item = schedules.find(s => s.id === t.scheduleId);
+                    return (
+                      <ReAnimated.View key={t.key} entering={FadeInDown.delay(Math.min(i, 8) * 40).duration(240)}>
+                        <RippleButton
+                          style={{
+                            flexDirection: 'row', alignItems: 'center', gap: 8,
+                            paddingVertical: 11, borderBottomWidth: 0.5, borderBottomColor: C.border2,
+                          }}
+                          onPress={() => { setTodoModalVisible(false); if (item) openDetail(item); }}>
+                          <View style={{
+                            paddingHorizontal: 6, paddingVertical: 3, borderRadius: 5,
+                            backgroundColor: (statusColors[item?.status ?? ''] ?? NEUTRAL_GRAY) + '22',
+                          }}>
+                            <Text style={{ fontSize: 9, fontWeight: 'bold', color: statusColors[item?.status ?? ''] ?? NEUTRAL_GRAY }}>
+                              {TODO_KIND_LABEL[t.kind]}
+                            </Text>
+                          </View>
+                          <View style={{ flex: 1 }}>
+                            <Text style={{ fontSize: 13, fontWeight: '600', color: C.text }} numberOfLines={1}>{t.company}</Text>
+                            <Text style={{ fontSize: 11, color: C.text2, marginTop: 1 }} numberOfLines={1}>{t.label}</Text>
+                          </View>
+                          {t.daysLeft !== undefined && (
+                            <View style={{
+                              paddingHorizontal: 7, paddingVertical: 3, borderRadius: 8,
+                              backgroundColor: overdue ? DANGER : soon ? '#f39c12' : C.bg3,
+                            }}>
+                              <Text style={{
+                                fontSize: 10, fontWeight: 'bold',
+                                color: overdue || soon ? '#fff' : C.text2,
+                              }}>{todoDueLabel(t)}</Text>
+                            </View>
+                          )}
+                        </RippleButton>
+                      </ReAnimated.View>
+                    );
+                  })}
+                </ScrollView>
+              )}
+            </View>
+          </View>
         </Modal>
 
       </View>

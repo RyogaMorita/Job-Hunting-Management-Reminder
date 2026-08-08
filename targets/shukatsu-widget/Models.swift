@@ -11,10 +11,8 @@ struct WidgetSchedule: Codable, Identifiable, Hashable {
     let minute: String
     let status: String
     let calendarColor: String?
-
-    enum CodingKeys: String, CodingKey {
-        case id, company, date, endDate, hour, minute, status, calendarColor
-    }
+    /// Webテストの登録があるか。→ボタンの遷移先をアプリ側と揃えるために持つ
+    let hasWebTest: Bool
 
     /// 1件でも欠けたフィールドがあると配列全体のデコードが失敗し、
     /// 4つのウィジェットが同時に真っ白になる。欠損・型違いは空文字で受ける。
@@ -33,10 +31,16 @@ struct WidgetSchedule: Codable, Identifiable, Hashable {
         minute = str(.minute)
         status = str(.status)
         calendarColor = try? c.decode(String.self, forKey: .calendarColor)
+        hasWebTest = (try? c.decode(Bool.self, forKey: .hasWebTest)) ?? false
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, company, date, endDate, hour, minute, status, calendarColor, hasWebTest
     }
 
     init(id: String, company: String, date: String, endDate: String?,
-         hour: String, minute: String, status: String, calendarColor: String?) {
+         hour: String, minute: String, status: String, calendarColor: String?,
+         hasWebTest: Bool = false) {
         self.id = id
         self.company = company
         self.date = date
@@ -45,6 +49,7 @@ struct WidgetSchedule: Codable, Identifiable, Hashable {
         self.minute = minute
         self.status = status
         self.calendarColor = calendarColor
+        self.hasWebTest = hasWebTest
     }
 
     /// 終了日（未設定・不正な場合は開始日）
@@ -200,7 +205,7 @@ enum AppGroupHelper {
             return WidgetSchedule(
                 id: s.id, company: s.company, date: s.date, endDate: s.endDate,
                 hour: s.hour, minute: s.minute, status: newStatus,
-                calendarColor: statusColors[newStatus]
+                calendarColor: statusColors[newStatus], hasWebTest: s.hasWebTest
             )
         }
     }
@@ -240,18 +245,21 @@ enum AppGroupHelper {
 // MARK: - Status
 
 /// 一覧・直近から除外するステータス（選考が動かないもの）
-let INACTIVE_STATUSES: Set<String> = ["内定", "内定辞退", "不合格", "完了"]
+let INACTIVE_STATUSES: Set<String> = ["内定", "内定承諾", "内定辞退", "不合格", "完了"]
 
 let statusColors: [String: String] = [
     "検討中": "#95A5A6",
     "説明会": "#00BCD4",
+    "ワークショップ": "#26A69A",
     "ES締切": "#27AE60",
     "ES提出済": "#2980B9",
+    "Webテスト": "#5C6BC0",
     "GD": "#FF9800",
     "1次面接": "#8E44AD",
     "2次面接": "#E67E22",
     "最終面接": "#E74C3C",
     "内定": "#E91E8C",
+    "内定承諾": "#C2185B",
     "インターンES締切": "#F59E0B",
     "インターン面接": "#EF6C00",
     "インターン確定": "#EC407A",
@@ -261,12 +269,17 @@ let statusColors: [String: String] = [
     "完了": "#95A5A6",
 ]
 
-/// App.tsx の PROGRESS_FLOW / INTERN_FLOW と同一に保つこと
-private let PROGRESS_FLOW = ["検討中", "ES提出済", "1次面接", "2次面接", "最終面接", "内定"]
+/// lib/schedule.ts の PROGRESS_FLOW / INTERN_FLOW と同一に保つこと
+private let PROGRESS_FLOW = ["検討中", "ES提出済", "Webテスト", "1次面接", "2次面接", "最終面接", "内定"]
 private let INTERN_FLOW = ["インターンES締切", "インターン面接", "インターン確定"]
 
-func nextStatus(_ current: String) -> String? {
+/// 次の選考段階。これ以上進めないものは nil。
+///
+/// Webテストは全社が課すわけではないので、テスト情報がある企業でだけ
+/// ES提出済 → Webテスト を挟む。無ければ従来どおり 1次面接へ進む。
+func nextStatus(_ current: String, hasWebTest: Bool = false) -> String? {
     if current == "ES締切" { return "ES提出済" }
+    if current == "ES提出済" { return hasWebTest ? "Webテスト" : "1次面接" }
     if let i = PROGRESS_FLOW.firstIndex(of: current), i < PROGRESS_FLOW.count - 1 {
         return PROGRESS_FLOW[i + 1]
     }
