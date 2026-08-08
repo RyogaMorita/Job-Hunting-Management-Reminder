@@ -77,6 +77,10 @@ const WIDGET_WEEK_START_KEY = 'widget_week_start_v1';
 const GENRES_KEY = '@genres_v11';
 const STATUS_COLORS_KEY = '@status_colors_v2';
 const STATUS_OPTIONS_KEY = '@status_options_v1';
+// v1 の保存データには後から足した Webテスト / 内定承諾 が入っておらず、
+// 読み込み時に既定値を丸ごと上書きしてしまうため選択肢に出てこなかった。
+// v2 へ一度だけ差し込み直す。以降のユーザー削除は v2 側で保持される。
+const STATUS_OPTIONS_KEY_V2 = '@status_options_v2';
 const TDU_BLUE = '#003366';
 const ACCENT = '#1a6bcc';
 
@@ -424,8 +428,9 @@ function WheelDateField({
         <RippleButton
           style={[styles.input, { flex: 1, backgroundColor: C.inputBg, justifyContent: 'center' }]}
           onPress={() => { setDraft(null); setOpen(v => !v); }}>
-          <Text style={{ fontSize: 15, color: value ? C.text : '#aaa' }}>
-            {value ? value.replace(/-/g, '/') : placeholder}
+          {/* 開いている間はホイールの現在値を出す。確定前の値と表示が食い違うと紛らわしいため */}
+          <Text style={{ fontSize: 15, color: open || value ? C.text : '#aaa' }}>
+            {open ? formatYmd(current).replace(/-/g, '/') : (value ? value.replace(/-/g, '/') : placeholder)}
           </Text>
         </RippleButton>
         {clearable && value ? (
@@ -438,7 +443,7 @@ function WheelDateField({
       {open && (
         <ReAnimated.View
           entering={FadeInDown.duration(180)}
-          style={{ backgroundColor: C.bg2, borderRadius: 12, borderWidth: 1, borderColor: C.border, marginTop: 4 }}>
+          style={{ backgroundColor: C.bg2, borderRadius: 12, borderWidth: 1, borderColor: C.border, marginTop: 4, overflow: 'hidden' }}>
           <DateTimePicker
             value={current}
             mode="date"
@@ -447,7 +452,7 @@ function WheelDateField({
             minimumDate={minimumDate}
             themeVariant={C === DARK ? 'dark' : 'light'}
             onChange={(_e, d) => { if (d) setDraft(d); }}
-            style={{ height: 180 }}
+            style={{ height: 180, alignSelf: 'stretch' }}
           />
           <RippleButton
             style={{ margin: 8, backgroundColor: TDU_BLUE, borderRadius: 8, padding: 10, alignItems: 'center' }}
@@ -488,7 +493,12 @@ function WheelTimeField({
         <RippleButton
           style={[styles.input, { flex: 1, backgroundColor: C.inputBg, justifyContent: 'center' }]}
           onPress={() => { setDraft(null); setOpen(v => !v); }}>
-          <Text style={{ fontSize: 15, color: shown ? C.text : '#aaa' }}>{shown || '時刻を設定'}</Text>
+          {/* 開いている間はホイールの現在値を出す */}
+          <Text style={{ fontSize: 15, color: open || shown ? C.text : '#aaa' }}>
+            {open
+              ? `${String(current.getHours()).padStart(2, '0')}:${String(current.getMinutes()).padStart(2, '0')}`
+              : (shown || '時刻を設定')}
+          </Text>
         </RippleButton>
         {shown ? (
           <TouchableOpacity onPress={() => { onChange('', ''); setDraft(null); setOpen(false); }}
@@ -500,7 +510,7 @@ function WheelTimeField({
       {open && (
         <ReAnimated.View
           entering={FadeInDown.duration(180)}
-          style={{ backgroundColor: C.bg2, borderRadius: 12, borderWidth: 1, borderColor: C.border, marginTop: 4 }}>
+          style={{ backgroundColor: C.bg2, borderRadius: 12, borderWidth: 1, borderColor: C.border, marginTop: 4, overflow: 'hidden' }}>
           <DateTimePicker
             value={current}
             mode="time"
@@ -509,7 +519,7 @@ function WheelTimeField({
             minuteInterval={5}
             themeVariant={C === DARK ? 'dark' : 'light'}
             onChange={(_e, d) => { if (d) setDraft(d); }}
-            style={{ height: 180 }}
+            style={{ height: 180, alignSelf: 'stretch' }}
           />
           <RippleButton
             style={{ margin: 8, backgroundColor: TDU_BLUE, borderRadius: 8, padding: 10, alignItems: 'center' }}
@@ -1475,8 +1485,27 @@ export default function App() {
       const ws = await AsyncStorage.getItem('@week_start');
       if (ws !== null) setWeekStart(JSON.parse(ws));
       await syncWidgetWeekStart(ws !== null ? JSON.parse(ws) : 0);
-      const so = await AsyncStorage.getItem(STATUS_OPTIONS_KEY);
-      if (so) { setStatusOptions(JSON.parse(so)); }
+      // v2 があればそれが正。無ければ v1 に既定値の不足分を差し込んで v2 として保存する。
+      // 差し込み位置は DEFAULT_STATUS_OPTIONS の並び順に合わせるので、
+      // Webテストは「ES提出済」の直後、内定承諾は「内定」の直後に入る。
+      const so2 = await AsyncStorage.getItem(STATUS_OPTIONS_KEY_V2);
+      if (so2) {
+        setStatusOptions(JSON.parse(so2));
+      } else {
+        const so = await AsyncStorage.getItem(STATUS_OPTIONS_KEY);
+        const merged: string[] = so ? JSON.parse(so) : [...DEFAULT_STATUS_OPTIONS];
+        DEFAULT_STATUS_OPTIONS.forEach((st, i) => {
+          if (merged.includes(st)) return;
+          let at = merged.length;
+          for (let j = i - 1; j >= 0; j--) {
+            const prev = merged.indexOf(DEFAULT_STATUS_OPTIONS[j]);
+            if (prev !== -1) { at = prev + 1; break; }
+          }
+          merged.splice(at, 0, st);
+        });
+        setStatusOptions(merged);
+        await AsyncStorage.setItem(STATUS_OPTIONS_KEY_V2, JSON.stringify(merged));
+      }
 
       // 起動回数カウント
       const launchCount = await AsyncStorage.getItem('@launch_count');
@@ -1554,7 +1583,7 @@ export default function App() {
   };
   const saveStatusOptions = async (data: string[]) => {
     setStatusOptions(data);
-    await AsyncStorage.setItem(STATUS_OPTIONS_KEY, JSON.stringify(data));
+    await AsyncStorage.setItem(STATUS_OPTIONS_KEY_V2, JSON.stringify(data));
   };
 
   // ─── 統計 ──────────────────────────────────────────────────────
@@ -2086,8 +2115,10 @@ export default function App() {
     await saveSchedules(updated);
   };
 
-  const advanceStatus = async (item: Schedule) => {
-    const ns = nextStatus(item.status, !!(item.webTestType || item.webTestDeadline));
+  // target を渡すと次段階ではなくそこへ直接移す。
+  // 内定は「承諾」か「辞退」かの分岐で一本道にならないため、カード側から明示的に指定する。
+  const advanceStatus = async (item: Schedule, target?: string) => {
+    const ns = target ?? nextStatus(item.status, !!(item.webTestType || item.webTestDeadline));
     if (!ns) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     const autoChecks = STATUS_TO_CHECKS[ns] ?? [];
@@ -2713,6 +2744,24 @@ export default function App() {
                               <Text style={[styles.nextStatusBtnText, { color: NEUTRAL_GRAY }]}>完了 →</Text>
                             </RippleButton>
                           ) : null}
+                          {/* 内定は一本道で進めないので承諾・辞退の2択を出す */}
+                          {item.status === '内定' ? (
+                            <>
+                              <RippleButton
+                                style={[styles.nextStatusBtn, { borderColor: statusColorOf('内定承諾') }]}
+                                onPress={() => advanceStatus(item, '内定承諾')}>
+                                <Text style={[styles.nextStatusBtnText, { color: statusColorOf('内定承諾') }]} numberOfLines={1}>承諾 →</Text>
+                              </RippleButton>
+                              <RippleButton
+                                style={[styles.nextStatusBtn, { borderColor: statusColorOf('内定辞退') }]}
+                                onPress={() => Alert.alert('内定辞退', `「${item.company}」を辞退しますか？`, [
+                                  { text: 'キャンセル', style: 'cancel' },
+                                  { text: '辞退する', style: 'destructive', onPress: () => advanceStatus(item, '内定辞退') },
+                                ])}>
+                                <Text style={[styles.nextStatusBtnText, { color: statusColorOf('内定辞退') }]} numberOfLines={1}>辞退 →</Text>
+                              </RippleButton>
+                            </>
+                          ) : null}
                           {/* 辞退を決めたのに連絡できていない企業を目立たせる */}
                           {item.status === '内定辞退' && !item.declineContacted ? (
                             <RippleButton
@@ -3294,25 +3343,21 @@ export default function App() {
                   })}
                 </View>
 
-                <View style={{ flexDirection: 'row', gap: 10 }}>
-                  <View style={{ flex: 2 }}>
-                    <Text style={[styles.label, { color: C.text3 }]}>日付</Text>
-                    <WheelDateField value={selDate} onChange={setSelDate} C={C} placeholder="日付なし" />
-                    <WheelDateField
-                      label="終了日" value={selEndDate} onChange={setSelEndDate} C={C}
-                      placeholder="終了日なし"
-                      minimumDate={selDate ? parseYmd(selDate) : undefined}
-                    />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={[styles.label, { color: C.text3 }]}>時間</Text>
-                    <WheelTimeField
-                      hour={selHour} minute={selMinute}
-                      onChange={(h, m) => { setSelHour(h); setSelMinute(m); }}
-                      C={C}
-                    />
-                  </View>
-                </View>
+                {/* iOSのホイールは幅を詰めるとクリップされるので、
+                    ピッカーを開く行はすべて全幅にする（横並びにしない） */}
+                <Text style={[styles.label, { color: C.text3 }]}>日付</Text>
+                <WheelDateField value={selDate} onChange={setSelDate} C={C} placeholder="日付なし" />
+                <WheelDateField
+                  label="終了日" value={selEndDate} onChange={setSelEndDate} C={C}
+                  placeholder="終了日なし"
+                  minimumDate={selDate ? parseYmd(selDate) : undefined}
+                />
+                <Text style={[styles.label, { color: C.text3 }]}>時間</Text>
+                <WheelTimeField
+                  hour={selHour} minute={selMinute}
+                  onChange={(h, m) => { setSelHour(h); setSelMinute(m); }}
+                  C={C}
+                />
 
                 {/* 会場（一次はWeb・最終は対面のように段階で変わる） */}
                 <Text style={[styles.label, { color: C.text3 }]}>実施形式</Text>
@@ -3593,8 +3638,9 @@ export default function App() {
                         <Text style={{ color: '#ccc', fontSize: 16 }}>✕</Text>
                       </TouchableOpacity>
                     </View>
+                    {/* ホイールの幅を確保するため左の字下げは浅くしている */}
                     {!c.checked && (
-                      <View style={{ paddingLeft: 34, paddingRight: 8, paddingBottom: 4 }}>
+                      <View style={{ paddingLeft: 8, paddingRight: 8, paddingBottom: 4 }}>
                         <WheelDateField
                           label="期限" value={c.due ?? ''} C={C} placeholder="なし"
                           onChange={ymd => checkModalItem && setCustomCheckDue(checkModalItem, c.id, ymd)}
