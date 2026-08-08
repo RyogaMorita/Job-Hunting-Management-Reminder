@@ -19,6 +19,7 @@ import {
   NativeModules, AppState,
   StyleProp, ViewStyle, TextStyle, ImageSourcePropType,
 } from 'react-native';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { Calendar } from 'react-native-calendars';
 import type { DateData, CalendarProps } from 'react-native-calendars';
 import { StatusBar } from 'expo-status-bar';
@@ -36,8 +37,10 @@ import {
 import { LISTED_COMPANIES, CompanyEntry } from './companies_v2';
 // 日付・ステータス遷移のロジックは lib/ に切り出してテストしている（__tests__/schedule.test.ts）
 import {
-  addDaysYmd, coversDate, dateRangeStr, expandDateRange, nextStatus,
+  addDaysYmd, collectTodos, formatYmd, parseYmd, coversDate, dateRangeStr, expandDateRange,
+  findConflicts, nextStatus, PREP_TEMPLATES,
 } from './lib/schedule';
+import type { TodoItem, VenueType } from './lib/schedule';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -78,36 +81,55 @@ const TDU_BLUE = '#003366';
 const ACCENT = '#1a6bcc';
 
 const INTERN_STATUSES = ['インターンES締切', 'インターン面接', 'インターン確定'];
-const SEPARATE_STATUSES = ['説明会', 'GD', ...INTERN_STATUSES]; // 本選考と別トラック
-const DEFAULT_STATUS_OPTIONS = ['検討中', '説明会', 'ES締切', 'ES提出済', 'GD', '1次面接', '2次面接', '最終面接', '内定', 'インターンES締切', 'インターン面接', 'インターン確定', '内定辞退', '不合格', '完了'];
+// 本選考の段階とは別に数える単発イベント
+const EVENT_STATUSES = ['説明会', 'ワークショップ', 'GD'];
+const SEPARATE_STATUSES = [...EVENT_STATUSES, ...INTERN_STATUSES]; // 本選考と別トラック
+const DEFAULT_STATUS_OPTIONS = [
+  '検討中', '説明会', 'ワークショップ', 'ES締切', 'ES提出済', 'Webテスト', 'GD',
+  '1次面接', '2次面接', '最終面接', '内定', '内定承諾',
+  'インターンES締切', 'インターン面接', 'インターン確定',
+  '内定辞退', '不合格', '完了',
+];
 const STATUS_OPTIONS = DEFAULT_STATUS_OPTIONS; // 後方互換用
 const STATUS_PRIORITY: Record<string, number> = {
-  '内定': 8, '最終面接': 7, '2次面接': 6, '1次面接': 5, 'GD': 4, 'ES提出済': 3, 'ES締切': 2, '説明会': 1, '検討中': 0,
+  '内定承諾': 9, '内定': 8, '最終面接': 7, '2次面接': 6, '1次面接': 5, 'GD': 4,
+  'Webテスト': 3.5, 'ES提出済': 3, 'ES締切': 2, 'ワークショップ': 1.5, '説明会': 1, '検討中': 0,
   'インターン確定': 0.3, 'インターン面接': 0.2, 'インターンES締切': 0.1,
   '内定辞退': -1, '不合格': -2, '完了': -3,
 };
-const STATUS_SORT_ORDER = ['内定', '最終面接', '2次面接', '1次面接', 'GD', 'ES提出済', 'ES締切', '説明会', '検討中', 'インターン確定', 'インターン面接', 'インターンES締切', '内定辞退', '不合格', '完了'];
+const STATUS_SORT_ORDER = [
+  '内定承諾', '内定', '最終面接', '2次面接', '1次面接', 'GD', 'Webテスト', 'ES提出済', 'ES締切',
+  'ワークショップ', '説明会', '検討中',
+  'インターン確定', 'インターン面接', 'インターンES締切', '内定辞退', '不合格', '完了',
+];
 // 持ち駒トラックグループ（同名企業でも別トラックは別行表示）
 const trackGroup = (status: string): string => {
-  if (['説明会', 'GD'].includes(status)) return '説明会GD';
+  if (EVENT_STATUSES.includes(status)) return 'イベント';
   if (INTERN_STATUSES.includes(status)) return 'インターン';
   return '本選考';
 };
 // ステータスに対応するチェックリスト自動チェック
 const STATUS_TO_CHECKS: Record<string, string[]> = {
   '説明会': [],
+  'ワークショップ': [],
   'ES締切': [],
   'ES提出済': ['ES提出'],
+  'Webテスト': ['ES提出', 'Webテスト受検'],
   'GD': ['ES提出'],
   '1次面接': ['ES提出', '1次面接'],
   '2次面接': ['ES提出', '1次面接', '2次面接'],
   '最終面接': ['ES提出', '1次面接', '2次面接', '最終面接'],
   '内定': ['ES提出', '1次面接', '2次面接', '最終面接', '内定'],
+  '内定承諾': ['ES提出', '1次面接', '2次面接', '最終面接', '内定'],
   '内定辞退': ['ES提出', '1次面接', '2次面接', '最終面接', '内定'],
   '不合格': [],
   '検討中': [],
 };
-const CHECKLIST_STEPS = ['ES提出', '1次面接', '2次面接', '最終面接', '内定'];
+const CHECKLIST_STEPS = ['ES提出', 'Webテスト受検', '1次面接', '2次面接', '最終面接', '内定'];
+
+// Webテストの種別。SPIは受検場所ごとに予約手続きが違うため分けている。
+// テストセンターの結果は他社にも使い回せる。
+const WEB_TEST_TYPES = ['SPI（テストセンター）', 'SPI（自宅Web）', '玉手箱', 'TG-WEB', 'GAB / CAB', 'その他'];
 // ─── アイコン画像 ────────────────────────────────────────────
 const ICONS = {
   bell:         require('./assets/bell.png'),
@@ -145,7 +167,18 @@ interface Schedule {
   status: string; note: string; url: string; userId: string; password: string;
   rank: string; genreId: string; calendarColor?: string;
   checklist: Record<string, boolean>;
-  customChecklist: { id: string; label: string; checked: boolean }[];
+  customChecklist: { id: string; label: string; checked: boolean; due?: string }[];
+  // 会場（一次はWeb・最終は対面のように段階で変わる）
+  venueType?: VenueType;
+  meetingUrl?: string;   // オンラインの接続URL
+  venue?: string;        // 対面の会場・最寄駅
+  // Webテスト（ES締切とは別軸の期限）
+  webTestType?: string;
+  webTestDeadline?: string;
+  webTestBookedAt?: string;  // 予約日時（会場受検の場合）
+  webTestVenue?: string;
+  // 辞退の連絡を済ませたか
+  declineContacted?: boolean;
   notifyEnabled?: boolean;
   notifySettings?: NotifySetting;
   statusHistory?: { status: string; changedAt: string }[];
@@ -184,13 +217,16 @@ type StatusColors = Record<string, string>;
 const DEFAULT_STATUS_COLORS: StatusColors = {
   '検討中': '#95A5A6',
   '説明会': '#00BCD4',
+  'ワークショップ': '#26A69A',
   'ES締切': '#27AE60',
   'ES提出済': '#2980B9',
+  'Webテスト': '#5C6BC0',
   'GD': '#FF9800',
   '1次面接': '#8E44AD',
   '2次面接': '#E67E22',
   '最終面接': '#E74C3C',
   '内定': '#E91E8C',
+  '内定承諾': '#C2185B',
   'インターンES締切': '#F59E0B',
   'インターン面接': '#EF6C00',
   'インターン確定': '#EC407A',
@@ -342,6 +378,120 @@ function AnimatedCheckmark({ checked, color }: { checked: boolean; color: string
   );
 }
 
+// ─── 日付・時刻ピッカー（iOS標準のホイール） ─────────────────────────
+// 自作のScrollViewピッカーは操作感がiOS標準と違うため、
+// @react-native-community/datetimepicker の spinner に統一している。
+
+function WheelDateField({
+  label, value, onChange, C, placeholder = '未設定', minimumDate, clearable = true,
+}: {
+  label?: string; value: string; onChange: (ymd: string) => void; C: typeof LIGHT;
+  placeholder?: string; minimumDate?: Date; clearable?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const current = value ? parseYmd(value) : new Date();
+
+  return (
+    <View style={{ marginBottom: 6 }}>
+      <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
+        {label ? <Text style={{ fontSize: 12, color: C.text3, width: 52 }}>{label}</Text> : null}
+        <RippleButton
+          style={[styles.input, { flex: 1, backgroundColor: C.inputBg, justifyContent: 'center' }]}
+          onPress={() => setOpen(v => !v)}>
+          <Text style={{ fontSize: 15, color: value ? C.text : '#aaa' }}>
+            {value ? value.replace(/-/g, '/') : placeholder}
+          </Text>
+        </RippleButton>
+        {clearable && value ? (
+          <TouchableOpacity onPress={() => { onChange(''); setOpen(false); }}
+            style={{ paddingHorizontal: 8, paddingVertical: 10 }}>
+            <Text style={{ color: '#aaa', fontSize: 16 }}>✕</Text>
+          </TouchableOpacity>
+        ) : null}
+      </View>
+      {open && (
+        <ReAnimated.View
+          entering={FadeInDown.duration(180)}
+          style={{ backgroundColor: C.bg2, borderRadius: 12, borderWidth: 1, borderColor: C.border, marginTop: 4 }}>
+          <DateTimePicker
+            value={current}
+            mode="date"
+            display="spinner"
+            locale="ja-JP"
+            minimumDate={minimumDate}
+            themeVariant={C === DARK ? 'dark' : 'light'}
+            onChange={(_e, d) => { if (d) onChange(formatYmd(d)); }}
+            style={{ height: 180 }}
+          />
+          <RippleButton
+            style={{ margin: 8, backgroundColor: TDU_BLUE, borderRadius: 8, padding: 10, alignItems: 'center' }}
+            onPress={() => { if (!value) onChange(formatYmd(current)); setOpen(false); }}>
+            <Text style={{ color: '#fff', fontWeight: 'bold' }}>完了</Text>
+          </RippleButton>
+        </ReAnimated.View>
+      )}
+    </View>
+  );
+}
+
+function WheelTimeField({
+  label, hour, minute, onChange, C,
+}: {
+  label?: string; hour: string; minute: string;
+  onChange: (h: string, m: string) => void; C: typeof LIGHT;
+}) {
+  const [open, setOpen] = useState(false);
+  const current = new Date();
+  current.setHours(Number(hour || 9), Number(minute || 0), 0, 0);
+  const shown = hour ? `${hour}:${minute || '00'}` : '';
+
+  return (
+    <View style={{ marginBottom: 6 }}>
+      <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
+        {label ? <Text style={{ fontSize: 12, color: C.text3, width: 52 }}>{label}</Text> : null}
+        <RippleButton
+          style={[styles.input, { flex: 1, backgroundColor: C.inputBg, justifyContent: 'center' }]}
+          onPress={() => setOpen(v => !v)}>
+          <Text style={{ fontSize: 15, color: shown ? C.text : '#aaa' }}>{shown || '時刻を設定'}</Text>
+        </RippleButton>
+        {shown ? (
+          <TouchableOpacity onPress={() => { onChange('', ''); setOpen(false); }}
+            style={{ paddingHorizontal: 8, paddingVertical: 10 }}>
+            <Text style={{ color: '#aaa', fontSize: 16 }}>✕</Text>
+          </TouchableOpacity>
+        ) : null}
+      </View>
+      {open && (
+        <ReAnimated.View
+          entering={FadeInDown.duration(180)}
+          style={{ backgroundColor: C.bg2, borderRadius: 12, borderWidth: 1, borderColor: C.border, marginTop: 4 }}>
+          <DateTimePicker
+            value={current}
+            mode="time"
+            display="spinner"
+            locale="ja-JP"
+            minuteInterval={5}
+            themeVariant={C === DARK ? 'dark' : 'light'}
+            onChange={(_e, d) => {
+              if (!d) return;
+              onChange(String(d.getHours()).padStart(2, '0'), String(d.getMinutes()).padStart(2, '0'));
+            }}
+            style={{ height: 180 }}
+          />
+          <RippleButton
+            style={{ margin: 8, backgroundColor: TDU_BLUE, borderRadius: 8, padding: 10, alignItems: 'center' }}
+            onPress={() => {
+              if (!hour) onChange(String(current.getHours()).padStart(2, '0'), String(current.getMinutes()).padStart(2, '0'));
+              setOpen(false);
+            }}>
+            <Text style={{ color: '#fff', fontWeight: 'bold' }}>完了</Text>
+          </RippleButton>
+        </ReAnimated.View>
+      )}
+    </View>
+  );
+}
+
 // ─── リップルボタン（ぽちゃんアニメーション） ──────────────────────────
 function RippleButton({ style, onPress, children, activeOpacity = 0.8 }: {
   style?: StyleProp<ViewStyle>; onPress?: () => void; children: React.ReactNode; activeOpacity?: number;
@@ -476,13 +626,15 @@ function MiniStepper({ status, statusColors, isDark, animTrigger }: {
 // ─── ステータスステッパー ──────────────────────────────────────────
 
 const STEPPER_STAGES = ['検討中', 'ES締切', '1次面接', '2次面接', '最終面接', '内定'];
+// ステッパーは6段のままにして、Webテストは書類フェーズに含める。
+// ステータス名自体はバッジで出るので情報は失われない。
 const STATUS_TO_STAGE: Record<string, number> = {
-  '検討中': 0, '説明会': 0, 'GD': 0,
-  'ES締切': 1, 'ES提出済': 1,
+  '検討中': 0, '説明会': 0, 'ワークショップ': 0, 'GD': 0,
+  'ES締切': 1, 'ES提出済': 1, 'Webテスト': 1,
   '1次面接': 2,
   '2次面接': 3,
   '最終面接': 4,
-  '内定': 5,
+  '内定': 5, '内定承諾': 5,
 };
 
 function StatusStepper({ status, statusColors, isDark }: { status: string; statusColors: Record<string, string>; isDark: boolean }) {
@@ -1001,8 +1153,6 @@ export default function App() {
   const [checklist, setChecklist] = useState<Record<string, boolean>>({});
 
   // ピッカー
-  const [showHourPicker, setShowHourPicker] = useState(false);
-  const [showMinutePicker, setShowMinutePicker] = useState(false);
 
   // 新機能用 state
   const [offerDeadline, setOfferDeadline] = useState('');
@@ -1010,13 +1160,22 @@ export default function App() {
   const [memoPR, setMemoPR] = useState('');
   const [memoQuestions, setMemoQuestions] = useState('');
   const [activeMemoTab, setActiveMemoTab] = useState(0); // 0=研究, 1=PR, 2=質問
-  const [showOfferDeadlinePicker, setShowOfferDeadlinePicker] = useState(false);
   const [internshipStart, setInternshipStart] = useState('');
   const [internshipEnd, setInternshipEnd] = useState('');
-  const [showInternStartPicker, setShowInternStartPicker] = useState(false);
-  const [showInternEndPicker, setShowInternEndPicker] = useState(false);
   const [showAllGenres, setShowAllGenres] = useState(false);
   const [showAllStatuses, setShowAllStatuses] = useState(false);
+
+  // 会場（オンライン / 対面）
+  const [selVenueType, setSelVenueType] = useState<VenueType | undefined>(undefined);
+  const [meetingUrl, setMeetingUrl] = useState('');
+  const [venue, setVenue] = useState('');
+  // Webテスト
+  const [webTestType, setWebTestType] = useState('');
+  const [webTestDeadline, setWebTestDeadline] = useState('');
+  const [webTestBookedAt, setWebTestBookedAt] = useState('');
+  const [webTestVenue, setWebTestVenue] = useState('');
+  // やること一覧
+  const [todoModalVisible, setTodoModalVisible] = useState(false);
   const [openHelpItem, setOpenHelpItem] = useState<number | null>(null);
   const [advanceAnimMap, setAdvanceAnimMap] = useState<Record<string, number>>({});
 
@@ -1042,11 +1201,6 @@ export default function App() {
   const [datePickerMonth, setDatePickerMonth] = useState(new Date().getMonth()); // 0-indexed
 
   // 企業登録用ホイールピッカー
-  const [showDateWheelPicker, setShowDateWheelPicker] = useState(false);
-  const [dateWheelTarget, setDateWheelTarget] = useState<'start' | 'end'>('start');
-  const [wheelYear, setWheelYear] = useState(new Date().getFullYear());
-  const [wheelMonth, setWheelMonth] = useState(new Date().getMonth() + 1); // 1-indexed
-  const [wheelDay, setWheelDay] = useState(new Date().getDate());
 
   useEffect(() => { loadAll(); }, []);
   useEffect(() => {
@@ -1521,6 +1675,14 @@ export default function App() {
       memoResearch: memoResearch || undefined,
       memoPR: memoPR || undefined,
       memoQuestions: memoQuestions || undefined,
+      venueType: selVenueType,
+      meetingUrl: selVenueType === 'online' ? (meetingUrl.trim() || undefined) : undefined,
+      venue: selVenueType === 'onsite' ? (venue.trim() || undefined) : undefined,
+      webTestType: webTestType || undefined,
+      webTestDeadline: webTestDeadline || undefined,
+      webTestBookedAt: webTestBookedAt || undefined,
+      webTestVenue: webTestVenue.trim() || undefined,
+      declineContacted: selectedItem?.declineContacted,
       calendarColor: selectedItem
         ? (statusColors[selStatus] ?? selectedItem.calendarColor ?? '#95A5A6') // 編集時: 新ステータス色で更新
         : (statusColors[selStatus] ?? '#95A5A6'), // 新規: 登録時のステータス色で固定
@@ -1551,10 +1713,11 @@ export default function App() {
     setSelDate(new Date().toISOString().split('T')[0]); setSelEndDate('');
     setSelHour(''); setSelMinute(''); setUrl(''); setUserId(''); setPassword('');
     setRank('B'); setSelGenreId('other'); setChecklist({});
-    setShowHourPicker(false); setShowMinutePicker(false); setShowDateWheelPicker(false);
+    setSelVenueType(undefined); setMeetingUrl(''); setVenue('');
+    setWebTestType(''); setWebTestDeadline(''); setWebTestBookedAt(''); setWebTestVenue('');
     setItemNotifyEnabled(true); setNotifyDaysList(['1']); setNotifyHour('09'); setNotifyMinute('00');
-    setOfferDeadline(''); setMemoResearch(''); setMemoPR(''); setMemoQuestions(''); setActiveMemoTab(0); setShowOfferDeadlinePicker(false);
-    setInternshipStart(''); setInternshipEnd(''); setShowInternStartPicker(false); setShowInternEndPicker(false);
+    setOfferDeadline(''); setMemoResearch(''); setMemoPR(''); setMemoQuestions(''); setActiveMemoTab(0);
+    setInternshipStart(''); setInternshipEnd('');
   };
 
   const openAdd = (dateStr?: string) => {
@@ -1562,8 +1725,6 @@ export default function App() {
     setSelDate(ds);
     setSelEndDate('');
     const d = new Date(ds);
-    setWheelYear(d.getFullYear()); setWheelMonth(d.getMonth() + 1); setWheelDay(d.getDate());
-    setDateWheelTarget('start');
     setItemNotifyEnabled(true);
     setNotifyDaysList(['1']); setNotifyHour('09'); setNotifyMinute('00');
     setModalVisible(true);
@@ -1584,7 +1745,6 @@ export default function App() {
     setMemoQuestions(prev.memoQuestions ?? '');
     // 引き継がないもの: status・date・通知設定
     setSelStatus('検討中');
-    setDateWheelTarget('start');
     setCompanyName(prev.company);
     setModalVisible(true);
   };
@@ -1631,7 +1791,6 @@ export default function App() {
     setNote(item.note ?? ''); setSelStatus(item.status); setSelDate(item.date);
     setSelEndDate(item.endDate ?? '');
     const _d = item.date ? new Date(item.date) : new Date();
-    setWheelYear(_d.getFullYear()); setWheelMonth(_d.getMonth() + 1); setWheelDay(_d.getDate());
     setSelHour(item.hour ?? ''); setSelMinute(item.minute ?? '');
     setUrl(item.url ?? ''); setUserId(item.userId ?? ''); setPassword(item.password ?? '');
     setRank(item.rank ?? 'B'); setSelGenreId(item.genreId ?? 'other');
@@ -1647,7 +1806,13 @@ export default function App() {
     setMemoPR(item.memoPR ?? '');
     setMemoQuestions(item.memoQuestions ?? '');
     setActiveMemoTab(0);
-    setDateWheelTarget('start');
+    setSelVenueType(item.venueType);
+    setMeetingUrl(item.meetingUrl ?? '');
+    setVenue(item.venue ?? '');
+    setWebTestType(item.webTestType ?? '');
+    setWebTestDeadline(item.webTestDeadline ?? '');
+    setWebTestBookedAt(item.webTestBookedAt ?? '');
+    setWebTestVenue(item.webTestVenue ?? '');
     setDetailVisible(true);
   };
 
@@ -1770,7 +1935,7 @@ export default function App() {
   };
 
   const advanceStatus = async (item: Schedule) => {
-    const ns = nextStatus(item.status);
+    const ns = nextStatus(item.status, !!(item.webTestType || item.webTestDeadline));
     if (!ns) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     const autoChecks = STATUS_TO_CHECKS[ns] ?? [];
@@ -2209,7 +2374,7 @@ export default function App() {
                   const sc = statusColorOf(item.status);
                   const isInternal = item.status === '内定';
                   const isInactive = INACTIVE.includes(item.status);
-                  const ns = nextStatus(item.status);
+                  const ns = nextStatus(item.status, !!(item.webTestType || item.webTestDeadline));
                   const cdLabel = countdownLabel(item.date);
                   return (
                     <ScaleDecorator activeScale={1.02}>
@@ -2269,7 +2434,7 @@ export default function App() {
                   const sc = statusColorOf(item.status);
                   const isInternal = item.status === '内定';
                   const isInactive = INACTIVE.includes(item.status);
-                  const ns = nextStatus(item.status);
+                  const ns = nextStatus(item.status, !!(item.webTestType || item.webTestDeadline));
                   const cdLabel = countdownLabel(item.date);
                   return (
                     <ReAnimated.View
@@ -2925,151 +3090,88 @@ export default function App() {
                 <View style={{ flexDirection: 'row', gap: 10 }}>
                   <View style={{ flex: 2 }}>
                     <Text style={[styles.label, { color: C.text3 }]}>日付</Text>
-                    <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
-                      <TouchableOpacity
-                        style={[styles.input, { flex: 1, backgroundColor: C.inputBg, justifyContent: 'center' }]}
-                        onPress={() => { setDateWheelTarget('start'); setShowDateWheelPicker(v => !v); }}>
-                        <Text style={{ fontSize: 15, color: selDate ? C.text : '#aaa' }}>{selDate || '日付なし'}</Text>
-                      </TouchableOpacity>
-                      {selDate ? <TouchableOpacity onPress={() => { setSelDate(''); setShowDateWheelPicker(false); }}
-                        style={{ paddingHorizontal: 8, paddingVertical: 10 }}>
-                        <Text style={{ color: '#aaa', fontSize: 16 }}>✕</Text>
-                      </TouchableOpacity> : null}
-                    </View>
-                    {showDateWheelPicker && (
-                      <View style={{
-                        backgroundColor: C.bg2, borderRadius: 12, borderWidth: 1,
-                        borderColor: C.border, marginTop: 4, padding: 8
-                      }}>
-                        <View style={{ flexDirection: 'row', gap: 4 }}>
-                          {/* 年 */}
-                          <ScrollView style={{ flex: 3, height: 140 }} showsVerticalScrollIndicator={false} nestedScrollEnabled>
-                            {Array.from({ length: 6 }, (_, i) => new Date().getFullYear() - 1 + i).map(wYr => (
-                              <TouchableOpacity key={wYr}
-                                style={{
-                                  paddingVertical: 9, alignItems: 'center', borderRadius: 8,
-                                  backgroundColor: wheelYear === wYr ? TDU_BLUE : 'transparent'
-                                }}
-                                onPress={() => {
-                                  setWheelYear(wYr);
-                                  const nd = `${wYr}-${String(wheelMonth).padStart(2, '0')}-${String(wheelDay).padStart(2, '0')}`;
-                                  dateWheelTarget === 'start' ? setSelDate(nd) : setSelEndDate(nd);
-                                }}>
-                                <Text style={{ fontSize: 14, color: wheelYear === wYr ? '#fff' : C.text, fontWeight: wheelYear === wYr ? 'bold' : 'normal' }}>{wYr}</Text>
-                              </TouchableOpacity>
-                            ))}
-                          </ScrollView>
-                          {/* 月 */}
-                          <ScrollView style={{ flex: 2, height: 140 }} showsVerticalScrollIndicator={false} nestedScrollEnabled>
-                            {Array.from({ length: 12 }, (_, i) => i + 1).map(wMon => (
-                              <TouchableOpacity key={wMon}
-                                style={{
-                                  paddingVertical: 9, alignItems: 'center', borderRadius: 8,
-                                  backgroundColor: wheelMonth === wMon ? TDU_BLUE : 'transparent'
-                                }}
-                                onPress={() => {
-                                  setWheelMonth(wMon);
-                                  const nd = `${wheelYear}-${String(wMon).padStart(2, '0')}-${String(wheelDay).padStart(2, '0')}`;
-                                  dateWheelTarget === 'start' ? setSelDate(nd) : setSelEndDate(nd);
-                                }}>
-                                <Text style={{ fontSize: 14, color: wheelMonth === wMon ? '#fff' : C.text, fontWeight: wheelMonth === wMon ? 'bold' : 'normal' }}>{wMon}月</Text>
-                              </TouchableOpacity>
-                            ))}
-                          </ScrollView>
-                          {/* 日 */}
-                          <ScrollView style={{ flex: 2, height: 140 }} showsVerticalScrollIndicator={false} nestedScrollEnabled>
-                            {Array.from({ length: 31 }, (_, i) => i + 1).map(wDay => (
-                              <TouchableOpacity key={wDay}
-                                style={{
-                                  paddingVertical: 9, alignItems: 'center', borderRadius: 8,
-                                  backgroundColor: wheelDay === wDay ? TDU_BLUE : 'transparent'
-                                }}
-                                onPress={() => {
-                                  setWheelDay(wDay);
-                                  const nd = `${wheelYear}-${String(wheelMonth).padStart(2, '0')}-${String(wDay).padStart(2, '0')}`;
-                                  dateWheelTarget === 'start' ? setSelDate(nd) : setSelEndDate(nd);
-                                }}>
-                                <Text style={{ fontSize: 14, color: wheelDay === wDay ? '#fff' : C.text, fontWeight: wheelDay === wDay ? 'bold' : 'normal' }}>{wDay}日</Text>
-                              </TouchableOpacity>
-                            ))}
-                          </ScrollView>
-                        </View>
-                        <TouchableOpacity
-                          style={{ marginTop: 8, backgroundColor: TDU_BLUE, borderRadius: 8, padding: 10, alignItems: 'center' }}
-                          onPress={() => setShowDateWheelPicker(false)}>
-                          <Text style={{ color: '#fff', fontWeight: 'bold' }}>決定</Text>
-                        </TouchableOpacity>
-                      </View>
-                    )}
-                    {/* 終了日 */}
-                    <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center', marginTop: 6 }}>
-                      <Text style={{ fontSize: 12, color: C.text3, width: 36 }}>終了日</Text>
-                      <TouchableOpacity
-                        style={[styles.input, { flex: 1, backgroundColor: C.inputBg, justifyContent: 'center' }]}
-                        onPress={() => {
-                          if (selEndDate) {
-                            const ed = new Date(selEndDate);
-                            setWheelYear(ed.getFullYear()); setWheelMonth(ed.getMonth() + 1); setWheelDay(ed.getDate());
-                          }
-                          setDateWheelTarget('end');
-                          setShowDateWheelPicker(true);
-                        }}>
-                        <Text style={{ fontSize: 15, color: selEndDate ? C.text : '#aaa' }}>{selEndDate || '終了日なし'}</Text>
-                      </TouchableOpacity>
-                      {selEndDate ? <TouchableOpacity onPress={() => setSelEndDate('')} style={{ paddingHorizontal: 8, paddingVertical: 10 }}>
-                        <Text style={{ color: '#aaa', fontSize: 16 }}>✕</Text>
-                      </TouchableOpacity> : null}
-                    </View>
+                    <WheelDateField value={selDate} onChange={setSelDate} C={C} placeholder="日付なし" />
+                    <WheelDateField
+                      label="終了日" value={selEndDate} onChange={setSelEndDate} C={C}
+                      placeholder="終了日なし"
+                      minimumDate={selDate ? parseYmd(selDate) : undefined}
+                    />
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={[styles.label, { color: C.text3 }]}>時間</Text>
-                    <View style={{ flexDirection: 'row', gap: 4, alignItems: 'flex-start' }}>
-                      {/* 時インラインドロップダウン */}
-                      <View style={{ flex: 1 }}>
-                        <TouchableOpacity style={[styles.input, { justifyContent: 'center', paddingVertical: 13, backgroundColor: C.inputBg }]}
-                          onPress={() => { setShowHourPicker(v => !v); setShowMinutePicker(false); }}>
-                          <Text style={{ fontSize: 14, color: selHour ? C.text : '#aaa' }}>{selHour || '時'}</Text>
-                        </TouchableOpacity>
-                        {showHourPicker && (
-                          <ScrollView style={[styles.inlinePicker, { backgroundColor: C.bg2, borderColor: C.border }]} nestedScrollEnabled>
-                            <TouchableOpacity style={styles.inlinePickerClear} onPress={() => { setSelHour(''); setShowHourPicker(false); }}>
-                              <Text style={{ fontSize: 10, color: '#999' }}>クリア</Text>
-                            </TouchableOpacity>
-                            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4 }}>
-                              {HOURS.map(selHr => (
-                                <TouchableOpacity key={selHr} style={[styles.inlinePickerItem, { backgroundColor: C.bg3 }, selHour === selHr && styles.inlinePickerItemActive]}
-                                  onPress={() => { setSelHour(selHr); setShowHourPicker(false); }}>
-                                  <Text style={[{ fontSize: 13, color: C.text }, selHour === selHr && { color: '#fff', fontWeight: 'bold' }]}>{selHr}</Text>
-                                </TouchableOpacity>
-                              ))}
-                            </View>
-                          </ScrollView>
-                        )}
-                      </View>
-                      <Text style={{ alignSelf: 'center', color: C.text, paddingTop: 13 }}>:</Text>
-                      {/* 分インラインドロップダウン */}
-                      <View style={{ flex: 1 }}>
-                        <TouchableOpacity style={[styles.input, { justifyContent: 'center', paddingVertical: 13, backgroundColor: C.inputBg }]}
-                          onPress={() => { setShowMinutePicker(v => !v); setShowHourPicker(false); }}>
-                          <Text style={{ fontSize: 14, color: selMinute ? C.text : '#aaa' }}>{selMinute || '分'}</Text>
-                        </TouchableOpacity>
-                        {showMinutePicker && (
-                          <View style={[styles.inlinePicker, { flexDirection: 'row', flexWrap: 'wrap', gap: 4, backgroundColor: C.bg2, borderColor: C.border }]}>
-                            <TouchableOpacity style={[styles.inlinePickerClear, { width: '100%' }]} onPress={() => { setSelMinute(''); setShowMinutePicker(false); }}>
-                              <Text style={{ fontSize: 10, color: '#999' }}>クリア</Text>
-                            </TouchableOpacity>
-                            {MINUTES.map(selMin => (
-                              <TouchableOpacity key={selMin} style={[styles.inlinePickerItem, { flex: 1, minWidth: 50, backgroundColor: C.bg3 }, selMinute === selMin && styles.inlinePickerItemActive]}
-                                onPress={() => { setSelMinute(selMin); setShowMinutePicker(false); }}>
-                                <Text style={[{ fontSize: 14, color: C.text }, selMinute === selMin && { color: '#fff', fontWeight: 'bold' }]}>{selMin}</Text>
-                              </TouchableOpacity>
-                            ))}
-                          </View>
-                        )}
-                      </View>
-                    </View>
+                    <WheelTimeField
+                      hour={selHour} minute={selMinute}
+                      onChange={(h, m) => { setSelHour(h); setSelMinute(m); }}
+                      C={C}
+                    />
                   </View>
                 </View>
+
+                {/* 会場（一次はWeb・最終は対面のように段階で変わる） */}
+                <Text style={[styles.label, { color: C.text3 }]}>実施形式</Text>
+                <View style={{ flexDirection: 'row', gap: 8, marginBottom: 6 }}>
+                  {([
+                    { v: undefined, label: '未設定' },
+                    { v: 'online' as const, label: 'オンライン' },
+                    { v: 'onsite' as const, label: '対面' },
+                  ]).map(opt => {
+                    const active = selVenueType === opt.v;
+                    return (
+                      <RippleButton key={opt.label}
+                        style={[styles.statusOption, { backgroundColor: active ? TDU_BLUE : C.bg3 }]}
+                        onPress={() => setSelVenueType(opt.v)}>
+                        <Text style={{ fontSize: 12, fontWeight: active ? 'bold' : 'normal', color: active ? '#fff' : C.text2 }}>
+                          {opt.label}
+                        </Text>
+                      </RippleButton>
+                    );
+                  })}
+                </View>
+                {selVenueType === 'online' && (
+                  <View style={styles.copyRow}>
+                    <TextInput
+                      style={[styles.input, { flex: 1, marginBottom: 0, backgroundColor: C.inputBg, color: C.text }]}
+                      placeholder="接続URL（Zoom / Teams 等）" placeholderTextColor="#aaa"
+                      value={meetingUrl} onChangeText={setMeetingUrl} autoCapitalize="none" keyboardType="url" />
+                    {meetingUrl ? (
+                      <TouchableOpacity style={styles.copyBtn}
+                        onPress={() => { Clipboard.setString(meetingUrl); Alert.alert('コピーしました', '接続URLをコピーしました'); }}>
+                        <Image source={ICONS.checklist} style={{ width: 16, height: 16, tintColor: TDU_BLUE }} resizeMode="contain" />
+                      </TouchableOpacity>
+                    ) : null}
+                  </View>
+                )}
+                {selVenueType === 'onsite' && (
+                  <TextInput
+                    style={[styles.input, { backgroundColor: C.inputBg, color: C.text }]}
+                    placeholder="会場・最寄駅（例: 本社ビル / 東京駅）" placeholderTextColor="#aaa"
+                    value={venue} onChangeText={setVenue} />
+                )}
+
+                {/* Webテスト（ES締切とは別軸の期限） */}
+                <Text style={[styles.label, { color: C.text3 }]}>Webテスト</Text>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 6 }}>
+                  {WEB_TEST_TYPES.map(t => {
+                    const active = webTestType === t;
+                    return (
+                      <RippleButton key={t}
+                        style={[styles.statusOption, { backgroundColor: active ? TDU_BLUE : C.bg3 }]}
+                        onPress={() => setWebTestType(active ? '' : t)}>
+                        <Text style={{ fontSize: 11, fontWeight: active ? 'bold' : 'normal', color: active ? '#fff' : C.text2 }}>{t}</Text>
+                      </RippleButton>
+                    );
+                  })}
+                </View>
+                {(webTestType || webTestDeadline) && (
+                  <>
+                    <WheelDateField label="受検期限" value={webTestDeadline} onChange={setWebTestDeadline} C={C} placeholder="期限を設定" />
+                    <WheelDateField label="予約日" value={webTestBookedAt} onChange={setWebTestBookedAt} C={C} placeholder="予約日を設定" />
+                    <TextInput
+                      style={[styles.input, { backgroundColor: C.inputBg, color: C.text }]}
+                      placeholder="受検会場（テストセンターの場合）" placeholderTextColor="#aaa"
+                      value={webTestVenue} onChangeText={setWebTestVenue} />
+                  </>
+                )}
 
                 <Text style={[styles.label, { color: C.text3 }]}>URL（マイページ等）</Text>
                 <View style={styles.copyRow}>
@@ -3155,68 +3257,7 @@ export default function App() {
                 {(selStatus === '内定' || offerDeadline) && (
                   <>
                     <Text style={[styles.label, { color: C.text3 }]}>内定承諾期限</Text>
-                    <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
-                      <TouchableOpacity
-                        style={[styles.input, { flex: 1, backgroundColor: C.inputBg, justifyContent: 'center' }]}
-                        onPress={() => setShowOfferDeadlinePicker(v => !v)}>
-                        <Text style={{ fontSize: 15, color: offerDeadline ? C.text : '#aaa' }}>{offerDeadline || '期限日を設定'}</Text>
-                      </TouchableOpacity>
-                      {offerDeadline && (
-                        <TouchableOpacity onPress={() => setOfferDeadline('')} style={{ paddingHorizontal: 8, paddingVertical: 10 }}>
-                          <Text style={{ color: '#aaa', fontSize: 16 }}>✕</Text>
-                        </TouchableOpacity>
-                      )}
-                    </View>
-                    {offerDeadline && (() => {
-                      const d = daysUntil(offerDeadline);
-                      if (d === null) return null;
-                      const color = d <= 3 ? '#e74c3c' : d <= 7 ? '#f39c12' : '#27ae60';
-                      return <Text style={{ color, fontSize: 12, marginBottom: 4 }}>{d === 0 ? '今日が期限！' : d < 0 ? `${Math.abs(d)}日超過` : `あと${d}日`}</Text>;
-                    })()}
-                    {showOfferDeadlinePicker && (
-                      <View style={{ backgroundColor: C.bg2, borderRadius: 12, borderWidth: 1, borderColor: C.border, marginTop: 4, padding: 8 }}>
-                        <View style={{ flexDirection: 'row', gap: 4 }}>
-                          <ScrollView style={{ flex: 3, height: 120 }} showsVerticalScrollIndicator={false} nestedScrollEnabled>
-                            {Array.from({ length: 6 }, (_, i) => new Date().getFullYear() - 1 + i).map(yr => (
-                              <TouchableOpacity key={yr} style={{ paddingVertical: 7, alignItems: 'center', borderRadius: 6, backgroundColor: offerDeadline?.startsWith(String(yr)) ? TDU_BLUE : 'transparent' }}
-                                onPress={() => { const [, m, d] = (offerDeadline || `${yr}-01-01`).split('-'); setOfferDeadline(`${yr}-${m || '01'}-${d || '01'}`); }}>
-                                <Text style={{ fontSize: 13, color: offerDeadline?.startsWith(String(yr)) ? '#fff' : C.text }}>{yr}</Text>
-                              </TouchableOpacity>
-                            ))}
-                          </ScrollView>
-                          <ScrollView style={{ flex: 2, height: 120 }} showsVerticalScrollIndicator={false} nestedScrollEnabled>
-                            {Array.from({ length: 12 }, (_, i) => i + 1).map(mn => {
-                              const ms = String(mn).padStart(2, '0');
-                              const [yr, , d] = (offerDeadline || '').split('-');
-                              const active = offerDeadline?.split('-')[1] === ms;
-                              return (
-                                <TouchableOpacity key={mn} style={{ paddingVertical: 7, alignItems: 'center', borderRadius: 6, backgroundColor: active ? TDU_BLUE : 'transparent' }}
-                                  onPress={() => setOfferDeadline(`${yr || new Date().getFullYear()}-${ms}-${d || '01'}`)}>
-                                  <Text style={{ fontSize: 13, color: active ? '#fff' : C.text }}>{mn}月</Text>
-                                </TouchableOpacity>
-                              );
-                            })}
-                          </ScrollView>
-                          <ScrollView style={{ flex: 2, height: 120 }} showsVerticalScrollIndicator={false} nestedScrollEnabled>
-                            {Array.from({ length: 31 }, (_, i) => i + 1).map(dy => {
-                              const ds2 = String(dy).padStart(2, '0');
-                              const [yr, mn] = (offerDeadline || '').split('-');
-                              const active = offerDeadline?.split('-')[2] === ds2;
-                              return (
-                                <TouchableOpacity key={dy} style={{ paddingVertical: 7, alignItems: 'center', borderRadius: 6, backgroundColor: active ? TDU_BLUE : 'transparent' }}
-                                  onPress={() => setOfferDeadline(`${yr || new Date().getFullYear()}-${mn || '01'}-${ds2}`)}>
-                                  <Text style={{ fontSize: 13, color: active ? '#fff' : C.text }}>{dy}日</Text>
-                                </TouchableOpacity>
-                              );
-                            })}
-                          </ScrollView>
-                        </View>
-                        <TouchableOpacity style={{ marginTop: 6, backgroundColor: TDU_BLUE, borderRadius: 8, padding: 8, alignItems: 'center' }}
-                          onPress={() => setShowOfferDeadlinePicker(false)}>
-                          <Text style={{ color: '#fff', fontWeight: 'bold' }}>決定</Text>
-                        </TouchableOpacity>
-                      </View>
-                    )}
+                    <WheelDateField value={offerDeadline} onChange={setOfferDeadline} C={C} placeholder="期限日を設定" />
                   </>
                 )}
 
@@ -3224,70 +3265,11 @@ export default function App() {
                 {(selStatus === 'インターン確定' || internshipStart || internshipEnd) && (
                   <>
                     <Text style={[styles.label, { color: C.text3 }]}>インターン期間</Text>
-                    {(['開始日', '終了日'] as const).map(label => {
-                      const val = label === '開始日' ? internshipStart : internshipEnd;
-                      const setVal = label === '開始日' ? setInternshipStart : setInternshipEnd;
-                      const showPicker = label === '開始日' ? showInternStartPicker : showInternEndPicker;
-                      const setShowPicker = label === '開始日' ? setShowInternStartPicker : setShowInternEndPicker;
-                      return (
-                        <View key={label} style={{ marginBottom: 6 }}>
-                          <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
-                            <Text style={{ fontSize: 12, color: C.text3, width: 36 }}>{label}</Text>
-                            <TouchableOpacity style={[styles.input, { flex: 1, backgroundColor: C.inputBg, justifyContent: 'center' }]}
-                              onPress={() => setShowPicker(v => !v)}>
-                              <Text style={{ fontSize: 15, color: val ? C.text : '#aaa' }}>{val || '日付を設定'}</Text>
-                            </TouchableOpacity>
-                            {val && <TouchableOpacity onPress={() => setVal('')} style={{ paddingHorizontal: 8, paddingVertical: 10 }}>
-                              <Text style={{ color: '#aaa', fontSize: 16 }}>✕</Text>
-                            </TouchableOpacity>}
-                          </View>
-                          {showPicker && (
-                            <View style={{ backgroundColor: C.bg2, borderRadius: 12, borderWidth: 1, borderColor: C.border, marginTop: 4, padding: 8 }}>
-                              <View style={{ flexDirection: 'row', gap: 4 }}>
-                                <ScrollView style={{ flex: 3, height: 120 }} showsVerticalScrollIndicator={false} nestedScrollEnabled>
-                                  {Array.from({ length: 6 }, (_, i) => new Date().getFullYear() - 1 + i).map(yr => (
-                                    <TouchableOpacity key={yr} style={{ paddingVertical: 7, alignItems: 'center', borderRadius: 6, backgroundColor: val?.startsWith(String(yr)) ? TDU_BLUE : 'transparent' }}
-                                      onPress={() => { const [, m, d] = (val || `${yr}-01-01`).split('-'); setVal(`${yr}-${m || '01'}-${d || '01'}`); }}>
-                                      <Text style={{ fontSize: 13, color: val?.startsWith(String(yr)) ? '#fff' : C.text }}>{yr}</Text>
-                                    </TouchableOpacity>
-                                  ))}
-                                </ScrollView>
-                                <ScrollView style={{ flex: 2, height: 120 }} showsVerticalScrollIndicator={false} nestedScrollEnabled>
-                                  {Array.from({ length: 12 }, (_, i) => i + 1).map(mn => {
-                                    const ms = String(mn).padStart(2, '0');
-                                    const [yr, , d] = (val || '').split('-');
-                                    const active = val?.split('-')[1] === ms;
-                                    return (
-                                      <TouchableOpacity key={mn} style={{ paddingVertical: 7, alignItems: 'center', borderRadius: 6, backgroundColor: active ? TDU_BLUE : 'transparent' }}
-                                        onPress={() => setVal(`${yr || new Date().getFullYear()}-${ms}-${d || '01'}`)}>
-                                        <Text style={{ fontSize: 13, color: active ? '#fff' : C.text }}>{mn}月</Text>
-                                      </TouchableOpacity>
-                                    );
-                                  })}
-                                </ScrollView>
-                                <ScrollView style={{ flex: 2, height: 120 }} showsVerticalScrollIndicator={false} nestedScrollEnabled>
-                                  {Array.from({ length: 31 }, (_, i) => i + 1).map(dy => {
-                                    const ds2 = String(dy).padStart(2, '0');
-                                    const [yr2, mn2] = (val || '').split('-');
-                                    const active = val?.split('-')[2] === ds2;
-                                    return (
-                                      <TouchableOpacity key={dy} style={{ paddingVertical: 7, alignItems: 'center', borderRadius: 6, backgroundColor: active ? TDU_BLUE : 'transparent' }}
-                                        onPress={() => setVal(`${yr2 || new Date().getFullYear()}-${mn2 || '01'}-${ds2}`)}>
-                                        <Text style={{ fontSize: 13, color: active ? '#fff' : C.text }}>{dy}日</Text>
-                                      </TouchableOpacity>
-                                    );
-                                  })}
-                                </ScrollView>
-                              </View>
-                              <TouchableOpacity style={{ marginTop: 6, backgroundColor: TDU_BLUE, borderRadius: 8, padding: 8, alignItems: 'center' }}
-                                onPress={() => setShowPicker(false)}>
-                                <Text style={{ color: '#fff', fontWeight: 'bold' }}>決定</Text>
-                              </TouchableOpacity>
-                            </View>
-                          )}
-                        </View>
-                      );
-                    })}
+                    <WheelDateField label="開始日" value={internshipStart} onChange={setInternshipStart} C={C} placeholder="日付を設定" />
+                    <WheelDateField
+                      label="終了日" value={internshipEnd} onChange={setInternshipEnd} C={C} placeholder="日付を設定"
+                      minimumDate={internshipStart ? parseYmd(internshipStart) : undefined}
+                    />
                   </>
                 )}
 
