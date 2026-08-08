@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import ReAnimated, {
   useSharedValue, useAnimatedStyle, useAnimatedProps, withSpring, withTiming, withSequence, withRepeat,
-  FadeInDown, FadeOutLeft, LinearTransition, runOnJS,
+  FadeInDown, FadeOutLeft, LinearTransition, runOnJS, SlideInRight, SlideInLeft,
 } from 'react-native-reanimated';
 import { GestureHandlerRootView, Gesture, GestureDetector } from 'react-native-gesture-handler';
 import DraggableFlatList, { ScaleDecorator, RenderItemParams } from 'react-native-draggable-flatlist';
@@ -18,7 +18,7 @@ import {
   StyleSheet, Text, View, TouchableOpacity, ScrollView,
   SafeAreaView, Modal, TextInput, Alert, KeyboardAvoidingView,
   Platform, Switch, Animated, PanResponder, Linking, Clipboard, Image, Dimensions,
-  NativeModules, AppState,
+  NativeModules, AppState, BackHandler, AccessibilityInfo, findNodeHandle,
   StyleProp, ViewStyle, TextStyle, ImageSourcePropType,
 } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
@@ -1485,6 +1485,31 @@ export default function App() {
   // チェックリストモーダル
   const [checkModalItem, setCheckModalItem] = useState<Schedule | null>(null);
   const [settingsPage, setSettingsPage] = useState<SettingsPage>(null);
+  const settingsScrollRef = useRef<ScrollView | null>(null);
+  const settingsTopOffset = useRef(0);
+  const settingsTitleRef = useRef<Text | null>(null);
+  const SETTINGS_PAGE_TITLES: Record<string, string> = {
+    genre: 'ジャンル管理', status: 'ステータス管理', cal: 'カレンダー設定',
+    notify: '通知', data: 'データ管理', help: 'ヘルプ・使い方', support: '開発者を支援する',
+  };
+  // 階層を降りる／戻る。スクロール位置は一覧側だけ復元する。
+  const openSettingsPage = (page: Exclude<SettingsPage, null>) => {
+    setSettingsPage(page);
+    settingsScrollRef.current?.scrollTo({ y: 0, animated: false });
+    // Viewを差し替えただけではスクリーンリーダーに画面が変わったことが伝わらない
+    AccessibilityInfo.announceForAccessibility(SETTINGS_PAGE_TITLES[page]);
+  };
+  const closeSettingsPage = () => {
+    setSettingsPage(null);
+    AccessibilityInfo.announceForAccessibility('設定');
+    setTimeout(() => settingsScrollRef.current?.scrollTo({ y: settingsTopOffset.current, animated: false }), 0);
+  };
+  // Androidの戻るは設定トップへ。深い階層に取り残さない
+  useEffect(() => {
+    if (activeTab !== 'settings' || settingsPage === null) return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => { closeSettingsPage(); return true; });
+    return () => sub.remove();
+  }, [activeTab, settingsPage]);
   // ステータス変更の取り消しトースト
   const [toast, setToast] = useState<{ text: string; undo: () => void } | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -2471,7 +2496,18 @@ export default function App() {
     setAdvanceAnimMap(prev => ({ ...prev, [item.id]: (prev[item.id] ?? 0) + 1 }));
     if (undoable && before) {
       showToast(`${item.company} を ${ns} にしました`, () => {
-        saveSchedules(schedulesRef.current.map(s => s.id === before.id ? before : s));
+        const cur = schedulesRef.current.find(s => s.id === before.id);
+        // 押すまでの間に別の変更が入っていたら何もしない。
+        // 「最新配列を見る」だけでは、その後の変更まで巻き戻してしまう。
+        if (!cur || cur.status !== ns) { setToast(null); return; }
+        // 進める操作が触った項目だけ戻す。メモや日付の編集は残す
+        saveSchedules(schedulesRef.current.map(s => s.id !== before.id ? s : {
+          ...s,
+          status: before.status,
+          checklist: before.checklist,
+          statusHistory: before.statusHistory,
+          calendarColor: before.calendarColor,
+        }));
         setToast(null);
       });
     }
@@ -3188,12 +3224,17 @@ export default function App() {
 
         {/* ── 設定タブ ── */}
         {activeTab === 'settings' && (
-          <ScrollView style={{ flex: 1, backgroundColor: C.bg }} contentContainerStyle={{ padding: 20 }}>
+          <ScrollView
+            ref={settingsScrollRef}
+            style={{ flex: 1, backgroundColor: C.bg }}
+            contentContainerStyle={{ padding: 20 }}
+            scrollEventThrottle={64}
+            onScroll={e => { if (settingsPage === null) settingsTopOffset.current = e.nativeEvent.contentOffset.y; }}>
             {/* 設定は「アプリの挙動を変える場所」。1本の長大なスクロールをやめ、
                 iOSの設定アプリと同じく 一覧 → 詳細 の階層にした。
                 遷移は translateX のスライドで表す（Modalの入れ子にはしない）。 */}
             {settingsPage === null ? (
-              <ReAnimated.View entering={FadeInDown.duration(160)}>
+              <ReAnimated.View key="settings-top" entering={SlideInLeft.duration(200)}>
             {/* 統計ダッシュボード */}
             <View style={{ backgroundColor: isDark ? '#1a2a3a' : '#eaf2ff', borderRadius: 10, padding: 16, marginBottom: 24, borderWidth: 1, borderColor: isDark ? '#2a3a4a' : '#c8ddf7' }}>
               <Text style={{ fontSize: 12, color: ACCENT, fontWeight: 'bold', marginBottom: 12 }}>就活ダッシュボード</Text>
@@ -3257,46 +3298,41 @@ export default function App() {
                 </Text>
               </View>
             </View>
-              <TouchableOpacity style={[styles.formRow, { borderBottomWidth: 1, borderColor: C.border2 }]}
-                onPress={() => setSettingsPage('genre')}>
+              <TouchableOpacity accessibilityRole="button" style={[styles.formRow, { borderBottomWidth: 1, borderColor: C.border2 }]}
+                onPress={() => openSettingsPage('genre')}>
                 <Text style={[styles.formRowLabel, { color: C.text }]}>ジャンル管理</Text>
                 <Text style={{ fontSize: 14, color: C.text3 }}>{genres.length}</Text>
                 <Text style={{ fontSize: 15, color: C.text3, marginLeft: 6 }}>›</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.formRow, { borderBottomWidth: 1, borderColor: C.border2 }]}
-                onPress={() => setSettingsPage('status')}>
+              <TouchableOpacity accessibilityRole="button" style={[styles.formRow, { borderBottomWidth: 1, borderColor: C.border2 }]}
+                onPress={() => openSettingsPage('status')}>
                 <Text style={[styles.formRowLabel, { color: C.text }]}>ステータス管理</Text>
                 <Text style={{ fontSize: 14, color: C.text3 }}>{statusOptions.length}</Text>
                 <Text style={{ fontSize: 15, color: C.text3, marginLeft: 6 }}>›</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.formRow, { borderBottomWidth: 1, borderColor: C.border2 }]}
-                onPress={() => setSettingsPage('cal')}>
+              <TouchableOpacity accessibilityRole="button" style={[styles.formRow, { borderBottomWidth: 1, borderColor: C.border2 }]}
+                onPress={() => openSettingsPage('cal')}>
                 <Text style={[styles.formRowLabel, { color: C.text }]}>カレンダー設定</Text>
-                {null}
                 <Text style={{ fontSize: 15, color: C.text3, marginLeft: 6 }}>›</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.formRow, { borderBottomWidth: 1, borderColor: C.border2 }]}
-                onPress={() => setSettingsPage('notify')}>
+              <TouchableOpacity accessibilityRole="button" style={[styles.formRow, { borderBottomWidth: 1, borderColor: C.border2 }]}
+                onPress={() => openSettingsPage('notify')}>
                 <Text style={[styles.formRowLabel, { color: C.text }]}>通知</Text>
-                {null}
                 <Text style={{ fontSize: 15, color: C.text3, marginLeft: 6 }}>›</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.formRow, { borderBottomWidth: 1, borderColor: C.border2 }]}
-                onPress={() => setSettingsPage('data')}>
+              <TouchableOpacity accessibilityRole="button" style={[styles.formRow, { borderBottomWidth: 1, borderColor: C.border2 }]}
+                onPress={() => openSettingsPage('data')}>
                 <Text style={[styles.formRowLabel, { color: C.text }]}>データ管理</Text>
-                {null}
                 <Text style={{ fontSize: 15, color: C.text3, marginLeft: 6 }}>›</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.formRow, { borderBottomWidth: 1, borderColor: C.border2 }]}
-                onPress={() => setSettingsPage('help')}>
+              <TouchableOpacity accessibilityRole="button" style={[styles.formRow, { borderBottomWidth: 1, borderColor: C.border2 }]}
+                onPress={() => openSettingsPage('help')}>
                 <Text style={[styles.formRowLabel, { color: C.text }]}>ヘルプ・使い方</Text>
-                {null}
                 <Text style={{ fontSize: 15, color: C.text3, marginLeft: 6 }}>›</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.formRow, { borderBottomWidth: 1, borderColor: C.border2 }]}
-                onPress={() => setSettingsPage('support')}>
+              <TouchableOpacity accessibilityRole="button" style={[styles.formRow, { borderBottomWidth: 1, borderColor: C.border2 }]}
+                onPress={() => openSettingsPage('support')}>
                 <Text style={[styles.formRowLabel, { color: C.text }]}>開発者を支援する</Text>
-                {null}
                 <Text style={{ fontSize: 15, color: C.text3, marginLeft: 6 }}>›</Text>
               </TouchableOpacity>
                 <View style={{ alignItems: 'center', marginTop: 24 }}>
@@ -3304,22 +3340,38 @@ export default function App() {
                 </View>
               </ReAnimated.View>
             ) : (
-              <ReAnimated.View entering={FadeInDown.duration(160)}>
+              <ReAnimated.View key={`settings-${settingsPage}`} entering={SlideInRight.duration(200)}>
                 <TouchableOpacity
                   style={{ flexDirection: 'row', alignItems: 'center', minHeight: 44, marginBottom: 4 }}
-                  onPress={() => setSettingsPage(null)}>
+                  accessibilityRole="button"
+                  accessibilityLabel="設定に戻る"
+                  onPress={closeSettingsPage}>
                   <Text style={{ fontSize: 17, color: ACCENT }}>‹</Text>
                   <Text style={{ fontSize: 15, color: ACCENT, marginLeft: 4 }}>設定</Text>
                 </TouchableOpacity>
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
+                  <Text
+                    ref={settingsTitleRef}
+                    accessibilityRole="header"
+                    style={{ fontSize: 22, fontWeight: '700', color: C.text, flex: 1 }}>
+                    {SETTINGS_PAGE_TITLES[settingsPage]}
+                  </Text>
+                  {settingsPage === 'genre' ? (
+                    <TouchableOpacity onPress={() => openAddGenre()} accessibilityLabel="ジャンルを追加"
+                      style={{ minWidth: 44, minHeight: 44, alignItems: 'flex-end', justifyContent: 'center' }}>
+                      <Text style={{ color: ACCENT, fontSize: 24, fontWeight: 'bold' }}>＋</Text>
+                    </TouchableOpacity>
+                  ) : null}
+                  {settingsPage === 'status' ? (
+                    <TouchableOpacity onPress={() => { setNewStatusName(''); setAddStatusModal(true); }} accessibilityLabel="ステータスを追加"
+                      style={{ minWidth: 44, minHeight: 44, alignItems: 'flex-end', justifyContent: 'center' }}>
+                      <Text style={{ color: ACCENT, fontSize: 24, fontWeight: 'bold' }}>＋</Text>
+                    </TouchableOpacity>
+                  ) : null}
+                </View>
             {settingsPage === 'genre' && (
               <>
-            {/* 独立したページなので折りたたまず全件出す。追加は右上の＋ */}
-            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
-              <Text style={[styles.settingSection, { flex: 1, marginBottom: 0 }]}>ジャンル</Text>
-              <TouchableOpacity onPress={() => openAddGenre()} style={{ minWidth: 44, minHeight: 44, alignItems: 'flex-end', justifyContent: 'center' }}>
-                <Text style={{ color: ACCENT, fontSize: 22, fontWeight: 'bold' }}>＋</Text>
-              </TouchableOpacity>
-            </View>
+            {/* 独立したページなので折りたたまず全件出す。追加はページ右上の＋ */}
             {genres.map(g => (
               <TouchableOpacity key={g.id} style={[styles.genreRow, { borderColor: C.border2 }]} onPress={() => openEditGenre(g)}>
                 <View style={[styles.genreColorDot, { backgroundColor: g.color }]} />
@@ -3331,13 +3383,6 @@ export default function App() {
             )}
             {settingsPage === 'status' && (
               <>
-            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
-              <Text style={[styles.settingSection, { flex: 1, marginBottom: 0 }]}>ステータス</Text>
-              <TouchableOpacity onPress={() => { setNewStatusName(''); setAddStatusModal(true); }}
-                style={{ minWidth: 44, minHeight: 44, alignItems: 'flex-end', justifyContent: 'center' }}>
-                <Text style={{ color: ACCENT, fontSize: 22, fontWeight: 'bold' }}>＋</Text>
-              </TouchableOpacity>
-            </View>
             {statusOptions.map((st, idx) => {
               const sc = statusColors[st] ?? '#95A5A6';
               const isFixed = DEFAULT_STATUS_OPTIONS.includes(st);
@@ -3368,7 +3413,6 @@ export default function App() {
             )}
             {settingsPage === 'cal' && (
               <>
-            <Text style={[styles.settingSection, { marginTop: 28 }]}>カレンダー設定</Text>
             <View style={[styles.settingRow, { borderColor: C.border2 }]}>
               <Text style={[styles.settingLabel, { color: C.text }]}>週の始まり</Text>
               <View style={{ flexDirection: 'row', gap: 8 }}>
@@ -3389,7 +3433,6 @@ export default function App() {
             )}
             {settingsPage === 'notify' && (
               <>
-            <Text style={[styles.settingSection, { marginTop: 28 }]}>通知テスト</Text>
             <View style={[styles.settingRow, { borderColor: C.border2, flexDirection: 'column', alignItems: 'flex-start', gap: 8 }]}>
               <Text style={{ color: C.text2, fontSize: 13 }}>5秒後にテスト通知を送信します</Text>
               <TouchableOpacity
@@ -3417,7 +3460,6 @@ export default function App() {
             )}
             {settingsPage === 'data' && (
               <>
-            <Text style={[styles.settingSection, { marginTop: 28 }]}>データ管理</Text>
             {/* ⑭ CSV エクスポート */}
             <TouchableOpacity style={[styles.outlineButton, { marginBottom: 12, borderColor: ACCENT }]} onPress={() => {
               const escape = (v: string) => `"${(v ?? '').replace(/"/g, '""')}"`;
@@ -3454,7 +3496,6 @@ export default function App() {
             )}
             {settingsPage === 'help' && (
               <>
-            <Text style={[styles.settingSection, { marginTop: 28 }]}>ヘルプ・使い方</Text>
             {([
               {
                 icon: ICONS.calendar,
@@ -3565,7 +3606,6 @@ export default function App() {
             )}
             {settingsPage === 'support' && (
               <>
-            <Text style={[styles.settingSection, { marginTop: 24 }]}>開発者を支援する</Text>
             <TouchableOpacity
               style={[styles.supportBtn, { backgroundColor: isDark ? '#1c2333' : '#e8f0fe', borderColor: isDark ? '#6ea8fe' : TDU_BLUE }]}
               onPress={showRewardedAd}
