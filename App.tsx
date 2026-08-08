@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import ReAnimated, {
   useSharedValue, useAnimatedStyle, useAnimatedProps, withSpring, withTiming, withSequence, withRepeat,
-  FadeInDown, FadeOutLeft, LinearTransition,
+  FadeInDown, FadeOutLeft, LinearTransition, runOnJS,
 } from 'react-native-reanimated';
 import { GestureHandlerRootView, Gesture, GestureDetector } from 'react-native-gesture-handler';
 import DraggableFlatList, { ScaleDecorator, RenderItemParams } from 'react-native-draggable-flatlist';
@@ -9,7 +9,9 @@ import Svg, { Path } from 'react-native-svg';
 import { Pressable } from 'react-native';
 import { useColorScheme } from 'react-native';
 import { useFonts } from 'expo-font';
-import { Inter_400Regular, Inter_700Bold } from '@expo-google-fonts/inter';
+// 英数字は IBM Plex Sans。Inter は AI 生成 UI の典型として挙がるうえ、
+// CLAUDE.md でも既定フォントとしての使用を禁じている。
+import { IBMPlexSans_400Regular, IBMPlexSans_700Bold } from '@expo-google-fonts/ibm-plex-sans';
 import { NotoSansJP_400Regular, NotoSansJP_700Bold } from '@expo-google-fonts/noto-sans-jp';
 
 import {
@@ -359,11 +361,11 @@ function DayTimeline({
             return (
               <TouchableOpacity key={s.id} onPress={() => onPressItem(s)}
                 style={{
-                  flexDirection: 'row', alignItems: 'center', gap: 4,
+                  flexDirection: 'row', alignItems: 'center', gap: 5,
                   backgroundColor: blendHex(sc, C.bg, 0.16),
-                  borderLeftWidth: 3, borderLeftColor: sc,
                   borderRadius: 6, paddingHorizontal: 8, paddingVertical: 5,
                 }}>
+                <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: sc }} />
                 <Text style={{ fontSize: 11, fontWeight: 'bold', color: C.text }} numberOfLines={1}>{s.company}</Text>
                 <Text style={{ fontSize: 10, color: sc }}>{s.status}</Text>
               </TouchableOpacity>
@@ -423,16 +425,18 @@ function DayTimeline({
                   height: ((p.endMin - p.startMin) / 60) * VT_HOUR_H - 2,
                   left: `${(p.col / p.cols) * 100}%`,
                   width: `${100 / p.cols}%`,
-                  paddingHorizontal: 6, paddingVertical: 4,
+                  paddingHorizontal: 7, paddingVertical: 4,
                   borderRadius: 6,
-                  borderLeftWidth: 3, borderLeftColor: sc,
-                  borderWidth: conflict ? 1.5 : 0,
-                  borderColor: conflict ? DANGER : 'transparent',
+                  borderWidth: conflict ? 1.5 : 1,
+                  borderColor: conflict ? DANGER : blendHex(sc, C.bg, 0.45),
                   backgroundColor: blendHex(sc, C.bg, 0.2),
                 }}>
-                <Text style={{ fontSize: 11, fontWeight: 'bold', color: C.text }} numberOfLines={1}>
-                  {s.pinned ? '📌 ' : ''}{s.company}
-                </Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                  <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: sc }} />
+                  <Text style={{ fontSize: 11, fontWeight: 'bold', color: C.text, flex: 1 }} numberOfLines={1}>
+                    {s.pinned ? '📌 ' : ''}{s.company}
+                  </Text>
+                </View>
                 <Text style={{ fontSize: 9, color: sc }} numberOfLines={1}>
                   {s.status}
                   {s.venueType === 'onsite' ? ' ・対面' : s.venueType === 'online' ? ' ・オンライン' : ''}
@@ -1350,8 +1354,8 @@ export default function App() {
   const [manualOrder, setManualOrder] = useState<string[]>([]);
 
   const [fontsLoaded] = useFonts({
-    Inter_400Regular,
-    Inter_700Bold,
+    IBMPlexSans_400Regular,
+    IBMPlexSans_700Bold,
     NotoSansJP_400Regular,
     NotoSansJP_700Bold,
   });
@@ -2015,11 +2019,34 @@ export default function App() {
   // カレンダー高さアニメーション（週↔月切り替え・月変更）
   // maxCalRows / filteredSorted より後に置くこと。
   // 依存配列はレンダリング時に評価されるため、宣言より前だと初回に undefined が入る。
+  // 開いたときのカレンダー高さ。下の「直近の予定」を引き上げると 0 まで縮む
+  const calOpenHeight = useMemo(
+    () => (calendarMode === 'week' ? 52 : maxCalRows * 52),
+    [calendarMode, maxCalRows],
+  );
   useEffect(() => {
-    const WEEK_H = 52;
-    const MONTH_H = maxCalRows * 52;
-    calHeight.value = withSpring(calendarMode === 'week' ? WEEK_H : MONTH_H, { damping: 15, stiffness: 150 });
-  }, [calendarMode, maxCalRows]);
+    calHeight.value = withSpring(calOpenHeight, { damping: 15, stiffness: 150 });
+  }, [calOpenHeight]);
+
+  // 「直近の予定」を掴んで引き上げるとカレンダーが縮み、予定が広く見られる。
+  // 高さのアニメーションはレイアウト再計算を伴うため、離した時点で開/閉に吸着させる。
+  const calDragStart = useSharedValue(0);
+  const sheetDrag = useMemo(
+    () => Gesture.Pan()
+      .activeOffsetY([-10, 10])
+      .onStart(() => { calDragStart.value = calHeight.value; })
+      .onUpdate(e => {
+        const next = calDragStart.value + e.translationY;
+        calHeight.value = Math.max(0, Math.min(next, calOpenHeight));
+      })
+      .onEnd(e => {
+        // 掴んだ位置から半分より縮んでいるか、上に弾いたら閉じる
+        const closing = calHeight.value < calOpenHeight / 2 || e.velocityY < -400;
+        calHeight.value = withSpring(closing && e.velocityY < 400 ? 0 : calOpenHeight,
+          { damping: 15, stiffness: 150 });
+      }),
+    [calOpenHeight],
+  );
 
   // リストフェードイン（フィルター/ソート変更時）
   const listFadeAnim = useRef(new Animated.Value(1)).current;
@@ -2364,6 +2391,23 @@ export default function App() {
     await saveSchedules(updated);
   };
 
+  // 週表示の左右スワイプ。ジェスチャーはUIスレッドで走るので
+  // 状態更新は runOnJS 経由で渡す。
+  const shiftWeek = (dir: number) => {
+    setSelectedDate(d => addDaysYmd(d, dir * 7));
+    setCalDaySelected(true);
+  };
+  const weekSwipe = useMemo(
+    () => Gesture.Pan()
+      .activeOffsetX([-20, 20])
+      .failOffsetY([-20, 20])
+      .onEnd(e => {
+        if (Math.abs(e.translationX) < 40) return;
+        runOnJS(shiftWeek)(e.translationX < 0 ? 1 : -1);
+      }),
+    [],
+  );
+
   const togglePinned = async (item: Schedule) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     await saveSchedules(schedules.map(s => s.id !== item.id ? s : { ...s, pinned: !s.pinned }));
@@ -2562,12 +2606,18 @@ export default function App() {
               <ReAnimated.View style={[calHeightStyle, { overflow: 'hidden' }]}>
               {calendarMode === 'week'
                 ? (
-                  <WeekCalendarRow
-                    selectedDate={selectedDate} today={today} weekStart={weekStart}
-                    C={C} isDark={isDark} dateCompanyMap={dateCompanyMap} statusColorOf={statusColorOf}
-                    onDayPress={(ds) => { setSelectedDate(ds); setCalDaySelected(true); }}
-                    onDayDoubleTap={(ds) => { setSelectedDate(ds); setCalDaySelected(true); openAdd(ds); }}
-                  />
+                  // 週表示は月表示のような横ページャが無く、スワイプしても何も起きなかった。
+                  // 左右に振れたら前後の週へ移す。
+                  <GestureDetector gesture={weekSwipe}>
+                    <View>
+                      <WeekCalendarRow
+                        selectedDate={selectedDate} today={today} weekStart={weekStart}
+                        C={C} isDark={isDark} dateCompanyMap={dateCompanyMap} statusColorOf={statusColorOf}
+                        onDayPress={(ds) => { setSelectedDate(ds); setCalDaySelected(true); }}
+                        onDayDoubleTap={(ds) => { setSelectedDate(ds); setCalDaySelected(true); openAdd(ds); }}
+                      />
+                    </View>
+                  </GestureDetector>
                 ) : (
               <ScrollView
                 ref={calScrollRef}
@@ -2730,8 +2780,6 @@ export default function App() {
                                           marginLeft: capL ? 0 : -4,
                                           marginRight: capR ? 0 : -4,
                                           backgroundColor: blendHex(sc, C.calBg, 0.33),
-                                          borderLeftWidth: capL ? 2 : 0,
-                                          borderLeftColor: sc,
                                           borderTopLeftRadius: capL ? 3 : 0,
                                           borderBottomLeftRadius: capL ? 3 : 0,
                                           borderTopRightRadius: capR ? 3 : 0,
@@ -2757,6 +2805,11 @@ export default function App() {
                 )}
               </ReAnimated.View>
             )}
+            <GestureDetector gesture={sheetDrag}>
+              <View style={{ alignItems: 'center', paddingTop: 6, paddingBottom: 2, backgroundColor: C.bg }}>
+                <View style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: C.border }} />
+              </View>
+            </GestureDetector>
             <View style={[styles.todoArea, { backgroundColor: C.bg }]}>
               {!calDaySelected ? (
                 <>
@@ -2797,7 +2850,7 @@ export default function App() {
                         const sc = item.calendarColor ?? statusColorOf(item.status);
                         return (
                           <TouchableOpacity key={item.id}
-                            style={[styles.itemCard, { borderLeftColor: sc, borderLeftWidth: 3, borderColor: C.border2, backgroundColor: C.bg }]}
+                            style={[styles.itemCard, { borderColor: C.border2, backgroundColor: C.bg }]}
                             onPress={() => openDetail(item)}>
                             <View style={{ flex: 1 }}>
                               <Text style={[styles.itemTitle, { color: C.text }]}>{item.company}</Text>
@@ -2927,12 +2980,12 @@ export default function App() {
                             borderColor: isActive ? ACCENT : (isDark ? C.border : statusCardBorder(item.status)),
                           }]}
                           onPress={() => openDetail(item)}>
-                          <View style={[styles.genreBand, { backgroundColor: sc }]} />
-                          <View style={{ flex: 1, paddingLeft: 10 }}>
+                          <View style={{ flex: 1 }}>
                             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                               <View style={[styles.rankBadge, { backgroundColor: rankColor(item.rank) }]}>
                                 <Text style={styles.rankText}>{item.rank}</Text>
                               </View>
+                              <View style={[styles.statusDot, { backgroundColor: sc }]} />
                               <HighlightText text={item.company + (isInternal ? ' 🌸' : '')} query={searchQuery} style={[styles.itemTitle, { color: isInactive ? '#888' : C.text, flex: 1 }]} />
                               {hasConflict(item) && <View style={{ backgroundColor: DANGER, borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2 }}>
                                 <Text style={{ color: '#fff', fontSize: 10, fontWeight: 'bold' }}>日程重複</Text>
@@ -2994,12 +3047,12 @@ export default function App() {
                           borderColor: isDark ? C.border : statusCardBorder(item.status)
                         }]}
                         onPress={() => openDetail(item)}>
-                        <View style={[styles.genreBand, { backgroundColor: sc }]} />
-                        <View style={{ flex: 1, paddingLeft: 10 }}>
+                        <View style={{ flex: 1 }}>
                           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                             <View style={[styles.rankBadge, { backgroundColor: rankColor(item.rank) }]}>
                               <Text style={styles.rankText}>{item.rank}</Text>
                             </View>
+                            <View style={[styles.statusDot, { backgroundColor: sc }]} />
                             <HighlightText
                               text={item.company + (isInternal ? ' 🌸' : '')}
                               query={searchQuery}
@@ -3133,7 +3186,7 @@ export default function App() {
         {activeTab === 'settings' && (
           <ScrollView style={{ flex: 1, padding: 20, backgroundColor: C.bg }}>
             {/* 統計ダッシュボード */}
-            <View style={{ backgroundColor: isDark ? '#1a2a3a' : '#eaf2ff', borderRadius: 16, padding: 16, marginBottom: 24, borderWidth: 1, borderColor: isDark ? '#2a3a4a' : '#c8ddf7' }}>
+            <View style={{ backgroundColor: isDark ? '#1a2a3a' : '#eaf2ff', borderRadius: 10, padding: 16, marginBottom: 24, borderWidth: 1, borderColor: isDark ? '#2a3a4a' : '#c8ddf7' }}>
               <Text style={{ fontSize: 12, color: ACCENT, fontWeight: 'bold', marginBottom: 12 }}>就活ダッシュボード</Text>
               <View style={{ flexDirection: 'row', justifyContent: 'space-around' }}>
                 <View style={{ alignItems: 'center' }}>
@@ -3179,24 +3232,20 @@ export default function App() {
                 ))}
               </View>
 
-              {/* 今週の動きとやることの残り */}
-              <View style={{ flexDirection: 'row', gap: 10, marginTop: 16 }}>
-                <View style={{ flex: 1, backgroundColor: C.bg3, borderRadius: 10, padding: 10 }}>
-                  <Text style={{ fontSize: 10, color: C.text3 }}>今週の動き</Text>
-                  <Text style={{ fontSize: 13, color: C.text, fontWeight: 'bold', marginTop: 4 }}>
-                    追加 {weekMoves.added} ／ 前進 {weekMoves.advanced}
-                  </Text>
-                </View>
-                <View style={{ flex: 1, backgroundColor: C.bg3, borderRadius: 10, padding: 10 }}>
-                  <Text style={{ fontSize: 10, color: C.text3 }}>やること</Text>
-                  <Text style={{
-                    fontSize: 13, fontWeight: 'bold', marginTop: 4,
-                    color: overdueTodoCount > 0 ? DANGER : C.text,
-                  }}>
-                    残り {todos.length}
-                    {overdueTodoCount > 0 ? `（期限切れ ${overdueTodoCount}）` : ''}
-                  </Text>
-                </View>
+              {/* カードの入れ子を避け、区切り線だけの行で並べる */}
+              <View style={{ height: 1, backgroundColor: isDark ? '#2a3a4a' : '#c8ddf7', marginTop: 16 }} />
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingTop: 12 }}>
+                <Text style={{ fontSize: 12, color: C.text3 }}>今週の動き</Text>
+                <Text style={{ fontSize: 12, color: C.text, fontWeight: 'bold' }}>
+                  追加 {weekMoves.added} ／ 前進 {weekMoves.advanced}
+                </Text>
+              </View>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingTop: 8 }}>
+                <Text style={{ fontSize: 12, color: C.text3 }}>やること</Text>
+                <Text style={{ fontSize: 12, fontWeight: 'bold', color: overdueTodoCount > 0 ? DANGER : C.text }}>
+                  残り {todos.length}
+                  {overdueTodoCount > 0 ? `（期限切れ ${overdueTodoCount}）` : ''}
+                </Text>
               </View>
             </View>
 
@@ -4182,7 +4231,7 @@ const styles = StyleSheet.create({
   statNum: { fontSize: 18, fontWeight: 'bold', color: TDU_BLUE },
   statLabel: { fontSize: 9, color: TDU_BLUE },
 
-  calLabel: { borderLeftWidth: 2, borderRadius: 3, paddingHorizontal: 2, marginTop: 1, width: '100%' },
+  calLabel: { borderRadius: 3, paddingHorizontal: 3, marginTop: 1, width: '100%' },
   calLabelText: { fontSize: 7, fontWeight: 'bold' },
   calMore: { fontSize: 7, color: '#999', marginTop: 1 },
 
@@ -4221,14 +4270,17 @@ const styles = StyleSheet.create({
   swipeDeleteBtn: { flex: 1, justifyContent: 'center', alignItems: 'center', width: 80 },
   swipeDeleteText: { color: '#fff', fontSize: 11, fontWeight: 'bold', textAlign: 'center' },
 
-  listCard: { padding: 14, borderRadius: 12, flexDirection: 'row', alignItems: 'center', borderWidth: 1, elevation: 3, overflow: 'hidden', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.08, shadowRadius: 8 },
-  genreBand: { width: 4, borderRadius: 4, alignSelf: 'stretch' },
-  dateText: { fontSize: 11, color: '#999', marginTop: 4, fontFamily: 'Inter_400Regular' },
+  // 角丸は チップ6 / カード10 / モーダル18 の3段だけに絞る。
+  // 淡い影と境界線の二重装飾はやめ、境界線だけで面を分ける。
+  listCard: { padding: 14, borderRadius: 10, flexDirection: 'row', alignItems: 'center', borderWidth: 1, overflow: 'hidden' },
+  // 左の色縦線はやめ、企業名の頭に置く小さな色ドットにした
+  statusDot: { width: 8, height: 8, borderRadius: 4 },
+  dateText: { fontSize: 11, color: '#999', marginTop: 4, fontFamily: 'IBMPlexSans_400Regular' },
   notePreview: { fontSize: 10, color: '#aaa', marginTop: 2 },
   statusBadge: { backgroundColor: TDU_BLUE, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
   statusBadgeText: { color: '#fff', fontSize: 9, fontWeight: 'bold', fontFamily: 'NotoSansJP_700Bold' },
   rankBadge: { width: 22, height: 22, borderRadius: 6, alignItems: 'center', justifyContent: 'center' },
-  rankText: { color: '#fff', fontSize: 10, fontWeight: 'bold', fontFamily: 'Inter_700Bold' },
+  rankText: { color: '#fff', fontSize: 10, fontWeight: 'bold', fontFamily: 'IBMPlexSans_700Bold' },
   checkBtn: { backgroundColor: LIGHT.bg3, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
   checkBtnText: { fontSize: 10, color: TDU_BLUE, fontWeight: 'bold' },
 

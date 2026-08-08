@@ -15,7 +15,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.moritaryoga.shukatsukanri",
-      "buildNumber": "93",
+      "buildNumber": "94",
       "appleTeamId": "M83VW435WG",
       "infoPlist": {
         "NSUserNotificationUsageDescription": "選考の締め切りや面接日程をリマインドするために通知を使用します。",
