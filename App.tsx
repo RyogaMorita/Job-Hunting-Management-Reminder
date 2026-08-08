@@ -148,6 +148,7 @@ const ICONS = {
   checklist:    require('./assets/checklist.png'),
   search:       require('./assets/search.png'),
   reload:       require('./assets/reload.png'),
+  pin:          require('./assets/icon_pin.png'),
 };
 
 const RANK_OPTIONS = ['S', 'A', 'B', 'C'];
@@ -184,6 +185,8 @@ interface Schedule {
   webTestVenue?: string;
   // 辞退の連絡を済ませたか
   declineContacted?: boolean;
+  // 一覧・カレンダーで常に上に出す
+  pinned?: boolean;
   notifyEnabled?: boolean;
   notifySettings?: NotifySetting;
   statusHistory?: { status: string; changedAt: string }[];
@@ -1673,8 +1676,11 @@ export default function App() {
     const used: Record<string, Set<number>> = {};
     schedules
       .filter(s => s.date && s.endDate && s.endDate > s.date)
-      // 長い期間ほど上の段に来るように、開始が早い順・期間が長い順で詰める
-      .sort((a, b) => a.date.localeCompare(b.date) || (b.endDate ?? '').localeCompare(a.endDate ?? ''))
+      // ピン留めを最上段に。あとは開始が早い順・期間が長い順で詰める
+      .sort((a, b) =>
+        (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) ||
+        a.date.localeCompare(b.date) ||
+        (b.endDate ?? '').localeCompare(a.endDate ?? ''))
       .forEach(s => {
         const days = expandDateRange(s);
         let lane = 0;
@@ -1695,7 +1701,9 @@ export default function App() {
       });
     });
     Object.keys(map).forEach(d => {
-      map[d].sort((a, b) => (STATUS_PRIORITY[b.status] ?? 0) - (STATUS_PRIORITY[a.status] ?? 0));
+      map[d].sort((a, b) =>
+        (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) ||
+        (STATUS_PRIORITY[b.status] ?? 0) - (STATUS_PRIORITY[a.status] ?? 0));
     });
     return map;
   }, [schedules]);
@@ -1707,9 +1715,10 @@ export default function App() {
     schedules.forEach(s => {
       const key = `${s.company.trim()}__${trackGroup(s.status)}`;
       const cur = map.get(key);
-      if (!cur || (STATUS_PRIORITY[s.status] ?? 0) > (STATUS_PRIORITY[cur.status] ?? 0)) {
-        map.set(key, s);
-      }
+      if (!cur) { map.set(key, s); return; }
+      // ピン留めした行が畳まれて消えないよう、代表行はピン優先で選ぶ
+      if (!!s.pinned !== !!cur.pinned) { if (s.pinned) map.set(key, s); return; }
+      if ((STATUS_PRIORITY[s.status] ?? 0) > (STATUS_PRIORITY[cur.status] ?? 0)) map.set(key, s);
     });
     return Array.from(map.values());
   }, [schedules]);
@@ -1761,7 +1770,9 @@ export default function App() {
       }
     }
     if (!sortAsc && sortType !== '直近順' && sortType !== '手動') list.reverse();
-    return list;
+    // ピン留めは並び順・昇順降順によらず常に先頭。ピン同士の順は上の並びを保つ
+    const pinned = list.filter(s => s.pinned);
+    return pinned.length > 0 ? [...pinned, ...list.filter(s => !s.pinned)] : list;
   }, [deduplicatedSchedules, searchQuery, filterGenreIds, filterStatuses, sortType, sortAsc, manualOrder]); // ② 正しい依存配列
 
   const filteredByDate = useMemo(
@@ -2182,6 +2193,11 @@ export default function App() {
       statusHistory: [...(s.statusHistory ?? []), { status: '完了', changedAt: new Date().toISOString() }],
     });
     await saveSchedules(updated);
+  };
+
+  const togglePinned = async (item: Schedule) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    await saveSchedules(schedules.map(s => s.id !== item.id ? s : { ...s, pinned: !s.pinned }));
   };
 
   // target を渡すと次段階ではなくそこへ直接移す。
@@ -2770,6 +2786,12 @@ export default function App() {
                               query={searchQuery}
                               style={[styles.itemTitle, { color: isInactive ? '#888' : C.text, flex: 1 }]}
                             />
+                            <TouchableOpacity onPress={() => togglePinned(item)} style={{ padding: 4 }}>
+                              <Image source={ICONS.pin} style={{
+                                width: 14, height: 14,
+                                tintColor: item.pinned ? ACCENT : (isDark ? '#555' : '#ccc'),
+                              }} />
+                            </TouchableOpacity>
                             {hasConflict(item) && <View style={{ backgroundColor: DANGER, borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2 }}>
                                 <Text style={{ color: '#fff', fontSize: 10, fontWeight: 'bold' }}>日程重複</Text>
                               </View>}
