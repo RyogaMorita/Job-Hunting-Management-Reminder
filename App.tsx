@@ -160,11 +160,6 @@ const HOURS = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0'));
 const MINUTES = ['00', '15', '30', '45'];
 const INACTIVE = ['内定辞退', '不合格', '完了'];
 
-const statusCardColor = (s: string) =>
-  s === '内定' ? '#fff0f0' : INACTIVE.includes(s) ? '#f0f0f0' : '#ffffff';
-const statusCardBorder = (s: string) =>
-  s === '内定' ? '#f5a0a0' : INACTIVE.includes(s) ? '#cccccc' : '#eeeeee';
-
 // ─── 型定義 ───────────────────────────────────────────────────────
 interface Genre { id: string; name: string; color: string; }
 
@@ -651,12 +646,14 @@ function WheelDateField({
 }
 
 function WheelTimeField({
-  label, hour, minute, onChange, C,
+  label, hour, minute, onChange, C, autoOpen = false,
 }: {
   label?: string; hour: string; minute: string;
   onChange: (h: string, m: string) => void; C: typeof LIGHT;
+  /// 設定行から開いた場合は、もう一度ボタンを押させずに最初からホイールを出す
+  autoOpen?: boolean;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(autoOpen);
   // 日付側と同じく、スクロール中の連続 onChange を確定させない
   const [draft, setDraft] = useState<Date | null>(null);
 
@@ -673,7 +670,7 @@ function WheelTimeField({
 
   return (
     <View style={{ marginBottom: 6 }}>
-      <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
+      <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center', display: autoOpen ? 'none' : 'flex' }}>
         {label ? <Text style={{ fontSize: 12, color: C.text3, width: 52 }}>{label}</Text> : null}
         <RippleButton
           style={[styles.input, { flex: 1, backgroundColor: C.inputBg, justifyContent: 'center' }]}
@@ -1249,9 +1246,12 @@ const LIGHT = {
 // セマンティックカラー。
 // StyleSheet.create は静的で C（ダーク/ライト）を参照できないため、
 // ここにライトの既定値を置き、ダーク時は各所で C.xxx をインラインで重ねる。
-const DANGER = '#e74c3c';        // 削除・警告
+// セマンティックカラー。意味を1つに固定し、データ固有の意味には使わない。
+// 特に青（ACCENT）は「操作・選択・遷移」専用。志望度やステータスの色分けには使わない。
+const DANGER = '#e74c3c';        // 破壊的操作・期限切れ・エラー
+const WARNING = '#E67E22';       // 期限間近・注意
+const SUCCESS = '#27AE60';       // 完了・成功
 const NEUTRAL_GRAY = '#95A5A6';  // ステータス未設定時のフォールバック
-const SUCCESS = '#27AE60';       // 完了・チェック済み
 const CHIP_BG = '#f0f2f5';       // チップ/ピッカーの背景
 const ACCENT_BORDER = '#dde8ff'; // ACCENT の淡い枠線
 const SURFACE_MUTED = '#f8f8f8'; // 沈めた面
@@ -1381,6 +1381,9 @@ export default function App() {
   const [itemNotifyEnabled, setItemNotifyEnabled] = useState(true);
   const [notifyDaysList, setNotifyDaysList] = useState<string[]>(['1']);
   const [notifyHour, setNotifyHour] = useState('09');
+  // 通知タイミングのシートと、通知時刻ピッカーの開閉
+  const [notifyDaysSheet, setNotifyDaysSheet] = useState(false);
+  const [notifyTimeOpen, setNotifyTimeOpen] = useState(false);
   const [notifyMinute, setNotifyMinute] = useState('00');
 
   // ダブルタップ検知
@@ -2493,47 +2496,39 @@ export default function App() {
       <StatusBar style="dark" />
       <View style={[styles.container, { backgroundColor: C.bg }]}>
 
-        {/* ヘッダー */}
+        {/* ヘッダー。
+            以前はアプリ名と持駒/内定の数を全タブ共通で出していたが、
+            どの画面を見ているのか分からず、設定を開いても本題が下に押し出されていた。
+            画面名だけを出し、数字はダッシュボードへ移した。 */}
         <View style={[styles.topNav, { borderBottomColor: C.border }]}>
-          {/* 1行目：持駒・タイトル・内定 */}
-          <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: 6, paddingBottom: 6 }}>
-            <View style={[styles.statChip, { backgroundColor: C.statChip }]}>
-              <Text style={[styles.statNum, { color: isDark ? '#6ea8fe' : TDU_BLUE }]}>{activeCount}</Text>
-              <Text style={[styles.statLabel, { color: isDark ? '#6ea8fe' : TDU_BLUE }]}>持駒</Text>
-            </View>
-            <Text style={[styles.headerTitle, { flex: 1, textAlign: 'center', color: ACCENT }]}>就活管理リマインダー</Text>
-            <View style={[styles.statChip, { backgroundColor: isDark ? '#2d2007' : '#fff3cd' }]}>
-              <Text style={[styles.statNum, { color: '#856404' }]}>{internalCount}</Text>
-              <Text style={[styles.statLabel, { color: '#856404' }]}>内定</Text>
-            </View>
+          <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingTop: 8, paddingBottom: 8, gap: 8 }}>
+            <Text style={[styles.screenTitle, { color: C.text }]}>
+              {activeTab === 'calendar' ? 'カレンダー' : activeTab === 'list' ? '持ち駒' : '設定'}
+            </Text>
+            {activeTab === 'list' ? (
+              <Text style={{ fontSize: 13, color: C.text3 }}>{activeCount}社</Text>
+            ) : null}
           </View>
 
-          {/* やること：締切が企業カードに散らばるので、横断で1本にまとめて出す */}
-          {todos.length > 0 && (
-            <ReAnimated.View entering={FadeInDown.duration(260)} style={{ paddingHorizontal: 12, paddingBottom: 6 }}>
-              <RippleButton
-                style={{
-                  flexDirection: 'row', alignItems: 'center', gap: 8,
-                  backgroundColor: overdueTodoCount > 0 ? (isDark ? '#3a1414' : '#fdecea') : C.bg3,
-                  borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8,
-                  borderWidth: 1,
-                  borderColor: overdueTodoCount > 0 ? DANGER : 'transparent',
-                }}
+          {/* やること。設定画面では出さない（設定は挙動を変える場所に寄せる） */}
+          {todos.length > 0 && activeTab !== 'settings' && (
+            <ReAnimated.View entering={FadeInDown.duration(260)} style={{ paddingHorizontal: 16, paddingBottom: 8 }}>
+              <TouchableOpacity
+                style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}
                 onPress={() => setTodoModalVisible(true)}>
                 <PulseView active={overdueTodoCount > 0}>
-                  <Image source={ICONS.checklist} style={{ width: 15, height: 15, tintColor: overdueTodoCount > 0 ? DANGER : ACCENT }} resizeMode="contain" />
+                  <Image source={ICONS.checklist} style={{ width: 14, height: 14, tintColor: overdueTodoCount > 0 ? DANGER : C.text3 }} resizeMode="contain" />
                 </PulseView>
-                <Text style={{ fontSize: 12, fontWeight: 'bold', color: overdueTodoCount > 0 ? DANGER : C.text, flex: 1 }} numberOfLines={1}>
+                <Text style={{ fontSize: 13, color: overdueTodoCount > 0 ? DANGER : C.text2, flex: 1 }} numberOfLines={1}>
                   やること {todos.length}件
-                  {overdueTodoCount > 0 ? `（期限切れ ${overdueTodoCount}）` : ''}
-                  {declinePendingCount > 0 ? `・辞退連絡 ${declinePendingCount}` : ''}
+                  {overdueTodoCount > 0 ? `・期限切れ ${overdueTodoCount}` : ''}
                 </Text>
-                <Text style={{ fontSize: 11, color: C.text3 }}>{todos[0].company} {todoDueLabel(todos[0])}</Text>
-              </RippleButton>
+                <Text style={{ fontSize: 15, color: C.text3 }}>›</Text>
+              </TouchableOpacity>
             </ReAnimated.View>
           )}
 
-          {/* 2行目：広告（課金済みなら非表示→カレンダーが自動で上に移動） */}
+          {/* 広告（課金済みなら非表示） */}
           {!adFree && (
             <View style={{ width: '100%', height: 60, alignItems: 'center', justifyContent: 'center' }}>
               <BannerAd
@@ -2826,9 +2821,7 @@ export default function App() {
                             <Text style={[styles.itemTitle, { color: C.text }]}>{item.company}</Text>
                             <Text style={[styles.itemStatus, { color: C.text2 }]}>{item.date.replace(/-/g, '/')} {timeStr(item.hour, item.minute) ? timeStr(item.hour, item.minute) + '〜 · ' : ''}{item.status}</Text>
                           </View>
-                          <View style={[styles.rankBadge, { backgroundColor: rankColor(item.rank) }]}>
-                            <Text style={styles.rankText}>{item.rank}</Text>
-                          </View>
+                          <Text style={{ fontSize: 12, color: C.text3, fontFamily: 'IBMPlexSans_400Regular' }}>{item.rank}</Text>
                         </TouchableOpacity>
                       ))
                     }
@@ -2856,10 +2849,8 @@ export default function App() {
                               <Text style={[styles.itemTitle, { color: C.text }]}>{item.company}</Text>
                               <Text style={[styles.itemStatus, { color: C.text2 }]}>{timeStr(item.hour, item.minute) ? timeStr(item.hour, item.minute) + '〜 · ' : ''}{item.status}</Text>
                             </View>
-                            <View style={[styles.rankBadge, { backgroundColor: rankColor(item.rank) }]}>
-                              <Text style={styles.rankText}>{item.rank}</Text>
-                            </View>
-                            <Text style={styles.itemArrow}>〉</Text>
+                            <Text style={{ fontSize: 12, color: C.text3, fontFamily: 'IBMPlexSans_400Regular' }}>{item.rank}</Text>
+                            <Text style={styles.itemArrow}>›</Text>
                           </TouchableOpacity>
                         );
                       })
@@ -2976,17 +2967,16 @@ export default function App() {
                       <SwipeableRow onDelete={() => deleteSchedule(item.id)}>
                         <AnimatedCard
                           style={[styles.listCard, {
-                            backgroundColor: isDark ? (isInactive ? '#2a2a2a' : isInternal ? '#2d0a0a' : C.card) : statusCardColor(item.status),
-                            borderColor: isActive ? ACCENT : (isDark ? C.border : statusCardBorder(item.status)),
+                            backgroundColor: C.card,
+                            borderColor: isActive ? ACCENT : C.border,
+                            opacity: isInactive ? 0.6 : 1,
                           }]}
                           onPress={() => openDetail(item)}>
                           <View style={{ flex: 1 }}>
                             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                              <View style={[styles.rankBadge, { backgroundColor: rankColor(item.rank) }]}>
-                                <Text style={styles.rankText}>{item.rank}</Text>
-                              </View>
                               <View style={[styles.statusDot, { backgroundColor: sc }]} />
-                              <HighlightText text={item.company + (isInternal ? ' 🌸' : '')} query={searchQuery} style={[styles.itemTitle, { color: isInactive ? '#888' : C.text, flex: 1 }]} />
+                              <HighlightText text={item.company + (isInternal ? ' 🌸' : '')} query={searchQuery} style={[styles.itemTitle, { color: C.text, flex: 1 }]} />
+                              <Text style={{ fontSize: 12, color: C.text3, fontFamily: 'IBMPlexSans_400Regular' }}>{item.rank}</Text>
                               {hasConflict(item) && <View style={{ backgroundColor: DANGER, borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2 }}>
                                 <Text style={{ color: '#fff', fontSize: 10, fontWeight: 'bold' }}>日程重複</Text>
                               </View>}
@@ -3041,128 +3031,96 @@ export default function App() {
                       exiting={FadeOutLeft.duration(200)}
                       layout={LinearTransition.springify()}>
                     <SwipeableRow onDelete={() => deleteSchedule(item.id)}>
+                      {/* 一覧で一瞬で知りたいのは 企業 / 現在ステータス / 次の日付 まで。
+                          ランクバッジ・進捗ステッパー・各種ピルは詳細側へ寄せた。
+                          ステータスは「状態」なのでボタンの見た目にしない。 */}
                       <AnimatedCard
                         style={[styles.listCard, {
-                          backgroundColor: isDark ? (isInactive ? '#2a2a2a' : isInternal ? '#2d0a0a' : C.card) : statusCardColor(item.status),
-                          borderColor: isDark ? C.border : statusCardBorder(item.status)
+                          backgroundColor: C.card,
+                          borderColor: C.border,
+                          opacity: isInactive ? 0.6 : 1,
                         }]}
                         onPress={() => openDetail(item)}>
-                        <View style={{ flex: 1 }}>
+                        <View style={{ flex: 1, gap: 3 }}>
                           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                            <View style={[styles.rankBadge, { backgroundColor: rankColor(item.rank) }]}>
-                              <Text style={styles.rankText}>{item.rank}</Text>
-                            </View>
                             <View style={[styles.statusDot, { backgroundColor: sc }]} />
                             <HighlightText
                               text={item.company + (isInternal ? ' 🌸' : '')}
                               query={searchQuery}
-                              style={[styles.itemTitle, { color: isInactive ? '#888' : C.text, flex: 1 }]}
+                              style={[styles.itemTitle, { color: C.text, flex: 1 }]}
                             />
-                            <TouchableOpacity onPress={() => togglePinned(item)} style={{ padding: 4 }}>
-                              <Image source={ICONS.pin} style={{
-                                width: 14, height: 14,
-                                tintColor: item.pinned ? ACCENT : (isDark ? '#555' : '#ccc'),
-                              }} />
-                            </TouchableOpacity>
-                            {hasConflict(item) && <View style={{ backgroundColor: DANGER, borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2 }}>
-                                <Text style={{ color: '#fff', fontSize: 10, fontWeight: 'bold' }}>日程重複</Text>
-                              </View>}
-                              {cdLabel && <View style={{ backgroundColor: cdLabel === '今日' ? DANGER : '#f39c12', borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2 }}>
-                              <Text style={{ color: '#fff', fontSize: 10, fontWeight: 'bold' }}>{cdLabel}</Text>
-                            </View>}
-                          </View>
-                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                            <Text style={styles.dateText}>{item.date ? dateRangeStr(item) + (timeStr(item.hour, item.minute) ? ' ' + timeStr(item.hour, item.minute) + '〜' : '') : '日付未定'}</Text>
-                            {item.userId ? (
-                              <TouchableOpacity onPress={() => { Clipboard.setString(item.userId); Alert.alert('コピー', 'IDをコピーしました'); }}
-                                style={{ backgroundColor: C.statChip, borderRadius: 6, paddingHorizontal: 7, paddingVertical: 2 }}>
-                                <Text style={{ fontSize: 10, color: ACCENT, fontWeight: 'bold' }}>IDコピー</Text>
-                              </TouchableOpacity>
+                            {item.pinned ? (
+                              <Image source={ICONS.pin} style={{ width: 12, height: 12, tintColor: ACCENT }} />
                             ) : null}
-                            {item.password ? (
-                              <TouchableOpacity onPress={() => { Clipboard.setString(item.password); Alert.alert('コピー', 'PWをコピーしました'); }}
-                                style={{ backgroundColor: C.statChip, borderRadius: 6, paddingHorizontal: 7, paddingVertical: 2 }}>
-                                <Text style={{ fontSize: 10, color: DANGER, fontWeight: 'bold' }}>PWコピー</Text>
-                              </TouchableOpacity>
-                            ) : null}
-                            {/* チェックリストへの入口。準備テンプレート・期限設定はここから開く */}
-                            {!isInactive ? (() => {
-                              const cl = item.customChecklist ?? [];
-                              const done = cl.filter(c => c.checked).length;
-                              return (
-                                <TouchableOpacity
-                                  style={[styles.checkBtn, { backgroundColor: C.bg3 }]}
-                                  onPress={() => setCheckModalItem(item)}>
-                                  <Text style={styles.checkBtnText}>
-                                    {cl.length > 0 ? `やること ${done}/${cl.length}` : 'やること'}
-                                  </Text>
-                                </TouchableOpacity>
-                              );
-                            })() : null}
+                            <Text style={{ fontSize: 12, color: C.text3, fontFamily: 'IBMPlexSans_400Regular' }}>{item.rank}</Text>
                           </View>
-                          {item.url ? (
+
+                          <Text style={{ fontSize: 13, color: C.text2 }} numberOfLines={1}>{item.status}</Text>
+
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                            <Text style={styles.dateText}>
+                              {item.date
+                                ? dateRangeStr(item) + (timeStr(item.hour, item.minute) ? ' ' + timeStr(item.hour, item.minute) : '')
+                                : '日付未定'}
+                            </Text>
+                            {cdLabel ? (
+                              <Text style={{ fontSize: 11, fontWeight: 'bold', color: cdLabel === '今日' ? DANGER : WARNING }}>
+                                ・{cdLabel}
+                              </Text>
+                            ) : null}
+                            {hasConflict(item) ? (
+                              <Text style={{ fontSize: 11, fontWeight: 'bold', color: DANGER }}>・日程重複</Text>
+                            ) : null}
+                            {item.status === '内定辞退' && !item.declineContacted ? (
+                              <Text style={{ fontSize: 11, fontWeight: 'bold', color: DANGER }}>・辞退未連絡</Text>
+                            ) : null}
+                          </View>
+
+                          {/* 副次操作は背景なしのテキスト。1カードに1つまで */}
+                          {!isInactive && ns ? (
                             <TouchableOpacity
-                              style={[styles.urlChip, { backgroundColor: C.statChip }]}
-                              onPress={() => Linking.openURL(item.url.startsWith('http') ? item.url : 'https://' + item.url)}>
-                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                                <Image source={ICONS.externalLink} style={{ width: 11, height: 11, tintColor: ACCENT }} />
-                                <Text style={styles.urlChipText}>開く</Text>
-                              </View>
+                              style={{ alignSelf: 'flex-start', paddingVertical: 6, paddingRight: 12, marginTop: 1 }}
+                              onPress={() => advanceStatus(item)}>
+                              <Text style={{ fontSize: 13, color: ACCENT, fontWeight: 'bold' }}>
+                                {ns === 'インターン面接' ? '面接へ進める'
+                                  : ns === 'インターン確定' ? '参加確定にする'
+                                  : `${ns}へ進める`}
+                              </Text>
                             </TouchableOpacity>
                           ) : null}
-                          {item.note ? <Text style={styles.notePreview} numberOfLines={1}>📝 {item.note}</Text> : null}
-                          {!isInactive && <MiniStepper status={item.status} statusColors={statusColors} isDark={isDark} animTrigger={advanceAnimMap[item.id] ?? 0} />}
-                        </View>
-                        <View style={{ alignItems: 'flex-end', gap: 6 }}>
-                          <View style={[styles.statusBadge, { backgroundColor: sc },
-                          isInactive && { backgroundColor: '#aaa' }]}>
-                            <Text style={styles.statusBadgeText}>{item.status}</Text>
-                          </View>
-                          {ns && !isInactive ? (
-                            <RippleButton
-                              style={[styles.nextStatusBtn, { borderColor: sc }]}
-                              onPress={() => advanceStatus(item)}>
-                              <Text style={[styles.nextStatusBtnText, { color: sc }]} numberOfLines={1}>{
-                                ns === 'インターン面接' ? '面接→' :
-                                ns === 'インターン確定' ? '参加確定→' :
-                                ns + ' →'
-                              }</Text>
-                            </RippleButton>
-                          ) : null}
-                          {EVENT_STATUSES.includes(item.status) && !isInactive ? (
-                            <RippleButton
-                              style={[styles.nextStatusBtn, { borderColor: NEUTRAL_GRAY }]}
+                          {!isInactive && EVENT_STATUSES.includes(item.status) ? (
+                            <TouchableOpacity
+                              style={{ alignSelf: 'flex-start', paddingVertical: 6, paddingRight: 12, marginTop: 1 }}
                               onPress={() => completeStatus(item)}>
-                              <Text style={[styles.nextStatusBtnText, { color: NEUTRAL_GRAY }]}>完了 →</Text>
-                            </RippleButton>
+                              <Text style={{ fontSize: 13, color: ACCENT, fontWeight: 'bold' }}>
+                                {item.status}を完了にする
+                              </Text>
+                            </TouchableOpacity>
                           ) : null}
-                          {/* 内定は一本道で進めないので承諾・辞退の2択を出す */}
                           {item.status === '内定' ? (
-                            <>
-                              <RippleButton
-                                style={[styles.nextStatusBtn, { borderColor: statusColorOf('内定承諾') }]}
-                                onPress={() => advanceStatus(item, '内定承諾')}>
-                                <Text style={[styles.nextStatusBtnText, { color: statusColorOf('内定承諾') }]} numberOfLines={1}>承諾 →</Text>
-                              </RippleButton>
-                              <RippleButton
-                                style={[styles.nextStatusBtn, { borderColor: statusColorOf('内定辞退') }]}
+                            <View style={{ flexDirection: 'row', gap: 18, marginTop: 1 }}>
+                              <TouchableOpacity style={{ paddingVertical: 6 }} onPress={() => advanceStatus(item, '内定承諾')}>
+                                <Text style={{ fontSize: 13, color: ACCENT, fontWeight: 'bold' }}>承諾する</Text>
+                              </TouchableOpacity>
+                              <TouchableOpacity
+                                style={{ paddingVertical: 6 }}
                                 onPress={() => Alert.alert('内定辞退', `「${item.company}」を辞退しますか？`, [
                                   { text: 'キャンセル', style: 'cancel' },
                                   { text: '辞退する', style: 'destructive', onPress: () => advanceStatus(item, '内定辞退') },
                                 ])}>
-                                <Text style={[styles.nextStatusBtnText, { color: statusColorOf('内定辞退') }]} numberOfLines={1}>辞退 →</Text>
-                              </RippleButton>
-                            </>
+                                <Text style={{ fontSize: 13, color: DANGER, fontWeight: 'bold' }}>辞退する</Text>
+                              </TouchableOpacity>
+                            </View>
                           ) : null}
-                          {/* 辞退を決めたのに連絡できていない企業を目立たせる */}
                           {item.status === '内定辞退' && !item.declineContacted ? (
-                            <RippleButton
-                              style={[styles.nextStatusBtn, { borderColor: DANGER, backgroundColor: DANGER + '14' }]}
+                            <TouchableOpacity
+                              style={{ alignSelf: 'flex-start', paddingVertical: 6, paddingRight: 12, marginTop: 1 }}
                               onPress={() => markDeclineContacted(item)}>
-                              <Text style={[styles.nextStatusBtnText, { color: DANGER }]} numberOfLines={1}>連絡済にする</Text>
-                            </RippleButton>
+                              <Text style={{ fontSize: 13, color: ACCENT, fontWeight: 'bold' }}>連絡済にする</Text>
+                            </TouchableOpacity>
                           ) : null}
                         </View>
+                        <Text style={{ fontSize: 17, color: C.text3, marginLeft: 8 }}>›</Text>
                       </AnimatedCard>
                     </SwipeableRow>
                     </ReAnimated.View>
@@ -3515,7 +3473,7 @@ export default function App() {
             </View>
 
             <View style={[styles.aboutBox, { backgroundColor: C.bg2, marginTop: 24 }]}>
-              <Text style={[styles.aboutText, { color: C.text2 }]}>就活管理リマインダー v1.2.0</Text>
+              <Text style={[styles.aboutText, { color: C.text2 }]}>就活管理リマインダー v1.3.0</Text>
             </View>
           </ScrollView>
         )}
@@ -3885,56 +3843,42 @@ export default function App() {
                   <Text style={{ color: C.text, fontSize: 14 }}>この企業の通知</Text>
                   <Switch value={itemNotifyEnabled} onValueChange={setItemNotifyEnabled} trackColor={{ true: TDU_BLUE }} />
                 </View>
+                {/* 当日〜7日前の6チップと00〜23時の横スクロールを常時出していたが、
+                    編集画面の大半を占めるわりに毎回いじる項目ではない。
+                    普段は選択結果だけを見せ、触るときにシート／ピッカーを開く。
+                    カードの入れ子も避け、区切り線だけの行にする。 */}
                 {itemNotifyEnabled && (
-                  <View style={{ backgroundColor: C.bg2, borderRadius: 10, padding: 10, marginBottom: 8, gap: 8 }}>
-                    <Text style={{ fontSize: 12, color: C.text3 }}>何日前に通知（複数選択可）</Text>
-                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-                      {['0', '1', '2', '3', '5', '7'].map(nDay => {
-                        const sel = notifyDaysList.includes(nDay);
-                        return (
-                          <TouchableOpacity key={nDay}
-                            style={{
-                              paddingHorizontal: 10, paddingVertical: 5, borderRadius: 14,
-                              backgroundColor: sel ? TDU_BLUE : C.bg3, borderWidth: 1, borderColor: sel ? TDU_BLUE : C.border
-                            }}
-                            onPress={() => {
-                              const nd2 = nDay;
-                              setNotifyDaysList(prev =>
-                                prev.includes(nd2) ? prev.filter(x => x !== nd2) : [...prev, nd2].sort((a, b) => Number(a) - Number(b))
-                              );
-                            }}>
-                            <Text style={{ fontSize: 11, color: sel ? '#fff' : C.text2 }}>{nDay === '0' ? '当日' : nDay + '日前'}</Text>
-                          </TouchableOpacity>
-                        );
-                      })}
-                    </View>
-                    <Text style={{ fontSize: 12, color: C.text3 }}>通知時刻</Text>
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                      <View style={{ flexDirection: 'row', gap: 4 }}>
-                        {HOURS.map(nH => (
-                          <TouchableOpacity key={nH}
-                            style={{
-                              paddingHorizontal: 8, paddingVertical: 5, borderRadius: 8,
-                              backgroundColor: notifyHour === nH ? TDU_BLUE : C.bg3
-                            }}
-                            onPress={() => setNotifyHour(nH)}>
-                            <Text style={{ fontSize: 11, color: notifyHour === nH ? '#fff' : C.text }}>{nH}時</Text>
-                          </TouchableOpacity>
-                        ))}
-                      </View>
-                    </ScrollView>
-                    <View style={{ flexDirection: 'row', gap: 6 }}>
-                      {['00', '15', '30', '45'].map(nM => (
-                        <TouchableOpacity key={nM}
-                          style={{
-                            flex: 1, paddingVertical: 6, borderRadius: 8, alignItems: 'center',
-                            backgroundColor: notifyMinute === nM ? TDU_BLUE : C.bg3
-                          }}
-                          onPress={() => setNotifyMinute(nM)}>
-                          <Text style={{ fontSize: 11, color: notifyMinute === nM ? '#fff' : C.text }}>{nM}分</Text>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
+                  <View style={{ marginBottom: 8 }}>
+                    <TouchableOpacity
+                      style={styles.formRow}
+                      onPress={() => setNotifyDaysSheet(true)}>
+                      <Text style={[styles.formRowLabel, { color: C.text }]}>通知タイミング</Text>
+                      <Text style={{ fontSize: 14, color: C.text3 }} numberOfLines={1}>
+                        {notifyDaysList.length === 0
+                          ? 'なし'
+                          : [...notifyDaysList].sort((a, b) => Number(a) - Number(b))
+                              .map(d => d === '0' ? '当日' : `${d}日前`).join('、')}
+                      </Text>
+                      <Text style={{ fontSize: 15, color: C.text3, marginLeft: 6 }}>›</Text>
+                    </TouchableOpacity>
+                    <View style={{ height: 1, backgroundColor: C.border2 }} />
+                    <TouchableOpacity
+                      style={styles.formRow}
+                      onPress={() => setNotifyTimeOpen(v => !v)}>
+                      <Text style={[styles.formRowLabel, { color: C.text }]}>通知時刻</Text>
+                      <Text style={{ fontSize: 14, color: notifyTimeOpen ? ACCENT : C.text3 }}>
+                        {notifyHour}:{notifyMinute}
+                      </Text>
+                      <Text style={{ fontSize: 15, color: C.text3, marginLeft: 6 }}>›</Text>
+                    </TouchableOpacity>
+                    {notifyTimeOpen && (
+                      <WheelTimeField
+                        hour={notifyHour} minute={notifyMinute}
+                        onChange={(h, m) => { setNotifyHour(h); setNotifyMinute(m); setNotifyTimeOpen(false); }}
+                        C={C}
+                        autoOpen
+                      />
+                    )}
                   </View>
                 )}
 
@@ -3957,6 +3901,31 @@ export default function App() {
                     />
                   </>
                 )}
+
+                {/* やること（選考ステップ・準備テンプレート）への入口。
+                    一覧カードから外したので、遷移はここが正本になる。 */}
+                {selectedItem ? (
+                  <>
+                    <View style={{ height: 1, backgroundColor: C.border2, marginTop: 8 }} />
+                    <TouchableOpacity
+                      style={styles.formRow}
+                      onPress={() => {
+                        const target = selectedItem;
+                        closeModal();
+                        setTimeout(() => setCheckModalItem(target), 300);
+                      }}>
+                      <Text style={[styles.formRowLabel, { color: C.text }]}>やること・選考ステップ</Text>
+                      {(() => {
+                        const cl = selectedItem.customChecklist ?? [];
+                        return cl.length > 0 ? (
+                          <Text style={{ fontSize: 14, color: C.text3 }}>{cl.filter(c => c.checked).length}/{cl.length}</Text>
+                        ) : null;
+                      })()}
+                      <Text style={{ fontSize: 15, color: C.text3, marginLeft: 6 }}>›</Text>
+                    </TouchableOpacity>
+                    <View style={{ height: 1, backgroundColor: C.border2, marginBottom: 8 }} />
+                  </>
+                ) : null}
 
                 {/* ⑫ メモタブ */}
                 <Text style={[styles.label, { color: C.text3 }]}>メモ・対策</Text>
@@ -4007,6 +3976,36 @@ export default function App() {
           </KeyboardAvoidingView>
         </Modal>
 
+        {/* 通知タイミング選択シート。常時6チップを出す代わりに、触るときだけ開く */}
+        <Modal visible={notifyDaysSheet} transparent animationType="slide"
+          onRequestClose={() => setNotifyDaysSheet(false)}>
+          <View style={styles.pickerOverlay}>
+            <TouchableOpacity style={StyleSheet.absoluteFillObject} activeOpacity={1}
+              onPress={() => setNotifyDaysSheet(false)} />
+            <View style={[styles.modalContent, { backgroundColor: C.bg }]} onStartShouldSetResponder={() => true}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                <Text style={[styles.modalTitle, { color: C.text, flex: 1, marginBottom: 0 }]}>通知タイミング</Text>
+                <TouchableOpacity onPress={() => setNotifyDaysSheet(false)} style={{ paddingHorizontal: 8, paddingVertical: 6 }}>
+                  <Text style={{ fontSize: 15, color: ACCENT, fontWeight: 'bold' }}>完了</Text>
+                </TouchableOpacity>
+              </View>
+              {['0', '1', '2', '3', '5', '7'].map(nDay => {
+                const sel = notifyDaysList.includes(nDay);
+                return (
+                  <TouchableOpacity key={nDay}
+                    style={{ flexDirection: 'row', alignItems: 'center', minHeight: 44, borderBottomWidth: 1, borderColor: C.border2 }}
+                    onPress={() => setNotifyDaysList(prev =>
+                      prev.includes(nDay) ? prev.filter(x => x !== nDay) : [...prev, nDay].sort((a, b) => Number(a) - Number(b)))}>
+                    <Text style={{ fontSize: 15, color: C.text, flex: 1 }}>{nDay === '0' ? '当日' : `${nDay}日前`}</Text>
+                    {sel ? <Text style={{ fontSize: 16, color: ACCENT, fontWeight: 'bold' }}>✓</Text> : null}
+                  </TouchableOpacity>
+                );
+              })}
+              <View style={{ height: 12 }} />
+            </View>
+          </View>
+        </Modal>
+
         {/* チェックリストモーダル */}
         <Modal visible={!!checkModalItem} transparent animationType="slide"
           onRequestClose={() => { setCheckModalItem(null); setNewCheckLabel(''); }}>
@@ -4014,7 +4013,14 @@ export default function App() {
             <TouchableOpacity style={StyleSheet.absoluteFillObject} activeOpacity={1}
               onPress={() => { setCheckModalItem(null); setNewCheckLabel(''); }} />
             <View style={[styles.modalContent, { maxHeight: '85%', backgroundColor: C.bg }]} onStartShouldSetResponder={() => true}>
-              <Text style={[styles.modalTitle, { color: C.text }]}>{checkModalItem?.company}</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <Text style={[styles.modalTitle, { color: C.text, flex: 1, marginBottom: 0 }]}>{checkModalItem?.company}</Text>
+                <TouchableOpacity
+                  style={{ minHeight: 44, justifyContent: 'center', paddingHorizontal: 8 }}
+                  onPress={() => { setCheckModalItem(null); setNewCheckLabel(''); }}>
+                  <Text style={{ fontSize: 15, color: ACCENT, fontWeight: 'bold' }}>完了</Text>
+                </TouchableOpacity>
+              </View>
               <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
                 <Text style={[styles.label, { marginTop: 8, color: C.text3 }]}>選考ステップ</Text>
                 {CHECKLIST_STEPS.map(step => {
@@ -4025,7 +4031,7 @@ export default function App() {
                       style={[styles.checkRow, { borderColor: C.border2 }, checked && isInter && { backgroundColor: isDark ? '#2d0a0a' : '#fff0f0', borderRadius: 8 }]}
                       onPress={() => checkModalItem && toggleCheck(checkModalItem, step)}>
                       <AnimatedCheckmark checked={checked} color={isInter ? '#e74c3c' : TDU_BLUE} />
-                      <Text style={[styles.checkLabel, checked && { color: isInter ? '#e74c3c' : TDU_BLUE, fontWeight: 'bold' }]}>
+                      <Text style={[styles.checkLabel, { color: C.text }, checked && { color: isInter ? DANGER : ACCENT, fontWeight: 'bold' }]}>
                         {step}{isInter && checked ? ' 🌸' : ''}
                       </Text>
                     </TouchableOpacity>
@@ -4065,7 +4071,7 @@ export default function App() {
                       <TouchableOpacity onPress={() => checkModalItem && toggleCustomCheck(checkModalItem, c.id)}>
                         <AnimatedCheckmark checked={c.checked} color={SUCCESS} />
                       </TouchableOpacity>
-                      <Text style={[styles.checkLabel, { flex: 1 }, c.checked && { color: SUCCESS, fontWeight: 'bold' }]}>{c.label}</Text>
+                      <Text style={[styles.checkLabel, { flex: 1, color: C.text }, c.checked && { color: SUCCESS, fontWeight: 'bold' }]}>{c.label}</Text>
                       <TouchableOpacity onPress={() => checkModalItem && deleteCustomCheck(checkModalItem, c.id)}
                         style={{ paddingHorizontal: 8, paddingVertical: 4 }}>
                         <Text style={{ color: '#ccc', fontSize: 16 }}>✕</Text>
@@ -4083,21 +4089,18 @@ export default function App() {
                   </View>
                 ))}
                 <View style={styles.customAddRow}>
-                  <TextInput style={styles.customAddInput} placeholder="項目を入力（例: 適性検査）"
+                  <TextInput style={[styles.customAddInput, { backgroundColor: C.inputBg, color: C.text }]}
+                    placeholder="項目を追加" placeholderTextColor={C.text3}
                     value={newCheckLabel} onChangeText={setNewCheckLabel}
                     returnKeyType="done"
                     onSubmitEditing={() => checkModalItem && addCustomCheck(checkModalItem)} />
                   <TouchableOpacity
-                    style={[styles.customAddBtn, !newCheckLabel.trim() && { backgroundColor: '#ccc' }]}
+                    style={{ minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' }}
                     onPress={() => checkModalItem && addCustomCheck(checkModalItem)}
                     disabled={!newCheckLabel.trim()}>
-                    <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 14 }}>追加</Text>
+                    <Text style={{ color: newCheckLabel.trim() ? ACCENT : C.text3, fontWeight: 'bold', fontSize: 22 }}>＋</Text>
                   </TouchableOpacity>
                 </View>
-                <TouchableOpacity style={[styles.saveButton, { marginTop: 20, alignSelf: 'center', paddingHorizontal: 40 }]}
-                  onPress={() => { setCheckModalItem(null); setNewCheckLabel(''); }}>
-                  <Text style={styles.saveButtonText}>閉じる</Text>
-                </TouchableOpacity>
                 <View style={{ height: 20 }} />
               </ScrollView>
             </View>
@@ -4228,6 +4231,11 @@ const styles = StyleSheet.create({
   headerStats: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20 },
   headerTitle: { fontSize: 17, fontWeight: 'bold', color: TDU_BLUE },
   statChip: { borderRadius: 10, paddingHorizontal: 12, paddingVertical: 6, alignItems: 'center' },
+  // 画面名。iOSのLarge Titleに寄せる
+  screenTitle: { fontSize: 26, fontWeight: '700', letterSpacing: -0.3, fontFamily: 'NotoSansJP_700Bold' },
+  // 設定アプリ型の行。ラベル左・値右・シェブロン。タップ領域は44pt確保する
+  formRow: { flexDirection: 'row', alignItems: 'center', minHeight: 44, paddingVertical: 10 },
+  formRowLabel: { fontSize: 15, flex: 1, fontFamily: 'NotoSansJP_400Regular' },
   statNum: { fontSize: 18, fontWeight: 'bold', color: TDU_BLUE },
   statLabel: { fontSize: 9, color: TDU_BLUE },
 
@@ -4344,7 +4352,7 @@ const styles = StyleSheet.create({
 
   checkRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderColor: LIGHT.searchBg, paddingHorizontal: 8 },
   checkbox: { width: 24, height: 24, borderRadius: 6, borderWidth: 2, borderColor: '#ddd', alignItems: 'center', justifyContent: 'center', marginRight: 12 },
-  checkLabel: { fontSize: 15, color: '#333' },
+  checkLabel: { fontSize: 15 },
   customAddRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12, paddingHorizontal: 4 },
   customAddInput: { flex: 1, backgroundColor: LIGHT.bg2, padding: 11, borderRadius: 10, fontSize: 14 },
   customAddBtn: { backgroundColor: TDU_BLUE, paddingVertical: 11, paddingHorizontal: 16, borderRadius: 10 },
