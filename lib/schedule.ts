@@ -209,6 +209,53 @@ export const collectTodos = (items: TodoSource[], todayYmd: string): TodoItem[] 
   });
 };
 
+// ─── ダッシュボード集計 ────────────────────────────────────────
+//
+// 内定率だけだと内定が出るまで数字が動かず、ダッシュボードが置物になる。
+// 内定前でも動く指標として「今どの段階に何社いるか」と「今週どれだけ動いたか」を出す。
+
+export const STAGE_BUCKETS: { key: string; label: string; statuses: string[] }[] = [
+  { key: 'considering', label: '検討中', statuses: ['検討中'] },
+  { key: 'document', label: '書類', statuses: ['ES締切', 'ES提出済', 'Webテスト'] },
+  { key: 'interview', label: '面接', statuses: ['GD', '1次面接', '2次面接', '最終面接'] },
+  { key: 'offer', label: '内定', statuses: ['内定', '内定承諾'] },
+];
+
+export type StageSource = {
+  status: string;
+  statusHistory?: { status: string; changedAt: string }[];
+};
+
+/// 段階ごとの社数。選考が終わったもの（不合格・辞退・完了）はどのバケツにも入らない。
+export const stageDistribution = (items: StageSource[]): { key: string; label: string; count: number }[] =>
+  STAGE_BUCKETS.map(b => ({
+    key: b.key,
+    label: b.label,
+    count: items.filter(s => b.statuses.includes(s.status)).length,
+  }));
+
+/// 週の初日。weekStart は 0=日曜, 1=月曜。
+export const startOfWeekYmd = (todayYmd: string, weekStart: number): string => {
+  const dow = parseYmd(todayYmd).getDay();
+  return addDaysYmd(todayYmd, -((dow - weekStart + 7) % 7));
+};
+
+/// 今週の動き。
+/// statusHistory の1件目は登録時に積まれるので「追加」、それ以降を「進んだ」として数える。
+export const weeklyActivity = (
+  items: StageSource[], todayYmd: string, weekStart: number,
+): { added: number; advanced: number } => {
+  const from = startOfWeekYmd(todayYmd, weekStart);
+  let added = 0, advanced = 0;
+  for (const s of items) {
+    const h = s.statusHistory ?? [];
+    if (h.length === 0) continue;
+    if (h[0].changedAt.slice(0, 10) >= from) added++;
+    advanced += h.slice(1).filter(e => e.changedAt.slice(0, 10) >= from).length;
+  }
+  return { added, advanced };
+};
+
 // ─── ステータス別の準備テンプレート ────────────────────────────
 //
 // 選んだ段階に応じて「やっておくこと」の雛形を出し、

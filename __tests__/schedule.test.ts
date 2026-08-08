@@ -3,6 +3,7 @@ import {
   coversDate, expandDateRange, nextStatus, MAX_SPAN_DAYS,
   eventsConflict, findConflicts, collectTodos, daysBetween,
   EVENT_DURATION_MIN, TRAVEL_BUFFER_MIN, PREP_TEMPLATES, PROGRESS_FLOW,
+  stageDistribution, startOfWeekYmd, weeklyActivity, STAGE_BUCKETS,
 } from '../lib/schedule';
 
 describe('日付ユーティリティ', () => {
@@ -313,5 +314,68 @@ describe('複数日の予定の重複検知', () => {
     const a = span('a', '2026-05-09', '2026-05-12', '10');
     const b = { id: 'b', company: 'b', date: '2026-05-11', hour: '15', minute: '00', venueType: 'online' as const };
     expect(eventsConflict(a, b)).toBe(false);
+  });
+});
+
+describe('段階分布', () => {
+  test('ステータスが対応するバケツに入る', () => {
+    const d = stageDistribution([
+      { status: '検討中' }, { status: 'ES締切' }, { status: 'ES提出済' },
+      { status: 'Webテスト' }, { status: '1次面接' }, { status: '最終面接' },
+      { status: '内定' }, { status: '内定承諾' },
+    ]);
+    const by = Object.fromEntries(d.map(x => [x.key, x.count]));
+    expect(by.considering).toBe(1);
+    expect(by.document).toBe(3);
+    expect(by.interview).toBe(2);
+    expect(by.offer).toBe(2);
+  });
+
+  test('選考が終わったものはどの段階にも入らない', () => {
+    const d = stageDistribution([{ status: '不合格' }, { status: '内定辞退' }, { status: '完了' }]);
+    expect(d.reduce((a, b) => a + b.count, 0)).toBe(0);
+  });
+
+  test('バケツ同士でステータスが重複していない', () => {
+    const all = STAGE_BUCKETS.flatMap(b => b.statuses);
+    expect(new Set(all).size).toBe(all.length);
+  });
+});
+
+describe('週の初日', () => {
+  test('月曜起点', () => {
+    // 2026-08-08 は土曜
+    expect(startOfWeekYmd('2026-08-08', 1)).toBe('2026-08-03');
+  });
+  test('日曜起点', () => {
+    expect(startOfWeekYmd('2026-08-08', 0)).toBe('2026-08-02');
+  });
+  test('週の初日そのものなら動かない', () => {
+    expect(startOfWeekYmd('2026-08-03', 1)).toBe('2026-08-03');
+  });
+});
+
+describe('今週の動き', () => {
+  const h = (...dates: string[]) => dates.map(d => ({ status: 'x', changedAt: `${d}T10:00:00.000Z` }));
+
+  test('1件目は追加、2件目以降は前進として数える', () => {
+    const r = weeklyActivity([
+      { status: '1次面接', statusHistory: h('2026-08-04', '2026-08-05', '2026-08-06') },
+    ], '2026-08-08', 1);
+    expect(r.added).toBe(1);
+    expect(r.advanced).toBe(2);
+  });
+
+  test('先週登録して今週進んだものは追加に数えない', () => {
+    const r = weeklyActivity([
+      { status: '1次面接', statusHistory: h('2026-07-28', '2026-08-05') },
+    ], '2026-08-08', 1);
+    expect(r.added).toBe(0);
+    expect(r.advanced).toBe(1);
+  });
+
+  test('履歴が無いものは無視する', () => {
+    const r = weeklyActivity([{ status: '検討中' }], '2026-08-08', 1);
+    expect(r).toEqual({ added: 0, advanced: 0 });
   });
 });

@@ -39,6 +39,7 @@ import { LISTED_COMPANIES, CompanyEntry } from './companies_v2';
 import {
   addDaysYmd, collectTodos, formatYmd, parseYmd, coversDate, dateRangeStr, expandDateRange,
   findConflicts, nextStatus, PREP_TEMPLATES,
+  stageDistribution, weeklyActivity,
 } from './lib/schedule';
 import type { TodoItem, VenueType } from './lib/schedule';
 
@@ -1378,7 +1379,10 @@ export default function App() {
       const autoChecks = STATUS_TO_CHECKS[ns] ?? [];
       const cl: Record<string, boolean> = { ...(s.checklist ?? {}) };
       CHECKLIST_STEPS.forEach(step => { if (autoChecks.includes(step)) cl[step] = true; });
-      return { ...s, status: ns, checklist: cl, calendarColor: colors[ns] ?? '#95A5A6' };
+      return {
+        ...s, status: ns, checklist: cl, calendarColor: colors[ns] ?? '#95A5A6',
+        statusHistory: [...(s.statusHistory ?? []), { status: ns, changedAt: new Date().toISOString() }],
+      };
     });
     return changed ? updated : null;
   };
@@ -1805,6 +1809,18 @@ export default function App() {
     [schedules, todayYmd]
   );
   const overdueTodoCount = todos.filter(t => t.daysLeft !== undefined && t.daysLeft < 0).length;
+
+  // 内定が出るまで通過率は動かないので、内定前でも毎週動く指標を並べる
+  const stages = useMemo(() => stageDistribution(schedules), [schedules]);
+  const stageTotal = useMemo(() => stages.reduce((a, b) => a + b.count, 0), [stages]);
+  const weekMoves = useMemo(
+    () => weeklyActivity(schedules, todayYmd, weekStart),
+    [schedules, todayYmd, weekStart],
+  );
+  // 段階の色は代表ステータスの色を借りる（新しい色を足さない）
+  const STAGE_COLOR_SOURCE: Record<string, string> = {
+    considering: '検討中', document: 'ES提出済', interview: '1次面接', offer: '内定',
+  };
   // 辞退を決めたのに連絡できていない企業（調査では内々定保有者の57.4%が該当）
   const declinePendingCount = todos.filter(t => t.kind === 'decline').length;
 
@@ -2163,6 +2179,7 @@ export default function App() {
     const updated = schedules.map(s => s.id !== item.id ? s : {
       ...s, status: '完了',
       calendarColor: statusColors['完了'] ?? '#95A5A6',
+      statusHistory: [...(s.statusHistory ?? []), { status: '完了', changedAt: new Date().toISOString() }],
     });
     await saveSchedules(updated);
   };
@@ -2179,6 +2196,8 @@ export default function App() {
     const updated = schedules.map(s => s.id !== item.id ? s : {
       ...s, status: ns, checklist: initCL,
       calendarColor: statusColors[ns] ?? '#95A5A6',
+      // カードから進めた場合も履歴に残す（ダッシュボードの「今週の前進」に効く）
+      statusHistory: [...(s.statusHistory ?? []), { status: ns, changedAt: new Date().toISOString() }],
     });
     await saveSchedules(updated);
     setAdvanceAnimMap(prev => ({ ...prev, [item.id]: (prev[item.id] ?? 0) + 1 }));
@@ -2891,6 +2910,51 @@ export default function App() {
                     {passRate !== null ? `${passRate}%` : '-'}
                   </Text>
                   <Text style={{ fontSize: 11, color: C.text3, marginTop: 2 }}>通過率</Text>
+                </View>
+              </View>
+
+              {/* 選考段階の分布。内定が出る前でもここは毎週動く */}
+              <Text style={{ fontSize: 11, color: C.text3, marginTop: 18, marginBottom: 6 }}>選考段階</Text>
+              <View style={{ flexDirection: 'row', height: 10, borderRadius: 5, overflow: 'hidden', backgroundColor: C.bg3 }}>
+                {stageTotal === 0
+                  ? null
+                  : stages.filter(s => s.count > 0).map(s => (
+                    <View key={s.key} style={{
+                      flex: s.count,
+                      backgroundColor: statusColors[STAGE_COLOR_SOURCE[s.key]] ?? NEUTRAL_GRAY,
+                    }} />
+                  ))}
+              </View>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginTop: 8 }}>
+                {stages.map(s => (
+                  <View key={s.key} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                    <View style={{
+                      width: 7, height: 7, borderRadius: 4,
+                      backgroundColor: statusColors[STAGE_COLOR_SOURCE[s.key]] ?? NEUTRAL_GRAY,
+                    }} />
+                    <Text style={{ fontSize: 11, color: C.text2 }}>{s.label}</Text>
+                    <Text style={{ fontSize: 11, color: C.text, fontWeight: 'bold' }}>{s.count}</Text>
+                  </View>
+                ))}
+              </View>
+
+              {/* 今週の動きとやることの残り */}
+              <View style={{ flexDirection: 'row', gap: 10, marginTop: 16 }}>
+                <View style={{ flex: 1, backgroundColor: C.bg3, borderRadius: 10, padding: 10 }}>
+                  <Text style={{ fontSize: 10, color: C.text3 }}>今週の動き</Text>
+                  <Text style={{ fontSize: 13, color: C.text, fontWeight: 'bold', marginTop: 4 }}>
+                    追加 {weekMoves.added} ／ 前進 {weekMoves.advanced}
+                  </Text>
+                </View>
+                <View style={{ flex: 1, backgroundColor: C.bg3, borderRadius: 10, padding: 10 }}>
+                  <Text style={{ fontSize: 10, color: C.text3 }}>やること</Text>
+                  <Text style={{
+                    fontSize: 13, fontWeight: 'bold', marginTop: 4,
+                    color: overdueTodoCount > 0 ? DANGER : C.text,
+                  }}>
+                    残り {todos.length}
+                    {overdueTodoCount > 0 ? `（期限切れ ${overdueTodoCount}）` : ''}
+                  </Text>
                 </View>
               </View>
             </View>
