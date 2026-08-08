@@ -3,7 +3,7 @@ import ReAnimated, {
   useSharedValue, useAnimatedStyle, useAnimatedProps, withSpring, withTiming, withSequence, withRepeat,
   FadeInDown, FadeOutLeft, LinearTransition,
 } from 'react-native-reanimated';
-import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { GestureHandlerRootView, Gesture, GestureDetector } from 'react-native-gesture-handler';
 import DraggableFlatList, { ScaleDecorator, RenderItemParams } from 'react-native-draggable-flatlist';
 import Svg, { Path } from 'react-native-svg';
 import { Pressable } from 'react-native';
@@ -246,38 +246,52 @@ const COLOR_PALETTE = [
 ];
 
 // ─── スワイプ削除コンポーネント ────────────────────────────────────
+// PanResponder はJSスレッドで動くため、指に一拍遅れて追従する（＝動きが固く感じる）。
+// gesture-handler + reanimated はUIスレッドで完結するので指に貼り付く。
+const SWIPE_OPEN_X = -80;
+
 function SwipeableRow({ children, onDelete }: { children: React.ReactNode; onDelete: () => void }) {
-  const translateX = useRef(new Animated.Value(0)).current;
-  const THRESHOLD = -80;
+  const translateX = useSharedValue(0);
+  // ドラッグ開始時点の位置。開いた状態から続けて引いても飛ばないようにする
+  const startX = useSharedValue(0);
 
-  const panResponder = useRef(PanResponder.create({
-    onMoveShouldSetPanResponder: (_, g) => Math.abs(g.dx) > 5 && Math.abs(g.dx) > Math.abs(g.dy),
-    onPanResponderMove: (_, g) => {
-      if (g.dx < 0) translateX.setValue(Math.max(g.dx, THRESHOLD * 1.5));
-    },
-    onPanResponderRelease: (_, g) => {
-      if (g.dx < THRESHOLD) {
-        Animated.spring(translateX, { toValue: THRESHOLD, useNativeDriver: true }).start();
-      } else {
-        Animated.spring(translateX, { toValue: 0, useNativeDriver: true }).start();
-      }
-    },
-  })).current;
+  const pan = Gesture.Pan()
+    // 横に十分動いてから初めて有効化する。縦は listのスクロールに譲る
+    .activeOffsetX([-12, 12])
+    .failOffsetY([-12, 12])
+    .onStart(() => { startX.value = translateX.value; })
+    .onUpdate(e => {
+      const next = startX.value + e.translationX;
+      // 開き切った先はゴムのように重くする（急に止まると固く感じる）
+      translateX.value = next < SWIPE_OPEN_X
+        ? SWIPE_OPEN_X + (next - SWIPE_OPEN_X) * 0.25
+        : Math.min(next, 0);
+    })
+    .onEnd(e => {
+      // 指を弾いた勢いも見る。距離が足りなくても速ければ開く
+      const shouldOpen = translateX.value + e.velocityX * 0.08 < SWIPE_OPEN_X / 2;
+      translateX.value = withSpring(shouldOpen ? SWIPE_OPEN_X : 0, { damping: 15, stiffness: 150 });
+    });
 
-  const reset = () => Animated.spring(translateX, { toValue: 0, useNativeDriver: true }).start();
+  const rowStyle = useAnimatedStyle(() => ({ transform: [{ translateX: translateX.value }] }));
 
   return (
     <View style={{ overflow: 'hidden', marginBottom: 10 }}>
       {/* 削除背景 */}
       <View style={styles.swipeDeleteBg}>
-        <TouchableOpacity onPress={() => { reset(); onDelete(); }} style={styles.swipeDeleteBtn}>
+        <TouchableOpacity
+          onPress={() => {
+            translateX.value = withSpring(0, { damping: 15, stiffness: 150 });
+            onDelete();
+          }}
+          style={styles.swipeDeleteBtn}>
           <Image source={ICONS.trash} style={{ width: 18, height: 18, tintColor: '#fff' }} />
           <Text style={styles.swipeDeleteText}>削除</Text>
         </TouchableOpacity>
       </View>
-      <Animated.View style={{ transform: [{ translateX }] }} {...panResponder.panHandlers}>
-        {children}
-      </Animated.View>
+      <GestureDetector gesture={pan}>
+        <ReAnimated.View style={rowStyle}>{children}</ReAnimated.View>
+      </GestureDetector>
     </View>
   );
 }
@@ -1071,6 +1085,16 @@ const CHIP_BG = '#f0f2f5';       // チップ/ピッカーの背景
 const ACCENT_BORDER = '#dde8ff'; // ACCENT の淡い枠線
 const SURFACE_MUTED = '#f8f8f8'; // 沈めた面
 
+/// 半透明の帯を隣のセルと重ねると重なった部分だけ濃くなり、日境界に縦線が出る。
+/// 先に背景と混ぜて不透明にしてから重ねる。
+const blendHex = (fg: string, bg: string, ratio: number): string => {
+  const ch = (h: string, i: number) => parseInt(h.slice(i, i + 2), 16);
+  const mix = (i: number) =>
+    Math.round(ch(fg, i) * ratio + ch(bg, i) * (1 - ratio)).toString(16).padStart(2, '0');
+  if (fg.length < 7 || bg.length < 7) return fg;
+  return `#${mix(1)}${mix(3)}${mix(5)}`;
+};
+
 const DARK = {
   bg: '#0d1117', bg2: '#161b22', bg3: '#1c2333', card: '#161b22',
   border: '#30363d', border2: '#21262d',
@@ -1637,6 +1661,26 @@ export default function App() {
     return map;
   }, [schedules, statusColors]);
 
+  // 複数日の帯は「何段目に描くか」を全日程で固定しないと、
+  // 日ごとの並び替えで同じ企業の帯が途中で段を飛び移ってしまう。
+  // セルを描く前にレーンを1回だけ割り当てておく。
+  const spanLanes = useMemo(() => {
+    const lanes: Record<string, number> = {};
+    const used: Record<string, Set<number>> = {};
+    schedules
+      .filter(s => s.date && s.endDate && s.endDate > s.date)
+      // 長い期間ほど上の段に来るように、開始が早い順・期間が長い順で詰める
+      .sort((a, b) => a.date.localeCompare(b.date) || (b.endDate ?? '').localeCompare(a.endDate ?? ''))
+      .forEach(s => {
+        const days = expandDateRange(s);
+        let lane = 0;
+        while (days.some(d => used[d]?.has(lane))) lane++;
+        lanes[s.id] = lane;
+        days.forEach(d => { (used[d] ??= new Set()).add(lane); });
+      });
+    return lanes;
+  }, [schedules]);
+
   const dateCompanyMap = useMemo(() => {
     const map: Record<string, Schedule[]> = {};
     schedules.forEach(s => {
@@ -1887,10 +1931,12 @@ export default function App() {
     closeModal();
   };
 
-  const closeModal = () => {
-    setModalVisible(false); setDetailVisible(false); setSelectedItem(null);
+  // 追加モーダルと詳細モーダルは同じ入力ステートを共有している。
+  // 片方を閉じただけだと前の企業の入力が残るため、開閉の両方でここを通す。
+  const resetForm = () => {
+    setSelectedItem(null);
     setCompanyName(''); setNote(''); setSelStatus('検討中');
-    setSelDate(new Date().toISOString().split('T')[0]); setSelEndDate('');
+    setSelEndDate('');
     setSelHour(''); setSelMinute(''); setUrl(''); setUserId(''); setPassword('');
     setRank('B'); setSelGenreId('other'); setChecklist({});
     setSelVenueType(undefined); setMeetingUrl(''); setVenue('');
@@ -1898,14 +1944,20 @@ export default function App() {
     setItemNotifyEnabled(true); setNotifyDaysList(['1']); setNotifyHour('09'); setNotifyMinute('00');
     setOfferDeadline(''); setMemoResearch(''); setMemoPR(''); setMemoQuestions(''); setActiveMemoTab(0);
     setInternshipStart(''); setInternshipEnd('');
+    setSuggestions([]); setShowSuggestions(false);
+  };
+
+  const closeModal = () => {
+    setModalVisible(false); setDetailVisible(false);
+    resetForm();
+    setSelDate(new Date().toISOString().split('T')[0]);
   };
 
   const openAdd = (dateStr?: string) => {
     const ds = (typeof dateStr === 'string' && dateStr) ? dateStr : selectedDate;
+    // 前に開いていた企業の入力を必ず消してから開く
+    resetForm();
     setSelDate(ds);
-    setSelEndDate('');
-    setItemNotifyEnabled(true);
-    setNotifyDaysList(['1']); setNotifyHour('09'); setNotifyMinute('00');
     setModalVisible(true);
   };
 
@@ -2384,35 +2436,62 @@ export default function App() {
                                   }} />
                                 );
                               })}
-                              {items.slice(0, 2).map((item: Schedule, i: number) => {
-                                const sc = item.calendarColor ?? statusColorOf(item.status);
-                                const isSpan = !!(item.endDate && item.endDate > item.date);
-                                const isStart = isSpan && ds === item.date;
-                                const isEnd = isSpan && ds === item.endDate;
-                                const capL = !isSpan || isStart || isWeekRowStart;
-                                const capR = !isSpan || isEnd || isWeekRowEnd;
-                                const label = isStart || !isSpan ? item.company : '';
-                                return isSpan ? (
-                                  <View key={i} style={{
-                                    height: 12, marginTop: 2, alignSelf: 'stretch',
-                                    marginHorizontal: capL && capR ? 0 : capL ? -2 : capR ? -2 : -2,
-                                    backgroundColor: sc + '55',
-                                    borderLeftWidth: capL ? 2 : 0,
-                                    borderLeftColor: sc,
-                                    borderTopLeftRadius: capL ? 3 : 0,
-                                    borderBottomLeftRadius: capL ? 3 : 0,
-                                    borderTopRightRadius: capR ? 3 : 0,
-                                    borderBottomRightRadius: capR ? 3 : 0,
-                                  }}>
-                                    {label ? <Text style={[styles.calLabelText, { color: sc }]} numberOfLines={1}>{label}</Text> : null}
-                                  </View>
-                                ) : (
-                                  <View key={i} style={[styles.calLabel, { backgroundColor: sc + '33', borderLeftColor: sc }]}>
-                                    <Text style={[styles.calLabelText, { color: sc }]} numberOfLines={1}>{item.company}</Text>
-                                  </View>
+                              {(() => {
+                                // 複数日は割り当て済みのレーンへ、単日は空いた段へ入れる。
+                                // 全段を同じ高さで描くので、帯が日をまたいでも段がずれない。
+                                const rows: (Schedule | null)[] = [null, null];
+                                items.forEach((s: Schedule) => {
+                                  if (!(s.endDate && s.endDate > s.date)) return;
+                                  const lane = spanLanes[s.id];
+                                  if (lane !== undefined && lane < rows.length && !rows[lane]) rows[lane] = s;
+                                });
+                                items.forEach((s: Schedule) => {
+                                  if (s.endDate && s.endDate > s.date) return;
+                                  const idx = rows.indexOf(null);
+                                  if (idx !== -1) rows[idx] = s;
+                                });
+                                const shown = rows.filter(Boolean).length;
+                                return (
+                                  <>
+                                    {rows.map((item, i) => {
+                                      if (!item) return <View key={i} style={{ height: 12, marginTop: 2 }} />;
+                                      const sc = item.calendarColor ?? statusColorOf(item.status);
+                                      const isSpan = !!(item.endDate && item.endDate > item.date);
+                                      if (!isSpan) {
+                                        return (
+                                          <View key={i} style={[styles.calLabel, {
+                                            height: 12, marginTop: 2, justifyContent: 'center',
+                                            backgroundColor: blendHex(sc, C.calBg, 0.2), borderLeftColor: sc,
+                                          }]}>
+                                            <Text style={[styles.calLabelText, { color: sc }]} numberOfLines={1}>{item.company}</Text>
+                                          </View>
+                                        );
+                                      }
+                                      const capL = ds === item.date || isWeekRowStart;
+                                      const capR = ds === item.endDate || isWeekRowEnd;
+                                      return (
+                                        <View key={i} style={{
+                                          height: 12, marginTop: 2, alignSelf: 'stretch', justifyContent: 'center',
+                                          // 続きの側だけセル間の隙間へ伸ばす。不透明色なので重なっても縦線が出ない
+                                          marginLeft: capL ? 0 : -4,
+                                          marginRight: capR ? 0 : -4,
+                                          backgroundColor: blendHex(sc, C.calBg, 0.33),
+                                          borderLeftWidth: capL ? 2 : 0,
+                                          borderLeftColor: sc,
+                                          borderTopLeftRadius: capL ? 3 : 0,
+                                          borderBottomLeftRadius: capL ? 3 : 0,
+                                          borderTopRightRadius: capR ? 3 : 0,
+                                          borderBottomRightRadius: capR ? 3 : 0,
+                                        }}>
+                                          {/* 週をまたいだ2週目以降も名前が分かるよう、週頭でもラベルを出す */}
+                                          {capL ? <Text style={[styles.calLabelText, { color: sc }]} numberOfLines={1}>{item.company}</Text> : null}
+                                        </View>
+                                      );
+                                    })}
+                                    {items.length > shown && <Text style={styles.calMore}>+{items.length - shown}</Text>}
+                                  </>
                                 );
-                              })}
-                              {items.length > 2 && <Text style={styles.calMore}>+{items.length - 2}</Text>}
+                              })()}
                             </TouchableOpacity>
                           );
                         }}
@@ -2683,14 +2762,14 @@ export default function App() {
                             <Text style={styles.dateText}>{item.date ? dateRangeStr(item) + (timeStr(item.hour, item.minute) ? ' ' + timeStr(item.hour, item.minute) + '〜' : '') : '日付未定'}</Text>
                             {item.userId ? (
                               <TouchableOpacity onPress={() => { Clipboard.setString(item.userId); Alert.alert('コピー', 'IDをコピーしました'); }}
-                                style={{ backgroundColor: '#e8f0fe', borderRadius: 6, paddingHorizontal: 7, paddingVertical: 2 }}>
+                                style={{ backgroundColor: C.statChip, borderRadius: 6, paddingHorizontal: 7, paddingVertical: 2 }}>
                                 <Text style={{ fontSize: 10, color: ACCENT, fontWeight: 'bold' }}>IDコピー</Text>
                               </TouchableOpacity>
                             ) : null}
                             {item.password ? (
                               <TouchableOpacity onPress={() => { Clipboard.setString(item.password); Alert.alert('コピー', 'PWをコピーしました'); }}
-                                style={{ backgroundColor: '#fde8f0', borderRadius: 6, paddingHorizontal: 7, paddingVertical: 2 }}>
-                                <Text style={{ fontSize: 10, color: '#c0392b', fontWeight: 'bold' }}>PWコピー</Text>
+                                style={{ backgroundColor: C.statChip, borderRadius: 6, paddingHorizontal: 7, paddingVertical: 2 }}>
+                                <Text style={{ fontSize: 10, color: DANGER, fontWeight: 'bold' }}>PWコピー</Text>
                               </TouchableOpacity>
                             ) : null}
                             {/* チェックリストへの入口。準備テンプレート・期限設定はここから開く */}
@@ -2710,7 +2789,7 @@ export default function App() {
                           </View>
                           {item.url ? (
                             <TouchableOpacity
-                              style={styles.urlChip}
+                              style={[styles.urlChip, { backgroundColor: C.statChip }]}
                               onPress={() => Linking.openURL(item.url.startsWith('http') ? item.url : 'https://' + item.url)}>
                               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
                                 <Image source={ICONS.externalLink} style={{ width: 11, height: 11, tintColor: ACCENT }} />
