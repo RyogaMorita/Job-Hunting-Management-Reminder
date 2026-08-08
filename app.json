@@ -3,6 +3,7 @@
     "name": "就活管理リマインダー",
     "slug": "shukatsu-kanri-reminder",
     "version": "1.2.3",
+    "scheme": "shukatsukanri",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
     "icon": "./assets/icon.png",
@@ -14,7 +15,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.moritaryoga.shukatsukanri",
-      "buildNumber": "83",
+      "buildNumber": "84",
       "appleTeamId": "M83VW435WG",
       "infoPlist": {
         "NSUserNotificationUsageDescription": "選考の締め切りや面接日程をリマインドするために通知を使用します。",

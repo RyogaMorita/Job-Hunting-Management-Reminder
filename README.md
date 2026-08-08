@@ -32,9 +32,19 @@
 - `expo-notifications` によるローカル通知
 
 ### ウィジェット (iOS Widget)
-- ホーム画面・ロック画面対応のWidgetKit製ウィジェット
-- 「直近の持ち駒」ウィジェット：日程が近い順に選考中企業を表示
-- 今日の予定を黄色でハイライト
+ホーム画面・ロック画面対応のWidgetKit製ウィジェット（4種類）。
+
+| ウィジェット | サイズ | 内容 |
+|---|---|---|
+| 就活カレンダー | Medium / Large | 月表示。複数日の予定は帯で表示。◀▶で月移動 |
+| 週間スケジュール | Medium | 今後7日間の予定 |
+| 直近の持ち駒 | Small / Medium / Large / ロック画面 | 日程が近い順。→ボタンで選考を次の段階へ |
+| 持ち駒一覧 | Medium / Large | 選考段階順に一覧表示 |
+
+- **インタラクティブウィジェット**（iOS 17+ AppIntent）: ウィジェット上の→ボタンでステータスを前進、◀▶で月移動
+- **複数日の予定**を週をまたぐ帯として表示（`Grid` + `gridCellColumns`）
+- **ディープリンク**: 日付をタップするとアプリの該当日を開く
+- ダーク/ライト、iOS 18のホーム画面色変更（accented）、ロック画面（vibrant）に対応
 - App Groupsでアプリとデータ共有
 
 ### 統計ダッシュボード
@@ -129,14 +139,41 @@ eas init
 
 ```
 targets/shukatsu-widget/
-├── AppGroupHelper.swift      # App Groupsでアプリとデータ共有
-├── WidgetUpcoming.swift      # 直近の持ち駒ウィジェット
-└── ...
+├── Models.swift               # データモデル・App Group入出力・タイムライン方針
+├── CalendarLayout.swift       # 月グリッドとレーン割り当ての計算
+├── Intents.swift              # AppIntent（ステータス前進・月移動）
+├── WidgetMonthCalendar.swift  # 就活カレンダー
+├── WidgetWeek.swift           # 週間スケジュール
+├── WidgetUpcoming.swift       # 直近の持ち駒
+├── WidgetList.swift           # 持ち駒一覧
+└── ShukatsuWidgetBundle.swift # ウィジェット登録
 ```
 
 App GroupID: `group.com.moritaryoga.shukatsukanri`
 
-データの流れ: `AsyncStorage（RN側）→ App Groups UserDefaults → Widget`
+### データの流れ
+
+```
+アプリ →  AsyncStorage（正本）
+       └→ App Group: widget_schedules_v1  →  ウィジェット表示
+
+ウィジェットの→ボタン
+       └→ App Group: widget_pending_actions_v1（待ち行列）
+              └→ 次回フォアグラウンド時にアプリが取り込み AsyncStorage を更新
+```
+
+ウィジェットは正本を直接書き換えず待ち行列に積むだけにして、
+RN側の状態と二重管理にならないようにしている。
+
+### タイムライン更新の方針
+
+ウィジェットのリロードには日次予算（頻繁に見られるもので約40〜70回）があり、
+短間隔のポーリングは予算を使い切って**かえって更新が止まる**。
+
+そのため各Providerは「今」＋今後7日ぶんの**深夜0時のエントリ**をまとめて返し、
+`policy` は `.atEnd` にしている。エントリの切り替えは `getTimeline` を呼ばないため
+予算を消費せず、日付の切り替わりも正確になる。
+データ変更時のみアプリから `reloadAllTimelines()` を呼ぶ。
 
 ---
 

@@ -62,6 +62,11 @@ const SHUKATSU_TIPS = [
 ];
 
 const STORAGE_KEY = '@schedules_v11';
+// ウィジェットとの共有領域（Swift側 AppGroupHelper と一致させること）
+const APP_GROUP = 'group.com.moritaryoga.shukatsukanri';
+const WIDGET_SCHEDULES_KEY = 'widget_schedules_v1';
+const WIDGET_PENDING_KEY = 'widget_pending_actions_v1';
+const WIDGET_WEEK_START_KEY = 'widget_week_start_v1';
 const GENRES_KEY = '@genres_v11';
 const STATUS_COLORS_KEY = '@status_colors_v2';
 const STATUS_OPTIONS_KEY = '@status_options_v1';
@@ -1059,30 +1064,78 @@ export default function App() {
     }
   }, [selDate, selEndDate]);
 
-  // カレンダー高さアニメーション（週↔月切り替え・月変更）
-  useEffect(() => {
-    const WEEK_H = 52;
-    const MONTH_H = maxCalRows * 52;
-    calHeight.value = withSpring(calendarMode === 'week' ? WEEK_H : MONTH_H, { damping: 15, stiffness: 150 });
-  }, [calendarMode, maxCalRows]);
+  // AppStateリスナーは一度しか張らないので、最新の色をrefで参照する
+  const statusColorsRef = useRef(statusColors);
+  useEffect(() => { statusColorsRef.current = statusColors; }, [statusColors]);
 
+  // ウィジェットの→ボタンで進めたステータスを取り込む。
+  // ウィジェットはApp Group側のキューに積むだけで、AsyncStorageの正本は
+  // アプリ側で更新する（二重管理による取りこぼしを防ぐため）。
+  // 待ち行列を読んで空にし、id → 新ステータス の対応を返す。
+  const drainWidgetPendingActions = async (): Promise<Record<string, string> | null> => {
+    if (Platform.OS !== 'ios') return null;
+    try {
+      const raw = await SharedGroupPreferences.getItem(WIDGET_PENDING_KEY, APP_GROUP);
+      if (!raw) return null;
+      const actions = JSON.parse(raw) as { id: string; status: string }[];
+      if (!Array.isArray(actions) || actions.length === 0) return null;
+      await SharedGroupPreferences.setItem(WIDGET_PENDING_KEY, '[]', APP_GROUP);
+      const map: Record<string, string> = {};
+      actions.forEach(a => { if (a?.id && a?.status) map[a.id] = a.status; });
+      return Object.keys(map).length ? map : null;
+    } catch {
+      return null;
+    }
+  };
 
-  // リストフェードイン（フィルター/ソート変更時）
-  const listFadeAnim = useRef(new Animated.Value(1)).current;
-  useEffect(() => {
-    listFadeAnim.setValue(0);
-    Animated.timing(listFadeAnim, { toValue: 1, duration: 220, useNativeDriver: true }).start();
-  }, [filteredSorted]);
-
-  // フォアグラウンド復帰時にウィジェットデータを再同期
-  useEffect(() => {
-    const sub = AppState.addEventListener('change', (nextState) => {
-      if (nextState === 'active') {
-        AsyncStorage.getItem(STORAGE_KEY).then(s => {
-          if (s) syncWidgetData(JSON.parse(s));
-        }).catch(() => {});
-      }
+  // 待ち行列のステータスを反映する。変化が無ければ null。
+  const mergePendingStatuses = (
+    list: Schedule[], map: Record<string, string>, colors: StatusColors
+  ): Schedule[] | null => {
+    let changed = false;
+    const updated = list.map(s => {
+      const ns = map[s.id];
+      if (!ns || ns === s.status) return s;
+      changed = true;
+      const autoChecks = STATUS_TO_CHECKS[ns] ?? [];
+      const cl: Record<string, boolean> = { ...(s.checklist ?? {}) };
+      CHECKLIST_STEPS.forEach(step => { if (autoChecks.includes(step)) cl[step] = true; });
+      return { ...s, status: ns, checklist: cl, calendarColor: colors[ns] ?? '#95A5A6' };
     });
+    return changed ? updated : null;
+  };
+
+  // フォアグラウンド復帰時にウィジェットの操作を取り込んでから再同期。
+  // 初回は loadAll 側で取り込むため、ここではリスナーだけ張る
+  // （マウント直後に走らせると loadAll の読み込みと競合する）。
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', async (nextState) => {
+      if (nextState !== 'active') return;
+      try {
+        const stored = await AsyncStorage.getItem(STORAGE_KEY);
+        if (!stored) return;
+        const list = JSON.parse(stored) as Schedule[];
+        const pending = await drainWidgetPendingActions();
+        const merged = pending ? mergePendingStatuses(list, pending, statusColorsRef.current) : null;
+        if (merged) await saveSchedules(merged);
+        else await syncWidgetData(list);
+      } catch {}
+    });
+    return () => sub.remove();
+  }, []);
+
+  // ウィジェットの日付タップ（shukatsukanri://date/YYYY-MM-DD）でその日を開く
+  useEffect(() => {
+    const openFromUrl = (url: string | null) => {
+      if (!url) return;
+      const m = url.match(/date\/(\d{4}-\d{2}-\d{2})/);
+      if (!m) return;
+      setSelectedDate(m[1]);
+      setCalDaySelected(true);
+      setActiveTab('calendar');
+    };
+    Linking.getInitialURL().then(openFromUrl).catch(() => {});
+    const sub = Linking.addEventListener('url', e => openFromUrl(e.url));
     return () => sub.remove();
   }, []);
 
@@ -1191,7 +1244,11 @@ export default function App() {
 
       const s = await AsyncStorage.getItem(STORAGE_KEY);
       if (s) {
-        const parsed: Schedule[] = JSON.parse(s);
+        let parsed: Schedule[] = JSON.parse(s);
+        // ウィジェットの→ボタンで進めたぶんを先に取り込む
+        const pending = await drainWidgetPendingActions();
+        const afterPending = pending ? mergePendingStatuses(parsed, pending, loadedColors) : null;
+        if (afterPending) parsed = afterPending;
         // 説明会・GDで日付が昨日以前のものを自動完了
         const today = new Date().toISOString().split('T')[0];
         const autoCompleted = parsed.map(item =>
@@ -1204,7 +1261,8 @@ export default function App() {
           ...item,
           calendarColor: loadedColors[item.status] ?? item.calendarColor ?? '#95A5A6',
         }));
-        const hasChanged = migrated.some((item, i) => item.status !== parsed[i].status || item.calendarColor !== parsed[i].calendarColor);
+        const hasChanged = !!afterPending
+          || migrated.some((item, i) => item.status !== parsed[i].status || item.calendarColor !== parsed[i].calendarColor);
         if (hasChanged) {
           await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(migrated));
           await syncWidgetData(migrated, loadedColors);
@@ -1222,6 +1280,7 @@ export default function App() {
       if (nd) setNotifyDays(nd);
       const ws = await AsyncStorage.getItem('@week_start');
       if (ws !== null) setWeekStart(JSON.parse(ws));
+      await syncWidgetWeekStart(ws !== null ? JSON.parse(ws) : 0);
       const so = await AsyncStorage.getItem(STATUS_OPTIONS_KEY);
       if (so) { setStatusOptions(JSON.parse(so)); }
 
@@ -1249,6 +1308,15 @@ export default function App() {
     } catch (e) { Alert.alert('エラー', '読み込み失敗'); }
   };
 
+  // 週の開始曜日をウィジェットへ共有する（カレンダーの列並びを合わせるため）
+  const syncWidgetWeekStart = async (ws: number) => {
+    if (Platform.OS !== 'ios') return;
+    try {
+      await SharedGroupPreferences.setItem(WIDGET_WEEK_START_KEY, String(ws), APP_GROUP);
+      NativeModules.WidgetKitModule?.reloadAllTimelines();
+    } catch {}
+  };
+
   const syncWidgetData = async (data: Schedule[], overrideColors?: StatusColors) => {
     if (Platform.OS !== 'ios') return;
     try {
@@ -1257,15 +1325,16 @@ export default function App() {
         id: s.id,
         company: s.company,
         date: s.date,
+        endDate: s.endDate ?? null,
         hour: s.hour,
         minute: s.minute,
         status: s.status,
         calendarColor: s.calendarColor ?? colors[s.status] ?? null,
       }));
       await SharedGroupPreferences.setItem(
-        'widget_schedules_v1',
+        WIDGET_SCHEDULES_KEY,
         JSON.stringify(widgetData),
-        'group.com.moritaryoga.shukatsukanri'
+        APP_GROUP
       );
       console.log('[WidgetSync] App Group write OK, items:', widgetData.length);
       // ウィジェットのタイムラインを即時リロード
@@ -1452,6 +1521,22 @@ export default function App() {
     const daysInMonth = new Date(currentCalDate.getFullYear(), currentCalDate.getMonth() + 1, 0).getDate();
     return Math.ceil((adjusted + daysInMonth) / 7);
   }, [currentCalDate, weekStart]);
+
+  // カレンダー高さアニメーション（週↔月切り替え・月変更）
+  // maxCalRows / filteredSorted より後に置くこと。
+  // 依存配列はレンダリング時に評価されるため、宣言より前だと初回に undefined が入る。
+  useEffect(() => {
+    const WEEK_H = 52;
+    const MONTH_H = maxCalRows * 52;
+    calHeight.value = withSpring(calendarMode === 'week' ? WEEK_H : MONTH_H, { damping: 15, stiffness: 150 });
+  }, [calendarMode, maxCalRows]);
+
+  // リストフェードイン（フィルター/ソート変更時）
+  const listFadeAnim = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    listFadeAnim.setValue(0);
+    Animated.timing(listFadeAnim, { toValue: 1, duration: 220, useNativeDriver: true }).start();
+  }, [filteredSorted]);
 
   // ─── 保存ロジック ──────────────────────────────────────────────
   const handleSave = async () => {
@@ -2463,7 +2548,11 @@ export default function App() {
                 {[{ label: '日曜', v: 0 }, { label: '月曜', v: 1 }].map(opt => (
                   <TouchableOpacity key={opt.v}
                     style={[styles.sortChip, { backgroundColor: C.bg2 }, weekStart === opt.v && { backgroundColor: ACCENT }]}
-                    onPress={async () => { setWeekStart(opt.v); await AsyncStorage.setItem('@week_start', JSON.stringify(opt.v)); }}>
+                    onPress={async () => {
+                      setWeekStart(opt.v);
+                      await AsyncStorage.setItem('@week_start', JSON.stringify(opt.v));
+                      await syncWidgetWeekStart(opt.v);
+                    }}>
                     <Text style={[styles.sortChipText, weekStart === opt.v && { color: '#fff' }]}>{opt.label}</Text>
                   </TouchableOpacity>
                 ))}
