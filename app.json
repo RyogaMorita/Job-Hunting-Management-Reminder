@@ -61,6 +61,11 @@
       "expo-tracking-transparency",
       "@bacons/apple-targets",
       "./plugins/withWidgetKitReload"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "16c1a5ec-00a6-4bfe-aca5-edb79bb20bb8"
+      }
+    }
   }
 }
