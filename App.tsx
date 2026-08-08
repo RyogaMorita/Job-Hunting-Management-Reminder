@@ -7,7 +7,6 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import DraggableFlatList, { ScaleDecorator, RenderItemParams } from 'react-native-draggable-flatlist';
 import Svg, { Path } from 'react-native-svg';
 import { Pressable } from 'react-native';
-// import RNIap, { initConnection, endConnection, getProducts, requestPurchase, finishTransaction, purchaseErrorListener, purchaseUpdatedListener, getAvailablePurchases } from 'react-native-iap'; // 近日公開
 import { useColorScheme } from 'react-native';
 import { useFonts } from 'expo-font';
 import { Inter_400Regular, Inter_700Bold } from '@expo-google-fonts/inter';
@@ -18,8 +17,10 @@ import {
   SafeAreaView, Modal, TextInput, Alert, KeyboardAvoidingView,
   Platform, Switch, Animated, PanResponder, Linking, Clipboard, Image, Dimensions,
   NativeModules, AppState,
+  StyleProp, ViewStyle, TextStyle, ImageSourcePropType,
 } from 'react-native';
 import { Calendar } from 'react-native-calendars';
+import type { DateData, CalendarProps } from 'react-native-calendars';
 import { StatusBar } from 'expo-status-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import SharedGroupPreferences from 'react-native-shared-group-preferences';
@@ -33,6 +34,10 @@ import {
   RewardedAd, RewardedAdEventType,
 } from 'react-native-google-mobile-ads';
 import { LISTED_COMPANIES, CompanyEntry } from './companies_v2';
+// 日付・ステータス遷移のロジックは lib/ に切り出してテストしている（__tests__/schedule.test.ts）
+import {
+  addDaysYmd, coversDate, dateRangeStr, expandDateRange, nextStatus,
+} from './lib/schedule';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -43,7 +48,6 @@ Notifications.setNotificationHandler({
 
 // ─── 定数 ─────────────────────────────────────────────────────────
 // ─── 広告ID ──────────────────────────────────────────────────────
-// const IAP_PRODUCT_ID = 'com.moritaryoga.shukatsukanri.adfree'; // 近日公開
 const AD_UNIT_ID = __DEV__ ? TestIds.BANNER : 'ca-app-pub-7090599455468315/1730004001';
 const APP_OPEN_ID = __DEV__ ? TestIds.APP_OPEN : 'ca-app-pub-7090599455468315/3637103731';
 const REWARDED_ID = __DEV__ ? TestIds.REWARDED : 'ca-app-pub-7090599455468315/8667464364';
@@ -155,27 +159,6 @@ interface Schedule {
 
 type TabType = 'calendar' | 'list' | 'settings';
 type SortType = '登録順' | '直近順' | '五十音' | '志望度' | 'ステータス' | 'ジャンル' | '手動';
-
-const parseYmd = (ymd: string) => {
-  const [y, m, d] = ymd.split('-').map(Number);
-  return new Date(y, (m || 1) - 1, d || 1);
-};
-const formatYmd = (dt: Date) => {
-  const y = dt.getFullYear();
-  const m = String(dt.getMonth() + 1).padStart(2, '0');
-  const d = String(dt.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
-};
-const addDaysYmd = (ymd: string, n: number) => {
-  const dt = parseYmd(ymd);
-  dt.setDate(dt.getDate() + n);
-  return formatYmd(dt);
-};
-const dateRangeStr = (s: Schedule) => {
-  const start = s.date.replace(/-/g, '/');
-  if (!s.endDate || s.endDate <= s.date) return start;
-  return `${start}〜${s.endDate.replace(/-/g, '/')}`;
-};
 
 // ─── デフォルトジャンル ───────────────────────────────────────────
 const DEFAULT_GENRES: Genre[] = [
@@ -302,8 +285,8 @@ function WeekCalendarRow({ selectedDate, today, weekStart, C, isDark, dateCompan
               isToday && !isSel && { borderWidth: 1.5, borderColor: ACCENT },
             ]}>
               <Text style={[{ fontSize: 12 }, (() => {
-                if (isSel) return { color: '#fff', fontWeight: 'bold' } as any;
-                if (isToday) return { color: ACCENT, fontWeight: 'bold' } as any;
+                if (isSel) return { color: '#fff', fontWeight: 'bold' as const };
+                if (isToday) return { color: ACCENT, fontWeight: 'bold' as const };
                 if (dow === 0) return { color: '#e74c3c' };
                 if (dow === 6) return { color: '#4A90D9' };
                 return { color: C.calText };
@@ -361,7 +344,7 @@ function AnimatedCheckmark({ checked, color }: { checked: boolean; color: string
 
 // ─── リップルボタン（ぽちゃんアニメーション） ──────────────────────────
 function RippleButton({ style, onPress, children, activeOpacity = 0.8 }: {
-  style?: any; onPress?: () => void; children: React.ReactNode; activeOpacity?: number;
+  style?: StyleProp<ViewStyle>; onPress?: () => void; children: React.ReactNode; activeOpacity?: number;
 }) {
   const rippleScale = useSharedValue(0);
   const rippleOpacity = useSharedValue(0);
@@ -389,7 +372,7 @@ function RippleButton({ style, onPress, children, activeOpacity = 0.8 }: {
 }
 
 // ─── 検索ハイライトテキスト ──────────────────────────────────────────
-function HighlightText({ text, query, style }: { text: string; query: string; style?: any }) {
+function HighlightText({ text, query, style }: { text: string; query: string; style?: StyleProp<TextStyle> }) {
   if (!query.trim()) return <Text style={style} numberOfLines={1}>{text}</Text>;
   const q = query.trim().toLowerCase();
   const idx = text.toLowerCase().indexOf(q);
@@ -404,7 +387,7 @@ function HighlightText({ text, query, style }: { text: string; query: string; st
 }
 
 // ─── アニメーションカード（プレス時スケール）────────────────────────
-function AnimatedCard({ children, style, onPress }: { children: React.ReactNode; style?: any; onPress: () => void }) {
+function AnimatedCard({ children, style, onPress }: { children: React.ReactNode; style?: StyleProp<ViewStyle>; onPress: () => void }) {
   const scale = useSharedValue(1);
   const animStyle = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
   return (
@@ -735,7 +718,7 @@ function TutorialModal({ visible, onClose, isDark, C }: {
   visible: boolean; onClose: () => void; isDark: boolean; C: typeof LIGHT;
 }) {
   const [page, setPage] = useState(0);
-  const scrollRef = useRef<any>(null);
+  const scrollRef = useRef<ScrollView>(null);
   const { width } = Dimensions.get('window');
   const PAGES = TUTORIAL_SLIDES.length;
 
@@ -826,6 +809,14 @@ const LIGHT = {
   tabBar: '#ffffff', inputBg: '#f8f9fa', searchBg: '#f5f5f5',
   filterBg: '#f8faff', statChip: '#e8f0fe', headerBorder: '#f0f0f0',
 };
+// セマンティックカラー。
+// StyleSheet.create は静的で C（ダーク/ライト）を参照できないため、
+// ここにライトの既定値を置き、ダーク時は各所で C.xxx をインラインで重ねる。
+const DANGER = '#e74c3c';        // 削除・警告
+const CHIP_BG = '#f0f2f5';       // チップ/ピッカーの背景
+const ACCENT_BORDER = '#dde8ff'; // ACCENT の淡い枠線
+const SURFACE_MUTED = '#f8f8f8'; // 沈めた面
+
 const DARK = {
   bg: '#0d1117', bg2: '#161b22', bg3: '#1c2333', card: '#161b22',
   border: '#30363d', border2: '#21262d',
@@ -1044,7 +1035,7 @@ export default function App() {
   const [notifyDays, setNotifyDays] = useState('1');
   const [weekStart, setWeekStart] = useState(0); // 0=日, 1=月
   const [datePickerVisible, setDatePickerVisible] = useState(false);
-  const calScrollRef = useRef<any>(null);
+  const calScrollRef = useRef<ScrollView>(null);
   const [screenWidth, setScreenWidth] = useState(0);
   const isSwipingCal = useRef(false);
   const [datePickerYear, setDatePickerYear] = useState(new Date().getFullYear());
@@ -1139,30 +1130,6 @@ export default function App() {
     return () => sub.remove();
   }, []);
 
-  // ─── IAP初期化（近日公開のためコメントアウト中） ────────────
-  // useEffect(() => {
-  //   let purchaseUpdate: any;
-  //   let purchaseError: any;
-  //   initConnection().then(() => {
-  //     purchaseUpdate = purchaseUpdatedListener(async (purchase: any) => {
-  //       if (purchase.productId === IAP_PRODUCT_ID) {
-  //         await finishTransaction({ purchase, isConsumable: false });
-  //         await AsyncStorage.setItem('@ad_free', 'true');
-  //         setAdFree(true);
-  //         Alert.alert('ありがとうございます！', '広告が削除されました🎉');
-  //       }
-  //     });
-  //     purchaseError = purchaseErrorListener((error: any) => {
-  //       if (error?.code !== 'E_USER_CANCELLED') console.log('IAP error:', error);
-  //     });
-  //   }).catch((err: any) => console.log('IAP init error:', err));
-  //   return () => {
-  //     purchaseUpdate?.remove();
-  //     purchaseError?.remove();
-  //     endConnection();
-  //   };
-  // }, []);
-
   // ─── 広告初期化 ──────────────────────────────────────────────
   useEffect(() => {
     const appOpen = AppOpenAd.createForAdRequest(APP_OPEN_ID, { requestNonPersonalizedAdsOnly: true });
@@ -1192,32 +1159,6 @@ export default function App() {
     await AsyncStorage.setItem('@launch_count', '1');
     showAppOpenAd();
   };
-
-  // 広告削除購入（近日公開のためコメントアウト中）
-  // const purchaseAdFree = async () => {
-  //   try {
-  //     const products = await getProducts({ skus: [IAP_PRODUCT_ID] });
-  //     if (!products || products.length === 0) {
-  //       Alert.alert('エラー', '商品情報を取得できませんでした。');
-  //       return;
-  //     }
-  //     await requestPurchase({ sku: IAP_PRODUCT_ID, andDangerouslyFinishTransactionAutomaticallyIOS: false });
-  //   } catch (err: any) {
-  //     if (err?.code !== 'E_USER_CANCELLED') {
-  //       Alert.alert('購入エラー', '購入処理に失敗しました。もう一度お試しください。');
-  //     }
-  //   }
-  // };
-
-  // 購入復元（近日公開のためコメントアウト中）
-  // const restorePurchase = async () => {
-  //   try {
-  //     const purchases = await getAvailablePurchases();
-  //     const found = purchases.some((p: any) => p.productId === IAP_PRODUCT_ID);
-  //     if (found) { await AsyncStorage.setItem('@ad_free', 'true'); setAdFree(true); Alert.alert('復元完了', '広告削除が復元されました🎉'); }
-  //     else Alert.alert('復元できませんでした', '購入履歴が見つかりません。');
-  //   } catch { Alert.alert('エラー', '復元処理に失敗しました。'); }
-  // };
 
   // リワード広告を表示してTipsを解放
   const showRewardedAd = () => {
@@ -1336,16 +1277,10 @@ export default function App() {
         JSON.stringify(widgetData),
         APP_GROUP
       );
-      console.log('[WidgetSync] App Group write OK, items:', widgetData.length);
       // ウィジェットのタイムラインを即時リロード
-      if (NativeModules.WidgetKitModule) {
-        NativeModules.WidgetKitModule.reloadAllTimelines();
-        console.log('[WidgetSync] reloadAllTimelines called');
-      } else {
-        console.warn('[WidgetSync] WidgetKitModule not found (native module not registered)');
-      }
-    } catch (e) {
-      console.warn('[WidgetSync] failed:', e);
+      NativeModules.WidgetKitModule?.reloadAllTimelines();
+    } catch {
+      // ウィジェットの同期失敗は本体の動作に影響しないため握りつぶす
     }
   };
 
@@ -1390,17 +1325,11 @@ export default function App() {
     schedules.forEach(s => {
       if (!s.date) return;
       const col = s.calendarColor ?? statusColors[s.status] ?? TDU_BLUE;
-      const start = s.date;
-      const end = s.endDate && s.endDate >= s.date ? s.endDate : s.date;
-      let cur = start;
-      let guard = 0;
-      while (cur <= end && guard < 120) {
+      expandDateRange(s).forEach(cur => {
         if (!marks[cur]) marks[cur] = { dots: [] };
         if (!marks[cur].dots) marks[cur].dots = [];
         marks[cur].dots.push({ color: col });
-        cur = addDaysYmd(cur, 1);
-        guard += 1;
-      }
+      });
     });
     marks[selectedDate] = { ...(marks[selectedDate] || {}), selected: true, selectedColor: TDU_BLUE };
     return marks;
@@ -1412,13 +1341,12 @@ export default function App() {
     schedules.forEach(s => {
       if (!s.internshipStart || !s.internshipEnd) return;
       const color = s.calendarColor ?? statusColors[s.status] ?? '#EC407A';
-      let cur = s.internshipStart;
-      while (cur <= s.internshipEnd) {
+      // 以前は new Date().toISOString() で日を進めていたが、
+      // ローカル時刻とUTCが混ざるうえ上限も無かったため expandDateRange に統一
+      expandDateRange({ date: s.internshipStart, endDate: s.internshipEnd }).forEach(cur => {
         if (!map[cur]) map[cur] = [];
         map[cur].push({ company: s.company, color, isStart: cur === s.internshipStart, isEnd: cur === s.internshipEnd });
-        const d = new Date(cur); d.setDate(d.getDate() + 1);
-        cur = d.toISOString().slice(0, 10);
-      }
+      });
     });
     return map;
   }, [schedules, statusColors]);
@@ -1427,16 +1355,10 @@ export default function App() {
     const map: Record<string, Schedule[]> = {};
     schedules.forEach(s => {
       if (!s.date) return;
-      const start = s.date;
-      const end = s.endDate && s.endDate >= s.date ? s.endDate : s.date;
-      let cur = start;
-      let guard = 0;
-      while (cur <= end && guard < 120) {
+      expandDateRange(s).forEach(cur => {
         if (!map[cur]) map[cur] = [];
         map[cur].push(s);
-        cur = addDaysYmd(cur, 1);
-        guard += 1;
-      }
+      });
     });
     Object.keys(map).forEach(d => {
       map[d].sort((a, b) => (STATUS_PRIORITY[b.status] ?? 0) - (STATUS_PRIORITY[a.status] ?? 0));
@@ -1508,11 +1430,10 @@ export default function App() {
     return list;
   }, [deduplicatedSchedules, searchQuery, filterGenreIds, filterStatuses, sortType, sortAsc, manualOrder]); // ② 正しい依存配列
 
-  const filteredByDate = useMemo(() => schedules.filter(s => {
-    if (!s.date) return false;
-    const end = s.endDate && s.endDate >= s.date ? s.endDate : s.date;
-    return s.date <= selectedDate && selectedDate <= end;
-  }), [schedules, selectedDate]);
+  const filteredByDate = useMemo(
+    () => schedules.filter(s => coversDate(s, selectedDate)),
+    [schedules, selectedDate]
+  );
 
   // カレンダーの行数を計算（現在月のみ）
   const maxCalRows = useMemo(() => {
@@ -1676,11 +1597,11 @@ export default function App() {
       const normalizedQ = normalizeQuery(q);
       const match = (c: CompanyEntry) => {
         if (c.n.includes(q)) return true;
-        const reading = (c as any).r ?? normalizeQuery(c.n);
+        const reading = c.r ?? normalizeQuery(c.n);
         return reading.includes(normalizedQ);
       };
       const startsWith = LISTED_COMPANIES.filter(c => {
-        const reading = (c as any).r ?? normalizeQuery(c.n);
+        const reading = c.r ?? normalizeQuery(c.n);
         return c.n.startsWith(q) || reading.startsWith(normalizedQ);
       });
       const partial = LISTED_COMPANIES.filter(c => !startsWith.includes(c) && match(c));
@@ -1774,7 +1695,9 @@ export default function App() {
           trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: notifyDate },
         });
       }
-    } catch (e) { console.log('通知エラー:', e); }
+    } catch {
+      // 通知のスケジュール失敗は致命的ではないので握りつぶす
+    }
   };
 
   const cancelNotification = async (id: string, item?: Schedule) => {
@@ -1838,16 +1761,6 @@ export default function App() {
   };
 
   // 次のステータスを返す（最終は変更なし）
-  const PROGRESS_FLOW = ['検討中', 'ES提出済', '1次面接', '2次面接', '最終面接', '内定'];
-  const INTERN_FLOW = ['インターンES締切', 'インターン面接', 'インターン確定'];
-  const nextStatus = (current: string): string | null => {
-    if (current === 'ES締切') return 'ES提出済';
-    const idx = PROGRESS_FLOW.indexOf(current);
-    if (idx !== -1 && idx < PROGRESS_FLOW.length - 1) return PROGRESS_FLOW[idx + 1];
-    const iIdx = INTERN_FLOW.indexOf(current);
-    if (iIdx !== -1 && iIdx < INTERN_FLOW.length - 1) return INTERN_FLOW[iIdx + 1];
-    return null;
-  };
   const completeStatus = async (item: Schedule) => {
     const updated = schedules.map(s => s.id !== item.id ? s : {
       ...s, status: '完了',
@@ -2015,7 +1928,7 @@ export default function App() {
                         key={`cal-${isDark}-${monthStr}`}
                         current={monthStr}
                         markingType="multi-dot"
-                        onDayPress={(day: any) => { if (day?.dateString) { setSelectedDate(day.dateString); setCalDaySelected(true); } }}
+                        onDayPress={(day: { dateString?: string }) => { if (day?.dateString) { setSelectedDate(day.dateString); setCalDaySelected(true); } }}
                         firstDay={weekStart}
                         markedDates={markedDates}
                         hideArrows={true}
@@ -2038,9 +1951,9 @@ export default function App() {
                             dayHeader: { height: 0, overflow: 'hidden', margin: 0, padding: 0 },
                             monthText: { height: 0, margin: 0, padding: 0 },
                           },
-                        } as any}
-                        dayComponent={({ date, state }: any) => {
-                          const ds = date.dateString;
+                        } as CalendarProps['theme']}
+                        dayComponent={({ date, state }: { date?: DateData; state?: string }) => {
+                          const ds = date?.dateString ?? '';
                           const items = dateCompanyMap[ds] || [];
                           const isSel = ds === selectedDate, isToday = ds === today;
                           const internBars = internshipPeriodsMap[ds] || [];
@@ -2078,7 +1991,7 @@ export default function App() {
                                   if (dow === 6) return { color: '#4A90D9' };
                                   return { color: C.calText };
                                 })(),
-                                ]}>{date.day}</Text>
+                                ]}>{date?.day ?? ""}</Text>
                               </View>
                               {/* インターン期間スパンバー */}
                               {internBars.slice(0, 1).map((bar, bi) => {
@@ -2695,7 +2608,7 @@ export default function App() {
                   '• 「全データを削除する」は元に戻せないので注意してください',
                 ],
               },
-            ] as { icon: any; title: string; body: string[] }[]).map((item, i) => (
+            ] as { icon: ImageSourcePropType; title: string; body: string[] }[]).map((item, i) => (
               <View key={i} style={{ borderBottomWidth: 0.5, borderBottomColor: C.border2 }}>
                 <TouchableOpacity
                   style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 14 }}
@@ -3562,7 +3475,7 @@ const styles = StyleSheet.create({
   subTitle: { fontSize: 15, fontWeight: 'bold', marginBottom: 10 },
   addButton: { backgroundColor: TDU_BLUE, paddingVertical: 6, paddingHorizontal: 12, borderRadius: 20 },
   addButtonText: { color: '#fff', fontSize: 11, fontWeight: 'bold' },
-  itemCard: { paddingVertical: 13, paddingHorizontal: 6, borderBottomWidth: 1, borderColor: '#f0f0f0', flexDirection: 'row', alignItems: 'center', gap: 8 },
+  itemCard: { paddingVertical: 13, paddingHorizontal: 6, borderBottomWidth: 1, borderColor: LIGHT.border2, flexDirection: 'row', alignItems: 'center', gap: 8 },
   itemTitle: { fontSize: 15, fontWeight: 'bold', fontFamily: 'NotoSansJP_700Bold' },
   itemStatus: { fontSize: 11, marginTop: 3 },
   itemArrow: { color: '#ccc', fontSize: 16 },
@@ -3580,14 +3493,14 @@ const styles = StyleSheet.create({
   filterPanelTitle: { fontSize: 13, fontWeight: 'bold', color: TDU_BLUE },
   filterGroupLabel: { fontSize: 11, color: '#888', fontWeight: 'bold', marginBottom: 6 },
   filterChipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  miniChip: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12, borderWidth: 1, borderColor: '#ddd', backgroundColor: '#f8f8f8' },
+  miniChip: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12, borderWidth: 1, borderColor: '#ddd', backgroundColor: SURFACE_MUTED },
   miniChipActive: { backgroundColor: TDU_BLUE, borderColor: TDU_BLUE },
   miniChipText: { fontSize: 10, color: '#666' },
-  ascBtn: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12, backgroundColor: '#e8f0fe', borderWidth: 1, borderColor: TDU_BLUE },
+  ascBtn: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12, backgroundColor: LIGHT.statChip, borderWidth: 1, borderColor: TDU_BLUE },
   ascBtnText: { fontSize: 10, color: TDU_BLUE, fontWeight: 'bold' },
 
   // スワイプ削除
-  swipeDeleteBg: { position: 'absolute', right: 0, top: 0, bottom: 0, width: 80, backgroundColor: '#e74c3c', borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
+  swipeDeleteBg: { position: 'absolute', right: 0, top: 0, bottom: 0, width: 80, backgroundColor: DANGER, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
   swipeDeleteBtn: { flex: 1, justifyContent: 'center', alignItems: 'center', width: 80 },
   swipeDeleteText: { color: '#fff', fontSize: 11, fontWeight: 'bold', textAlign: 'center' },
 
@@ -3599,7 +3512,7 @@ const styles = StyleSheet.create({
   statusBadgeText: { color: '#fff', fontSize: 9, fontWeight: 'bold', fontFamily: 'NotoSansJP_700Bold' },
   rankBadge: { width: 22, height: 22, borderRadius: 6, alignItems: 'center', justifyContent: 'center' },
   rankText: { color: '#fff', fontSize: 10, fontWeight: 'bold', fontFamily: 'Inter_700Bold' },
-  checkBtn: { backgroundColor: '#f0f4ff', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
+  checkBtn: { backgroundColor: LIGHT.bg3, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
   checkBtnText: { fontSize: 10, color: TDU_BLUE, fontWeight: 'bold' },
 
   fab: { position: 'absolute', bottom: 16, right: 20, width: 52, height: 52, borderRadius: 26, backgroundColor: TDU_BLUE, alignItems: 'center', justifyContent: 'center', elevation: 5 },
@@ -3608,18 +3521,18 @@ const styles = StyleSheet.create({
   settingSection: { fontSize: 12, fontWeight: 'bold', color: '#888', marginBottom: 12, letterSpacing: 1, fontFamily: 'NotoSansJP_700Bold' },
   settingRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 14, borderBottomWidth: 1 },
   settingLabel: { fontSize: 14, flex: 1, fontFamily: 'NotoSansJP_400Regular' },
-  genreRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderColor: '#f0f0f0' },
+  genreRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderColor: LIGHT.border2 },
   genreColorDot: { width: 16, height: 16, borderRadius: 8, marginRight: 12 },
   outlineButton: { borderWidth: 1, borderColor: TDU_BLUE, padding: 12, borderRadius: 10, alignItems: 'center', marginTop: 12 },
   outlineButtonText: { color: TDU_BLUE, fontWeight: 'bold' },
-  dangerButton: { borderWidth: 1, borderColor: '#e74c3c', padding: 14, borderRadius: 10, alignItems: 'center' },
-  dangerButtonText: { color: '#e74c3c', fontWeight: 'bold' },
+  dangerButton: { borderWidth: 1, borderColor: DANGER, padding: 14, borderRadius: 10, alignItems: 'center' },
+  dangerButtonText: { color: DANGER, fontWeight: 'bold' },
   aboutBox: { padding: 16, borderRadius: 10, marginTop: 20 },
   aboutText: { fontSize: 13, color: '#666', lineHeight: 20 },
   supportBtn: { flexDirection: 'row', alignItems: 'center', borderRadius: 14, borderWidth: 1.5, padding: 16, marginTop: 8 },
   supportBtnTitle: { fontSize: 15, fontWeight: 'bold' },
   supportBtnSub: { fontSize: 12, marginTop: 2 },
-  sortChip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, backgroundColor: '#f0f2f5' },
+  sortChip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, backgroundColor: CHIP_BG },
   sortChipActive: { backgroundColor: TDU_BLUE },
   sortChipText: { fontSize: 12, color: '#666' },
 
@@ -3636,12 +3549,12 @@ const styles = StyleSheet.create({
   dragHandleContainer: { alignItems: 'center', paddingVertical: 8, marginTop: -8, marginHorizontal: -24 },
   dragHandleBar: { width: 40, height: 4, borderRadius: 2, backgroundColor: '#ccc' },
   modalTitle: { fontSize: 17, fontWeight: 'bold', marginBottom: 4, fontFamily: 'NotoSansJP_700Bold' },
-  deleteText: { color: '#e74c3c', fontSize: 13 },
+  deleteText: { color: DANGER, fontSize: 13 },
   label: { fontSize: 11, color: '#888', marginBottom: 6, marginTop: 12 },
-  input: { backgroundColor: '#f8f9fa', padding: 13, borderRadius: 10, fontSize: 15, marginBottom: 2 },
+  input: { backgroundColor: LIGHT.bg2, padding: 13, borderRadius: 10, fontSize: 15, marginBottom: 2 },
   textArea: { height: 90, textAlignVertical: 'top' },
   statusContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 4 },
-  statusOption: { paddingHorizontal: 11, paddingVertical: 7, borderRadius: 10, backgroundColor: '#f0f2f5' },
+  statusOption: { paddingHorizontal: 11, paddingVertical: 7, borderRadius: 10, backgroundColor: CHIP_BG },
   statusSelected: { backgroundColor: TDU_BLUE },
   statusOptionText: { fontSize: 11, color: '#666' },
   rankOption: { width: 40, height: 40, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
@@ -3656,28 +3569,28 @@ const styles = StyleSheet.create({
   pickerOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center' },
   pickerBox: { backgroundColor: '#fff', borderRadius: 20, padding: 20, width: '85%' },
   pickerTitle: { fontSize: 16, fontWeight: 'bold', color: '#333', marginBottom: 4, textAlign: 'center' },
-  pickerItem: { width: 44, height: 44, borderRadius: 10, backgroundColor: '#f0f2f5', alignItems: 'center', justifyContent: 'center' },
+  pickerItem: { width: 44, height: 44, borderRadius: 10, backgroundColor: CHIP_BG, alignItems: 'center', justifyContent: 'center' },
   pickerItemActive: { backgroundColor: TDU_BLUE },
   pickerItemText: { fontSize: 14, color: '#333' },
 
-  checkRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderColor: '#f5f5f5', paddingHorizontal: 8 },
+  checkRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderColor: LIGHT.searchBg, paddingHorizontal: 8 },
   checkbox: { width: 24, height: 24, borderRadius: 6, borderWidth: 2, borderColor: '#ddd', alignItems: 'center', justifyContent: 'center', marginRight: 12 },
   checkLabel: { fontSize: 15, color: '#333' },
   customAddRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12, paddingHorizontal: 4 },
-  customAddInput: { flex: 1, backgroundColor: '#f8f9fa', padding: 11, borderRadius: 10, fontSize: 14 },
+  customAddInput: { flex: 1, backgroundColor: LIGHT.bg2, padding: 11, borderRadius: 10, fontSize: 14 },
   customAddBtn: { backgroundColor: TDU_BLUE, paddingVertical: 11, paddingHorizontal: 16, borderRadius: 10 },
 
   colorDot: { width: 32, height: 32, borderRadius: 16 },
   colorDotActive: { borderWidth: 3, borderColor: '#333' },
 
   // インラインピッカー
-  inlinePicker: { backgroundColor: '#f0f4ff', borderRadius: 10, borderWidth: 1, borderColor: '#dde8ff', padding: 6, marginTop: 4, maxHeight: 200 },
-  inlinePickerItem: { width: 38, height: 38, borderRadius: 8, backgroundColor: '#f0f2f5', alignItems: 'center', justifyContent: 'center' },
+  inlinePicker: { backgroundColor: LIGHT.bg3, borderRadius: 10, borderWidth: 1, borderColor: ACCENT_BORDER, padding: 6, marginTop: 4, maxHeight: 200 },
+  inlinePickerItem: { width: 38, height: 38, borderRadius: 8, backgroundColor: CHIP_BG, alignItems: 'center', justifyContent: 'center' },
   inlinePickerItemActive: { backgroundColor: TDU_BLUE },
   inlinePickerClear: { width: '100%', alignItems: 'flex-end', paddingRight: 4, paddingBottom: 2 },
 
   // URLチップ・進捗ボタン
-  urlChip: { marginTop: 4, backgroundColor: '#e8f0fe', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 7, alignSelf: 'flex-start' },
+  urlChip: { marginTop: 4, backgroundColor: LIGHT.statChip, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 7, alignSelf: 'flex-start' },
   urlChipText: { fontSize: 11, color: ACCENT, fontWeight: 'bold' },
   progressBtn: { backgroundColor: TDU_BLUE, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 },
   progressBtnText: { fontSize: 11, color: '#fff', fontWeight: 'bold' },
@@ -3686,6 +3599,6 @@ const styles = StyleSheet.create({
 
   // コピーボタン
   copyRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 2 },
-  copyBtn: { backgroundColor: '#f0f4ff', borderRadius: 8, padding: 10, borderWidth: 1, borderColor: '#dde8ff' },
+  copyBtn: { backgroundColor: LIGHT.bg3, borderRadius: 8, padding: 10, borderWidth: 1, borderColor: ACCENT_BORDER },
   copyBtnText: { fontSize: 16 },
 });
