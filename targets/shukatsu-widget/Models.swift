@@ -334,6 +334,21 @@ func formatDateRange(_ s: WidgetSchedule) -> String {
     return "\(Fmt.shortMonthDay.string(from: start))〜\(Fmt.shortMonthDay.string(from: end))"
 }
 
+/// 今日を0として何日後か。DSTで23/25時間になる日があるため
+/// 秒数の割り算ではなくカレンダーの日差で数える。
+func daysUntil(_ ymd: String, from todayYmd: String) -> Int? {
+    guard let a = Ymd.date(todayYmd), let b = Ymd.date(ymd) else { return nil }
+    return Fmt.jaCalendar.dateComponents([.day], from: a, to: b).day
+}
+
+/// 「今日」「明日」「あと3日」。過ぎているものは nil。
+func relativeDayLabel(_ ymd: String, from todayYmd: String) -> String? {
+    guard let d = daysUntil(ymd, from: todayYmd), d >= 0 else { return nil }
+    if d == 0 { return "今日" }
+    if d == 1 { return "明日" }
+    return "あと\(d)日"
+}
+
 // MARK: - Timeline 生成
 //
 // 30分ごとのポーリングは1日48回のリロードを要求し、システムの日次予算

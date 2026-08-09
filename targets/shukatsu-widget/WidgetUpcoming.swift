@@ -80,16 +80,82 @@ struct UpcomingHomeView: View {
     private var isSmall: Bool { family == .systemSmall }
 
     private var limit: Int {
-        switch family {
-        case .systemSmall: return 3
-        case .systemLarge: return 8
-        default: return 5
-        }
+        // small は heroBody を使うのでここには来ない
+        family == .systemLarge ? 8 : 5
     }
 
     private var visible: [WidgetSchedule] { Array(entry.schedules.prefix(limit)) }
 
+    @ViewBuilder
     var body: some View {
+        // 小サイズは一覧にすると1行が9ptになり結局読めない。
+        // 「次に何があるか」だけを大きく出す。
+        if isSmall {
+            heroBody
+        } else {
+            listBody
+        }
+    }
+
+    /// 次の予定を1件だけ大きく見せる
+    private var heroBody: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 4) {
+                Image(systemName: "clock.fill")
+                    .font(.system(size: 10))
+                    .foregroundStyle(isFullColor ? TDU_ACCENT : .white)
+                    .widgetAccentable()
+                Text("次の予定")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.7))
+            }
+            Spacer(minLength: 4)
+            if let s = entry.schedules.first {
+                let color = isFullColor ? colorForStatus(s.status, override: s.calendarColor) : Color.white
+                Text(s.company)
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(.white)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.8)
+                Text(s.status)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(color)
+                    .lineLimit(1)
+                    .invalidatableContent()
+                Spacer(minLength: 4)
+                if let rel = relativeDayLabel(s.date, from: entry.today) {
+                    Text(rel)
+                        .font(.system(size: 20, weight: .bold))
+                        .foregroundStyle(.white)
+                        .monospacedDigit()
+                        .minimumScaleFactor(0.7)
+                        .lineLimit(1)
+                }
+                HStack(spacing: 4) {
+                    Text(formatDateRange(s))
+                    if !s.hour.isEmpty {
+                        Text("\(s.hour):\(s.minute.isEmpty ? "00" : s.minute)")
+                            .monospacedDigit()
+                    }
+                }
+                .font(.system(size: 10))
+                .foregroundStyle(.white.opacity(0.6))
+                .lineLimit(1)
+            } else {
+                Spacer()
+                Text("予定はありません")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.white.opacity(0.5))
+                Spacer()
+            }
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(showsBackground ? 12 : 6)
+        .dynamicTypeSize(.large ... .xxLarge)
+    }
+
+    private var listBody: some View {
         VStack(alignment: .leading, spacing: 0) {
             header.padding(.bottom, 6)
             if entry.schedules.isEmpty {
@@ -247,7 +313,7 @@ struct UpcomingWidget: Widget {
             UpcomingAllView(entry: entry)
         }
         .configurationDisplayName("直近の持ち駒")
-        .description("日程が近い順に選考中の企業を表示。→ボタンで選考を次の段階へ進められます。")
+        .description("小サイズは次の予定を1件だけ大きく表示。中・大サイズは日程が近い順に一覧表示し、→ボタンで選考を次の段階へ進められます。")
         .supportedFamilies([.systemSmall, .systemMedium, .systemLarge, .accessoryRectangular, .accessoryCircular])
     }
 }
