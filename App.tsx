@@ -2177,28 +2177,30 @@ export default function App() {
     () => (calendarMode === 'week' ? CAL_ROW_H : maxCalRows * CAL_ROW_H),
     [calendarMode, maxCalRows],
   );
+  // 「直近の予定」を広げるとカレンダーが縮む。
+  // 指に追従させて高さを毎フレーム変えると、カレンダーの42セルぶんの
+  // レイアウトがそのたびに走って引っかかる。開くか閉じるかの2状態だけにし、
+  // 切り替わる瞬間だけ timing で動かす（spring は高さが跳ねて不快になる）。
+  const [calCollapsed, setCalCollapsed] = useState(false);
   useEffect(() => {
-    calHeight.value = withSpring(calOpenHeight, { damping: 15, stiffness: 150 });
-  }, [calOpenHeight]);
+    calHeight.value = withTiming(calCollapsed ? 0 : calOpenHeight, { duration: 220 });
+  }, [calOpenHeight, calCollapsed]);
 
-  // 「直近の予定」を掴んで引き上げるとカレンダーが縮み、予定が広く見られる。
-  // 高さのアニメーションはレイアウト再計算を伴うため、離した時点で開/閉に吸着させる。
-  const calDragStart = useSharedValue(0);
+  const toggleCal = () => {
+    Haptics.selectionAsync();
+    setCalCollapsed(v => !v);
+  };
+
+  // 上下に振れば切り替わる。ドラッグ中は何も動かさず、離した向きだけを見る。
   const sheetDrag = useMemo(
     () => Gesture.Pan()
-      .activeOffsetY([-10, 10])
-      .onStart(() => { calDragStart.value = calHeight.value; })
-      .onUpdate(e => {
-        const next = calDragStart.value + e.translationY;
-        calHeight.value = Math.max(0, Math.min(next, calOpenHeight));
-      })
+      .activeOffsetY([-14, 14])
+      .failOffsetX([-24, 24])
       .onEnd(e => {
-        // 掴んだ位置から半分より縮んでいるか、上に弾いたら閉じる
-        const closing = calHeight.value < calOpenHeight / 2 || e.velocityY < -400;
-        calHeight.value = withSpring(closing && e.velocityY < 400 ? 0 : calOpenHeight,
-          { damping: 15, stiffness: 150 });
+        if (e.translationY < -24 || e.velocityY < -400) runOnJS(setCalCollapsed)(true);
+        else if (e.translationY > 24 || e.velocityY > 400) runOnJS(setCalCollapsed)(false);
       }),
-    [calOpenHeight],
+    [],
   );
 
   // リストフェードイン（フィルター/ソート変更時）
@@ -3056,10 +3058,20 @@ export default function App() {
                 )}
               </ReAnimated.View>
             )}
+            {/* タップでも切り替わる。掴む線は4pxしかないので、
+                当たり判定は44pt確保する */}
             <GestureDetector gesture={sheetDrag}>
-              <View style={{ alignItems: 'center', paddingTop: 6, paddingBottom: 2, backgroundColor: C.bg }}>
+              <TouchableOpacity
+                activeOpacity={0.6}
+                onPress={toggleCal}
+                accessibilityRole="button"
+                accessibilityLabel={calCollapsed ? 'カレンダーを表示' : 'カレンダーを隠す'}
+                style={{ alignItems: 'center', justifyContent: 'center', height: 28, backgroundColor: C.bg }}>
                 <View style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: C.border }} />
-              </View>
+                <Text style={{ fontSize: 9, color: C.text3, marginTop: 2 }}>
+                  {calCollapsed ? '▼ カレンダー' : '▲ 予定を広げる'}
+                </Text>
+              </TouchableOpacity>
             </GestureDetector>
             <View style={[styles.todoArea, { backgroundColor: C.bg }]}>
               {!calDaySelected ? (
