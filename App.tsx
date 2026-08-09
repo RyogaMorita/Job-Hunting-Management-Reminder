@@ -1791,7 +1791,6 @@ export default function App() {
         status: s.status,
         calendarColor: s.calendarColor ?? colors[s.status] ?? null,
         // ウィジェットの→ボタンの遷移先をアプリ側と揃えるために渡す
-        hasWebTest: !!(s.webTestType || s.webTestDeadline),
       }));
       await SharedGroupPreferences.setItem(
         WIDGET_SCHEDULES_KEY,

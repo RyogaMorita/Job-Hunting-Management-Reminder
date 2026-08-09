@@ -64,11 +64,11 @@ export const INTERN_FLOW = ['インターンES締切', 'インターン面接', 
 
 /// 次の選考段階。これ以上進めないものは null。
 ///
-/// ES提出済の次は常に Webテスト。以前はテスト情報を登録した企業だけ挟んでいたが、
-/// 登録前でも受検が発生するため、既定の流れに入れておき、
-/// テストが無い企業は手動で 1次面接 に飛ばしてもらう。
-/// hasWebTest は互換のため残してあるが、遷移先には影響しない。
-export const nextStatus = (current: string, hasWebTest = false): string | null => {
+/// ES提出済の次は常に Webテスト。
+/// 以前はテスト情報を登録した企業だけ挟んでいたが、「未登録」と「テストが無い」は
+/// 別物で、入力していないだけの企業まで飛ばしてしまう。
+/// テストが無い企業は手動で 1次面接 に進めてもらう。
+export const nextStatus = (current: string): string | null => {
   // ES締切は「提出前」の状態なので、進めると提出済になる
   if (current === 'ES締切') return 'ES提出済';
   const idx = PROGRESS_FLOW.indexOf(current);

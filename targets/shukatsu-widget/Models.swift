@@ -11,8 +11,6 @@ struct WidgetSchedule: Codable, Identifiable, Hashable {
     let minute: String
     let status: String
     let calendarColor: String?
-    /// Webテストの登録があるか。→ボタンの遷移先をアプリ側と揃えるために持つ
-    let hasWebTest: Bool
 
     /// 1件でも欠けたフィールドがあると配列全体のデコードが失敗し、
     /// 4つのウィジェットが同時に真っ白になる。欠損・型違いは空文字で受ける。
@@ -31,16 +29,14 @@ struct WidgetSchedule: Codable, Identifiable, Hashable {
         minute = str(.minute)
         status = str(.status)
         calendarColor = try? c.decode(String.self, forKey: .calendarColor)
-        hasWebTest = (try? c.decode(Bool.self, forKey: .hasWebTest)) ?? false
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, company, date, endDate, hour, minute, status, calendarColor, hasWebTest
+        case id, company, date, endDate, hour, minute, status, calendarColor
     }
 
     init(id: String, company: String, date: String, endDate: String?,
-         hour: String, minute: String, status: String, calendarColor: String?,
-         hasWebTest: Bool = false) {
+         hour: String, minute: String, status: String, calendarColor: String?) {
         self.id = id
         self.company = company
         self.date = date
@@ -49,7 +45,6 @@ struct WidgetSchedule: Codable, Identifiable, Hashable {
         self.minute = minute
         self.status = status
         self.calendarColor = calendarColor
-        self.hasWebTest = hasWebTest
     }
 
     /// 終了日（未設定・不正な場合は開始日）
@@ -205,7 +200,7 @@ enum AppGroupHelper {
             return WidgetSchedule(
                 id: s.id, company: s.company, date: s.date, endDate: s.endDate,
                 hour: s.hour, minute: s.minute, status: newStatus,
-                calendarColor: statusColors[newStatus], hasWebTest: s.hasWebTest
+                calendarColor: statusColors[newStatus]
             )
         }
     }
@@ -276,8 +271,7 @@ private let INTERN_FLOW = ["インターンES締切", "インターン面接", "
 /// 次の選考段階。これ以上進めないものは nil。
 ///
 /// ES提出済の次は常に Webテスト（lib/schedule.ts と揃えること）。
-/// hasWebTest は互換のため残してあるが遷移先には影響しない。
-func nextStatus(_ current: String, hasWebTest: Bool = false) -> String? {
+func nextStatus(_ current: String) -> String? {
     if current == "ES締切" { return "ES提出済" }
     if let i = PROGRESS_FLOW.firstIndex(of: current), i < PROGRESS_FLOW.count - 1 {
         return PROGRESS_FLOW[i + 1]

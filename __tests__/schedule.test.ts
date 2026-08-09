@@ -147,10 +147,8 @@ const ev = (id: string, hour: string, minute = '00', venueType?: 'online' | 'ons
   ({ id, company: id, date: '2026-05-09', hour, minute, venueType });
 
 describe('Webテストを挟むステータス遷移', () => {
-  test('ES提出済の次は常にWebテスト（テスト情報の登録有無によらない）', () => {
+  test('ES提出済の次は常にWebテスト', () => {
     expect(nextStatus('ES提出済')).toBe('Webテスト');
-    expect(nextStatus('ES提出済', false)).toBe('Webテスト');
-    expect(nextStatus('ES提出済', true)).toBe('Webテスト');
   });
 
   test('Webテストの次は1次面接', () => {
