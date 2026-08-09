@@ -85,6 +85,11 @@ const STATUS_OPTIONS_KEY = '@status_options_v1';
 // v2 へ一度だけ差し込み直す。以降のユーザー削除は v2 側で保持される。
 const STATUS_OPTIONS_KEY_V2 = '@status_options_v2';
 const SWIPE_HINT_KEY = '@swipe_hint_shown_v1';
+// カレンダー1行の高さ。日付の丸26 + 予定2行(12+2)×2 = 54 に
+// weekVerticalMargin の上下4を足して58。少し余裕を見て60。
+// 52 のままだと最終行の予定が枠外に出て overflow で切られていた。
+// 「+N」は絶対配置にして行の高さを消費させない。
+const CAL_ROW_H = 60;
 const TDU_BLUE = '#003366';
 const ACCENT = '#1a6bcc';
 
@@ -517,7 +522,7 @@ function WeekCalendarRow({ selectedDate, today, weekStart, C, isDark, dateCompan
   }, [selectedDate, weekStart]);
   const lastTapRef = useRef<{ ds: string; time: number }>({ ds: '', time: 0 });
   return (
-    <View style={{ flexDirection: 'row', justifyContent: 'space-around', paddingHorizontal: 2, height: 52 }}>
+    <View style={{ flexDirection: 'row', justifyContent: 'space-around', paddingHorizontal: 2, height: CAL_ROW_H }}>
       {weekDates.map(ds => {
         const items = dateCompanyMap[ds] || [];
         const isSel = ds === selectedDate;
@@ -558,7 +563,11 @@ function WeekCalendarRow({ selectedDate, today, weekStart, C, isDark, dateCompan
                 </View>
               );
             })}
-            {items.length > 2 && <Text style={styles.calMore}>+{items.length - 2}</Text>}
+            {items.length > 2 && (
+              <Text style={[styles.calMore, { position: 'absolute', bottom: -1, right: 2 }]}>
+                +{items.length - 2}
+              </Text>
+            )}
           </TouchableOpacity>
         );
       })}
@@ -2153,7 +2162,7 @@ export default function App() {
   // 依存配列はレンダリング時に評価されるため、宣言より前だと初回に undefined が入る。
   // 開いたときのカレンダー高さ。下の「直近の予定」を引き上げると 0 まで縮む
   const calOpenHeight = useMemo(
-    () => (calendarMode === 'week' ? 52 : maxCalRows * 52),
+    () => (calendarMode === 'week' ? CAL_ROW_H : maxCalRows * CAL_ROW_H),
     [calendarMode, maxCalRows],
   );
   useEffect(() => {
@@ -2841,7 +2850,7 @@ export default function App() {
                   }
                 }}
                 contentOffset={{ x: screenWidth, y: 0 }}
-                style={{ flexGrow: 0, height: maxCalRows * 52 }}
+                style={{ flexGrow: 0, height: maxCalRows * CAL_ROW_H }}
               >
 
                 {[-1, 0, 1].map(offset => {
@@ -2985,7 +2994,11 @@ export default function App() {
                                         </View>
                                       );
                                     })}
-                                    {items.length > shown && <Text style={styles.calMore}>+{items.length - shown}</Text>}
+                                    {items.length > shown && (
+                                      <Text style={[styles.calMore, { position: 'absolute', bottom: -1, right: 2 }]}>
+                                        +{items.length - shown}
+                                      </Text>
+                                    )}
                                   </>
                                 );
                               })()}
