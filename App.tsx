@@ -84,6 +84,7 @@ const STATUS_OPTIONS_KEY = '@status_options_v1';
 // 読み込み時に既定値を丸ごと上書きしてしまうため選択肢に出てこなかった。
 // v2 へ一度だけ差し込み直す。以降のユーザー削除は v2 側で保持される。
 const STATUS_OPTIONS_KEY_V2 = '@status_options_v2';
+const SWIPE_HINT_KEY = '@swipe_hint_shown_v1';
 const TDU_BLUE = '#003366';
 const ACCENT = '#1a6bcc';
 
@@ -258,10 +259,30 @@ const COLOR_PALETTE = [
 // gesture-handler + reanimated はUIスレッドで完結するので指に貼り付く。
 const SWIPE_OPEN_X = -80;
 
-function SwipeableRow({ children, onDelete }: { children: React.ReactNode; onDelete: () => void }) {
+function SwipeableRow({ children, onDelete, hint = false }: {
+  children: React.ReactNode; onDelete: () => void;
+  /// 初回だけ少し引いて戻し、スワイプできることを見せる。
+  /// カードは枠と余白を持つのでリスト行に比べてスワイプの手掛かりが弱い。
+  hint?: boolean;
+}) {
   const translateX = useSharedValue(0);
   // ドラッグ開始時点の位置。開いた状態から続けて引いても飛ばないようにする
   const startX = useSharedValue(0);
+
+  // 親が「表示済み」を記録すると hint が false に変わるので、
+  // 初回の値を控えてアニメーションが打ち切られないようにする
+  const hintRef = useRef(hint);
+  useEffect(() => {
+    if (!hintRef.current) return;
+    const t = setTimeout(() => {
+      translateX.value = withSequence(
+        withTiming(-44, { duration: 320 }),
+        withTiming(-44, { duration: 420 }),
+        withSpring(0, { damping: 15, stiffness: 150 }),
+      );
+    }, 700);
+    return () => clearTimeout(t);
+  }, []);
 
   const pan = Gesture.Pan()
     // 横に十分動いてから初めて有効化する。縦は listのスクロールに譲る
@@ -1476,6 +1497,13 @@ export default function App() {
   const [checkModalItem, setCheckModalItem] = useState<Schedule | null>(null);
   const [settingsPage, setSettingsPage] = useState<SettingsPage>(null);
   const [sortSheet, setSortSheet] = useState(false);
+  // スワイプ削除のヒントは一度だけ。先頭カードにのみ出す
+  const [swipeHintDone, setSwipeHintDone] = useState(true);
+  useEffect(() => {
+    if (swipeHintDone || activeTab !== 'list' || schedules.length === 0) return;
+    setSwipeHintDone(true);
+    AsyncStorage.setItem(SWIPE_HINT_KEY, 'true');
+  }, [swipeHintDone, activeTab, schedules.length]);
   const [analyticsVisible, setAnalyticsVisible] = useState(false);
   // 保存できる＝変更がある、を伝えるための差分判定。
   // openDetail/openAdd の setState は同じレンダーにまとまるので、
@@ -1685,7 +1713,22 @@ export default function App() {
 
       const s = await AsyncStorage.getItem(STORAGE_KEY);
       if (s) {
-        let parsed: Schedule[] = JSON.parse(s);
+        // ここで例外を投げると以降の設定読み込みが丸ごと飛び、
+        // 企業が0社に見えてしまう。企業データだけ切り離して防御する。
+        let parsed: Schedule[] | null = null;
+        try {
+          const raw = JSON.parse(s);
+          if (!Array.isArray(raw)) throw new Error('not an array');
+          // 壊れた要素だけ落として残りは活かす
+          parsed = raw.filter((x: unknown): x is Schedule =>
+            !!x && typeof x === 'object' && typeof (x as Schedule).id === 'string');
+        } catch {
+          // 壊れた値は上書きせず残す（後から取り出せる可能性を潰さない）。
+          // ウィジェットにも空を書かない。次回の正常な読み込みで復帰できる。
+          Alert.alert('データを読み込めませんでした',
+            '保存されている企業データが壊れている可能性があります。アプリを再起動しても直らない場合はお問い合わせください。');
+        }
+        if (parsed) {
         // ウィジェットの→ボタンで進めたぶんを先に取り込む
         const pending = await drainWidgetPendingActions();
         const afterPending = pending ? mergePendingStatuses(parsed, pending, loadedColors) : null;
@@ -1710,6 +1753,7 @@ export default function App() {
         }
         setSchedules(migrated);
         if (!hasChanged) await syncWidgetData(migrated, loadedColors);
+        }
       }
       const g = await AsyncStorage.getItem(GENRES_KEY);
       if (g) setGenres(JSON.parse(g));
@@ -1725,6 +1769,9 @@ export default function App() {
       // v2 があればそれが正。無ければ v1 に既定値の不足分を差し込んで v2 として保存する。
       // 差し込み位置は DEFAULT_STATUS_OPTIONS の並び順に合わせるので、
       // Webテストは「ES提出済」の直後、内定承諾は「内定」の直後に入る。
+      const hinted = await AsyncStorage.getItem(SWIPE_HINT_KEY);
+      setSwipeHintDone(hinted === 'true');
+
       const so2 = await AsyncStorage.getItem(STATUS_OPTIONS_KEY_V2);
       if (so2) {
         setStatusOptions(JSON.parse(so2));
@@ -1765,7 +1812,7 @@ export default function App() {
       // 起動時に表示済みフラグをリセット（新しい起動サイクル開始）
       await AsyncStorage.setItem('@interstitial_triggered', 'false');
 
-    } catch (e) { Alert.alert('エラー', '読み込み失敗'); }
+    } catch { Alert.alert('設定を読み込めませんでした', 'アプリを再起動してみてください。'); }
   };
 
   // 週の開始曜日をウィジェットへ共有する（カレンダーの列並びを合わせるため）
@@ -2113,8 +2160,11 @@ export default function App() {
   }, [filteredSorted]);
 
   // ─── 保存ロジック ──────────────────────────────────────────────
+  const savingRef = useRef(false);
   const handleSave = async () => {
-    if (companyName.trim() === '') return;
+    if (companyName.trim() === '' || savingRef.current) return;
+    savingRef.current = true;
+    setTimeout(() => { savingRef.current = false; }, 800);
     const name = companyName.trim();
 
     if (!selectedItem) {
@@ -2494,7 +2544,13 @@ export default function App() {
     applyStatus(item, ns, true);
   };
 
+  // 高頻度で押される操作なので、連打で2段階進まないよう企業ごとに短時間ロックする
+  const advancingRef = useRef<Set<string>>(new Set());
+
   const applyStatus = async (item: Schedule, ns: string, undoable: boolean) => {
+    if (advancingRef.current.has(item.id)) return;
+    advancingRef.current.add(item.id);
+    setTimeout(() => advancingRef.current.delete(item.id), 600);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     const autoChecks = STATUS_TO_CHECKS[ns] ?? [];
     const initCL: Record<string, boolean> = { ...(item.checklist ?? {}) };
@@ -2915,7 +2971,7 @@ export default function App() {
                   </View>
                   <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }}>
                     {upcomingSchedules.length === 0
-                      ? <Text style={[styles.emptyText, { color: C.text3 }]}>直近の予定はありません</Text>
+                      ? <Text style={[styles.emptyText, { color: C.text3 }]}>日付が決まっている予定はありません</Text>
                       : upcomingSchedules.map(item => (
                         <TouchableOpacity key={item.id} style={[styles.upcomingCard, { backgroundColor: C.bg3 }]} onPress={() => openDetail(item)}>
                           <View style={{ flex: 1 }}>
@@ -3063,7 +3119,8 @@ export default function App() {
                 ListEmptyComponent={
                   <ReAnimated.View entering={FadeInDown.duration(400).springify()} style={{ alignItems: 'center', paddingTop: 60, gap: 8 }}>
                     <Text style={{ fontSize: 44 }}>📭</Text>
-                    <Text style={[styles.emptyText, { color: C.text3 }]}>企業を追加してみましょう</Text>
+                    <Text style={[styles.emptyText, { color: C.text3 }]}>まだ企業が登録されていません</Text>
+                    <Text style={{ fontSize: 12, color: C.text3, textAlign: 'center', marginTop: 4 }}>右下の＋から追加できます</Text>
                   </ReAnimated.View>
                 }
                 renderItem={({ item, drag, isActive }: RenderItemParams<Schedule>) => {
@@ -3121,7 +3178,12 @@ export default function App() {
                   <ReAnimated.View entering={FadeInDown.duration(400).springify()} style={{ alignItems: 'center', paddingTop: 60, gap: 8 }}>
                     <Text style={{ fontSize: 44 }}>📭</Text>
                     <Text style={[styles.emptyText, { color: C.text3 }]}>
-                      {isFilterActive || searchQuery.trim() ? '該当する企業がありません' : '企業を追加してみましょう'}
+                      {isFilterActive || searchQuery.trim() ? '条件に一致する企業がありません' : 'まだ企業が登録されていません'}
+                    </Text>
+                    <Text style={{ fontSize: 12, color: C.text3, textAlign: 'center', marginTop: 4 }}>
+                      {isFilterActive || searchQuery.trim()
+                        ? '絞り込み条件や検索語を変えてみてください'
+                        : '右下の＋から選考中の企業を追加できます'}
                     </Text>
                     {(isFilterActive || searchQuery.trim()) && (
                       <Text style={{ fontSize: 12, color: C.text3 }}>検索条件を変えてみてください</Text>
@@ -3140,7 +3202,9 @@ export default function App() {
                       entering={FadeInDown.delay(Math.min(index * 80, 480)).springify()}
                       exiting={FadeOutLeft.duration(200)}
                       layout={LinearTransition.springify()}>
-                    <SwipeableRow onDelete={() => deleteSchedule(item.id)}>
+                    <SwipeableRow
+                      onDelete={() => deleteSchedule(item.id)}
+                      hint={!swipeHintDone && index === 0}>
                       {/* 一覧で一瞬で知りたいのは 企業 / 現在ステータス / 次の日付 まで。
                           ランクバッジ・進捗ステッパー・各種ピルは詳細側へ寄せた。
                           ステータスは「状態」なのでボタンの見た目にしない。 */}
@@ -3418,7 +3482,7 @@ export default function App() {
                       trigger: { type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL, seconds: 5, repeats: false },
                     });
                     Alert.alert('送信完了', '5秒後に通知が届きます。アプリをバックグラウンドにしてお待ちください。');
-                  } catch (e) { Alert.alert('エラー', '通知の送信に失敗しました: ' + String(e)); }
+                  } catch { Alert.alert('通知を送信できませんでした', '設定アプリで通知が許可されているか確認してください。'); }
                 }}>
                 <Text style={[styles.outlineButtonText, { color: ACCENT }]}>テスト通知を送る</Text>
               </TouchableOpacity>
@@ -4475,7 +4539,7 @@ export default function App() {
 
               {todos.length === 0 ? (
                 <Text style={{ fontSize: 13, color: C.text3, textAlign: 'center', paddingVertical: 24 }}>
-                  期限のあるやることはありません
+                  期限のあるやることはありません{'\n'}企業の詳細から追加できます
                 </Text>
               ) : (
                 <ScrollView>

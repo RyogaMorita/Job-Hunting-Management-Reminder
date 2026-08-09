@@ -428,3 +428,51 @@ describe('バーチカル表示の配置', () => {
     expect(key(fwd)).toBe(key(rev));
   });
 });
+
+// 就活は年をまたいで走るため、日付境界は落とすと痛い箇所。
+describe('日付の境界', () => {
+  test('月末から翌月へ渡る', () => {
+    expect(daysBetween('2026-08-31', '2026-09-01')).toBe(1);
+    expect(addDaysYmd('2026-08-31', 1)).toBe('2026-09-01');
+  });
+
+  test('年をまたぐ', () => {
+    expect(daysBetween('2026-12-31', '2027-01-01')).toBe(1);
+    expect(daysBetween('2026-12-25', '2027-01-05')).toBe(11);
+  });
+
+  test('うるう年の2月をまたぐ', () => {
+    expect(daysBetween('2028-02-28', '2028-03-01')).toBe(2); // 2/29がある
+    expect(daysBetween('2026-02-28', '2026-03-01')).toBe(1);
+  });
+
+  test('同日は0、過去は負', () => {
+    expect(daysBetween('2026-08-09', '2026-08-09')).toBe(0);
+    expect(daysBetween('2026-08-09', '2026-08-08')).toBe(-1);
+  });
+
+  test('やることの残り日数は今日を0として数える', () => {
+    const base = { id: '1', company: 'A社', status: 'ES締切', date: '2026-08-09' };
+    expect(collectTodos([base], '2026-08-09')[0].daysLeft).toBe(0);
+    expect(collectTodos([base], '2026-08-08')[0].daysLeft).toBe(1);
+    expect(collectTodos([base], '2026-08-10')[0].daysLeft).toBe(-1);
+  });
+
+  test('月をまたいだ期間の予定も全日を覆う', () => {
+    const s = { date: '2026-08-30', endDate: '2026-09-02' };
+    expect(coversDate(s, '2026-08-31')).toBe(true);
+    expect(coversDate(s, '2026-09-01')).toBe(true);
+    expect(coversDate(s, '2026-09-03')).toBe(false);
+  });
+
+  test('年をまたいだ期間の予定も全日を覆う', () => {
+    const s = { date: '2026-12-30', endDate: '2027-01-02' };
+    expect(expandDateRange(s)).toEqual(['2026-12-30', '2026-12-31', '2027-01-01', '2027-01-02']);
+  });
+
+  test('時刻未設定は重複判定の対象外', () => {
+    const a = { id: 'a', company: 'a', date: '2026-08-09', hour: '', minute: '' };
+    const b = { id: 'b', company: 'b', date: '2026-08-09', hour: '', minute: '' };
+    expect(eventsConflict(a, b)).toBe(false);
+  });
+});
