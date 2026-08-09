@@ -41,7 +41,7 @@ import { LISTED_COMPANIES, CompanyEntry } from './companies_v2';
 import {
   addDaysYmd, collectTodos, formatYmd, parseYmd, coversDate, dateRangeStr, expandDateRange,
   findConflicts, nextStatus, PREP_TEMPLATES,
-  stageDistribution, weeklyActivity, layoutDayEvents, TRAVEL_BUFFER_MIN,
+  stageDistribution, weeklyActivity, weeklyTrend, layoutDayEvents, TRAVEL_BUFFER_MIN,
 } from './lib/schedule';
 import type { TodoItem, VenueType } from './lib/schedule';
 
@@ -189,6 +189,7 @@ interface Schedule {
   webTestDeadline?: string;
   webTestBookedAt?: string;  // 予約日時（会場受検の場合）
   webTestVenue?: string;
+  webTestDone?: boolean;     // 受検済み。やること一覧から消すために持つ
   // 辞退の連絡を済ませたか
   declineContacted?: boolean;
   // 一覧・カレンダーで常に上に出す
@@ -2142,6 +2143,15 @@ export default function App() {
     () => weeklyActivity(schedules, todayYmd, weekStart),
     [schedules, todayYmd, weekStart],
   );
+  const trend = useMemo(
+    () => weeklyTrend(schedules, todayYmd, weekStart, 6),
+    [schedules, todayYmd, weekStart],
+  );
+  // 志望度の内訳。内定前でも毎日動く指標として置く
+  const rankCounts = useMemo(() => {
+    const active = schedules.filter(s => !INACTIVE.includes(s.status));
+    return RANK_OPTIONS.map(r => ({ rank: r, count: active.filter(s => s.rank === r).length }));
+  }, [schedules]);
   // グラフの色。青は操作・選択専用にしたので、チャートには使わない。
   const CHART_PALETTE: Record<string, string> = {
     considering: NEUTRAL_GRAY, document: '#7E57C2', interview: '#26A69A', offer: '#EC407A',
@@ -2528,6 +2538,37 @@ export default function App() {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     const updated = schedules.map(s => s.id !== item.id ? s : { ...s, declineContacted: true });
     await saveSchedules(updated);
+  };
+
+  // やること一覧から直接片付ける。種類ごとに「済んだ」の意味が違うので分岐する。
+  const completeTodo = async (t: TodoItem) => {
+    const item = schedules.find(s => s.id === t.scheduleId);
+    if (!item) return;
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    switch (t.kind) {
+      case 'es':
+        // ES締切のやること＝提出すること
+        await applyStatus(item, 'ES提出済', true);
+        break;
+      case 'webtest':
+        await saveSchedules(schedules.map(s => s.id !== item.id ? s : { ...s, webTestDone: true }));
+        break;
+      case 'offer':
+        // 承諾は後戻りしづらいので確認を挟む advanceStatus を通す
+        advanceStatus(item, '内定承諾');
+        break;
+      case 'decline':
+        await markDeclineContacted(item);
+        break;
+      case 'custom':
+        if (!t.customId) return;
+        await saveSchedules(schedules.map(s => s.id !== item.id ? s : {
+          ...s,
+          customChecklist: (s.customChecklist ?? []).map(c =>
+            c.id === t.customId ? { ...c, checked: true } : c),
+        }));
+        break;
+    }
   };
 
   const deleteCustomCheck = async (item: Schedule, id: string) => {
@@ -4404,6 +4445,56 @@ export default function App() {
                 </Text>
               </View>
             </View>
+
+                {/* 直近6週の前進回数。内定が出る前でも毎週動く指標。
+                    色だけで読ませないよう、各週に数値を添える。 */}
+                <Text style={[styles.formSection, { color: C.text3, marginTop: 8 }]}>週ごとの前進</Text>
+                {trend.every(w => w.count === 0) ? (
+                  <Text style={{ fontSize: 12, color: C.text3, paddingVertical: 8 }}>
+                    まだ記録がありません。ステータスを進めるとここに溜まっていきます。
+                  </Text>
+                ) : (
+                  <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 8, height: 110, paddingTop: 8 }}>
+                    {trend.map((w, i) => {
+                      const max = Math.max(...trend.map(x => x.count), 1);
+                      const isThisWeek = i === trend.length - 1;
+                      return (
+                        <View key={w.from} style={{ flex: 1, alignItems: 'center', gap: 4 }}>
+                          <Text style={{ fontSize: 11, color: C.text, fontWeight: 'bold' }}>{w.count}</Text>
+                          <View style={{
+                            width: '100%',
+                            height: Math.max(3, (w.count / max) * 70),
+                            borderRadius: 4,
+                            backgroundColor: isThisWeek ? ACCENT : CHART_PALETTE.interview,
+                          }} />
+                          <Text style={{ fontSize: 9, color: C.text3 }}>
+                            {w.from.slice(5).replace('-', '/')}
+                          </Text>
+                        </View>
+                      );
+                    })}
+                  </View>
+                )}
+
+                {/* 志望度の内訳 */}
+                <Text style={[styles.formSection, { color: C.text3 }]}>志望度の内訳</Text>
+                {rankCounts.map(r => {
+                  const max = Math.max(...rankCounts.map(x => x.count), 1);
+                  return (
+                    <View key={r.rank} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                      <Text style={{ width: 18, fontSize: 12, color: C.text2, fontFamily: 'IBMPlexSans_400Regular' }}>{r.rank}</Text>
+                      <View style={{ flex: 1, height: 8, borderRadius: 4, backgroundColor: C.bg3, overflow: 'hidden' }}>
+                        <View style={{
+                          width: `${(r.count / max) * 100}%`,
+                          height: '100%',
+                          backgroundColor: CHART_PALETTE.document,
+                        }} />
+                      </View>
+                      <Text style={{ width: 26, textAlign: 'right', fontSize: 12, color: C.text, fontWeight: 'bold' }}>{r.count}</Text>
+                    </View>
+                  );
+                })}
+
                 <View style={{ height: 20 }} />
               </ScrollView>
             </View>
@@ -4606,10 +4697,23 @@ export default function App() {
                     const item = schedules.find(s => s.id === t.scheduleId);
                     return (
                       <ReAnimated.View key={t.key} entering={FadeInDown.delay(Math.min(i, 6) * 80).duration(240)}>
+                        <View style={{
+                          flexDirection: 'row', alignItems: 'center', gap: 4,
+                          borderBottomWidth: 0.5, borderBottomColor: C.border2,
+                        }}>
+                        {/* 済ませたものはここで片付けられるようにする。
+                            種類ごとに「済んだ」の意味が違うので completeTodo で分岐する */}
+                        <TouchableOpacity
+                          accessibilityRole="checkbox"
+                          accessibilityLabel={`${t.company} ${t.label} を完了にする`}
+                          style={{ width: 40, height: 44, alignItems: 'center', justifyContent: 'center' }}
+                          onPress={() => completeTodo(t)}>
+                          <AnimatedCheckmark checked={false} color={SUCCESS} />
+                        </TouchableOpacity>
                         <RippleButton
                           style={{
-                            flexDirection: 'row', alignItems: 'center', gap: 8,
-                            paddingVertical: 11, borderBottomWidth: 0.5, borderBottomColor: C.border2,
+                            flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8,
+                            paddingVertical: 11,
                           }}
                           onPress={() => {
                             setTodoModalVisible(false);
@@ -4640,6 +4744,7 @@ export default function App() {
                             </View>
                           )}
                         </RippleButton>
+                        </View>
                       </ReAnimated.View>
                     );
                   })}
@@ -4756,7 +4861,7 @@ const styles = StyleSheet.create({
   tabLabelActive: { fontWeight: 'bold', color: TDU_BLUE, fontFamily: 'NotoSansJP_700Bold' },
 
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
-  modalContent: { backgroundColor: '#fff', borderTopLeftRadius: 25, borderTopRightRadius: 25, padding: 24, maxHeight: '92%' },
+  modalContent: { width: '100%', backgroundColor: '#fff', borderTopLeftRadius: 18, borderTopRightRadius: 18, padding: 20, paddingBottom: 28, maxHeight: '92%' },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
   dragHandleContainer: { alignItems: 'center', paddingVertical: 8, marginTop: -8, marginHorizontal: -24 },
   dragHandleBar: { width: 40, height: 4, borderRadius: 2, backgroundColor: '#ccc' },
@@ -4781,7 +4886,7 @@ const styles = StyleSheet.create({
   saveButtonDisabled: { backgroundColor: '#aaa' },
   saveButtonText: { color: '#fff', fontWeight: 'bold', fontSize: 15 },
 
-  pickerOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center' },
+  pickerOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
   pickerBox: { backgroundColor: '#fff', borderRadius: 20, padding: 20, width: '85%' },
   pickerTitle: { fontSize: 16, fontWeight: 'bold', color: '#333', marginBottom: 4, textAlign: 'center' },
   pickerItem: { width: 44, height: 44, borderRadius: 10, backgroundColor: CHIP_BG, alignItems: 'center', justifyContent: 'center' },

@@ -3,7 +3,7 @@ import {
   coversDate, expandDateRange, nextStatus, MAX_SPAN_DAYS,
   eventsConflict, findConflicts, collectTodos, daysBetween,
   EVENT_DURATION_MIN, TRAVEL_BUFFER_MIN, PREP_TEMPLATES, PROGRESS_FLOW,
-  stageDistribution, startOfWeekYmd, weeklyActivity, STAGE_BUCKETS, layoutDayEvents,
+  stageDistribution, startOfWeekYmd, weeklyActivity, weeklyTrend, STAGE_BUCKETS, layoutDayEvents,
 } from '../lib/schedule';
 
 describe('日付ユーティリティ', () => {
@@ -474,5 +474,47 @@ describe('日付の境界', () => {
     const a = { id: 'a', company: 'a', date: '2026-08-09', hour: '', minute: '' };
     const b = { id: 'b', company: 'b', date: '2026-08-09', hour: '', minute: '' };
     expect(eventsConflict(a, b)).toBe(false);
+  });
+});
+
+describe('週ごとの前進', () => {
+  const h = (...dates: string[]) => dates.map(d => ({ status: 'x', changedAt: `${d}T10:00:00.000Z` }));
+
+  test('古い週から順に、指定した週数ぶん返る', () => {
+    const r = weeklyTrend([], '2026-08-08', 1, 4);
+    expect(r).toHaveLength(4);
+    expect(r.map(w => w.from)).toEqual(['2026-07-13', '2026-07-20', '2026-07-27', '2026-08-03']);
+  });
+
+  test('週ごとに正しく振り分けられる', () => {
+    const r = weeklyTrend([
+      { status: 'x', statusHistory: h('2026-07-20', '2026-07-28', '2026-08-04', '2026-08-05') },
+    ], '2026-08-08', 1, 3);
+    // 1件目(7/20)は登録なので数えない
+    expect(r.find(w => w.from === '2026-07-27')?.count).toBe(1);
+    expect(r.find(w => w.from === '2026-08-03')?.count).toBe(2);
+  });
+
+  test('範囲外の変更は数えない', () => {
+    const r = weeklyTrend([
+      { status: 'x', statusHistory: h('2026-01-01', '2026-01-05') },
+    ], '2026-08-08', 1, 4);
+    expect(r.every(w => w.count === 0)).toBe(true);
+  });
+});
+
+describe('やることの完了', () => {
+  const base = { id: '1', company: 'A社', status: 'ES締切', date: '2026-05-12' };
+
+  test('Webテストを受検済みにすると一覧から消える', () => {
+    const src = { ...base, status: '1次面接', webTestDeadline: '2026-05-15' };
+    expect(collectTodos([src], '2026-05-09').some(t => t.kind === 'webtest')).toBe(true);
+    expect(collectTodos([{ ...src, webTestDone: true }], '2026-05-09').some(t => t.kind === 'webtest')).toBe(false);
+  });
+
+  test('カスタム項目には対象IDが付く', () => {
+    const src = { ...base, customChecklist: [{ id: 'c1', label: '適性検査', checked: false }] };
+    const t = collectTodos([src], '2026-05-09').find(x => x.kind === 'custom');
+    expect(t?.customId).toBe('c1');
   });
 });

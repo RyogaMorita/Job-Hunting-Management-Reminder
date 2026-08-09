@@ -206,6 +206,8 @@ export type TodoItem = {
   scheduleId: string;
   company: string;
   label: string;
+  /// kind === 'custom' のときだけ、対象のカスタム項目ID
+  customId?: string;
   /// 期限。無期限のものは undefined（末尾に並ぶ）
   due?: string;
   /// 期限までの日数（今日=0、過ぎていれば負）。期限なしは undefined
@@ -218,6 +220,8 @@ export type TodoSource = {
   status: string;
   date: string;
   webTestDeadline?: string;
+  /// Webテストを受け終えたか。受検期限のやることを消すために持つ
+  webTestDone?: boolean;
   offerDeadline?: string;
   declineContacted?: boolean;
   customChecklist?: { id: string; label: string; checked: boolean; due?: string }[];
@@ -239,7 +243,7 @@ export const collectTodos = (items: TodoSource[], todayYmd: string): TodoItem[] 
     if (s.status === 'ES締切' && s.date) {
       push({ key: `es_${s.id}`, kind: 'es', scheduleId: s.id, company: s.company, label: 'ESを提出する', due: s.date });
     }
-    if (s.webTestDeadline && s.status !== '不合格' && s.status !== '完了') {
+    if (s.webTestDeadline && !s.webTestDone && s.status !== '不合格' && s.status !== '完了') {
       push({ key: `wt_${s.id}`, kind: 'webtest', scheduleId: s.id, company: s.company, label: 'Webテストを受検する', due: s.webTestDeadline });
     }
     if (s.offerDeadline && s.status === '内定') {
@@ -252,7 +256,7 @@ export const collectTodos = (items: TodoSource[], todayYmd: string): TodoItem[] 
     }
     for (const c of s.customChecklist ?? []) {
       if (c.checked) continue;
-      push({ key: `cc_${s.id}_${c.id}`, kind: 'custom', scheduleId: s.id, company: s.company, label: c.label, due: c.due });
+      push({ key: `cc_${s.id}_${c.id}`, kind: 'custom', scheduleId: s.id, company: s.company, label: c.label, due: c.due, customId: c.id });
     }
   }
 
@@ -310,6 +314,30 @@ export const weeklyActivity = (
     advanced += h.slice(1).filter(e => e.changedAt.slice(0, 10) >= from).length;
   }
   return { added, advanced };
+};
+
+/// 直近 weeks 週ぶんの「進んだ回数」。古い週から順に返す。
+/// 内定が出るまで動かない指標ばかりだと分析が置物になるため、毎週動くものを出す。
+export const weeklyTrend = (
+  items: StageSource[], todayYmd: string, weekStart: number, weeks = 4,
+): { from: string; count: number }[] => {
+  const thisWeek = startOfWeekYmd(todayYmd, weekStart);
+  const out: { from: string; count: number }[] = [];
+  for (let i = weeks - 1; i >= 0; i--) {
+    const from = addDaysYmd(thisWeek, -7 * i);
+    const to = addDaysYmd(from, 7);
+    let count = 0;
+    for (const s of items) {
+      const h = s.statusHistory ?? [];
+      // 1件目は登録なので「進んだ」には数えない
+      count += h.slice(1).filter(e => {
+        const d = e.changedAt.slice(0, 10);
+        return d >= from && d < to;
+      }).length;
+    }
+    out.push({ from, count });
+  }
+  return out;
 };
 
 // ─── ステータス別の準備テンプレート ────────────────────────────
