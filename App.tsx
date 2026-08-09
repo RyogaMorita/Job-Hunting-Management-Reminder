@@ -1154,6 +1154,9 @@ const LIGHT = {
 // セマンティックカラー。意味を1つに固定し、データ固有の意味には使わない。
 // 特に青（ACCENT）は「操作・選択・遷移」専用。志望度やステータスの色分けには使わない。
 const DANGER = '#e74c3c';        // 破壊的操作・期限切れ・エラー
+// 開始が差し迫っている（30分以内）。赤に近いが「間違い・失敗」ではないので分ける。
+// ここを DANGER で兼ねると、赤が「期限切れ／破壊」以外にも広がって意味が薄れる。
+const URGENT = '#E8590C';
 const WARNING = '#E67E22';       // 期限間近・注意
 const SUCCESS = '#27AE60';       // 完了・成功
 const NEUTRAL_GRAY = '#95A5A6';  // ステータス未設定時のフォールバック
@@ -2832,7 +2835,7 @@ export default function App() {
                             <Text style={{
                               fontSize: urgent ? 14 : 13,
                               fontWeight: soon2 ? 'bold' : '400',
-                              color: urgent ? DANGER : soon2 ? WARNING : C.text2,
+                              color: urgent ? URGENT : soon2 ? WARNING : C.text2,
                             }}>
                               {diff < 60 ? `あと${diff}分` : `あと${Math.floor(diff / 60)}時間`}
                             </Text>
