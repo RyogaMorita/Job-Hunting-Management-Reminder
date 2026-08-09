@@ -275,11 +275,10 @@ private let INTERN_FLOW = ["インターンES締切", "インターン面接", "
 
 /// 次の選考段階。これ以上進めないものは nil。
 ///
-/// Webテストは全社が課すわけではないので、テスト情報がある企業でだけ
-/// ES提出済 → Webテスト を挟む。無ければ従来どおり 1次面接へ進む。
+/// ES提出済の次は常に Webテスト（lib/schedule.ts と揃えること）。
+/// hasWebTest は互換のため残してあるが遷移先には影響しない。
 func nextStatus(_ current: String, hasWebTest: Bool = false) -> String? {
     if current == "ES締切" { return "ES提出済" }
-    if current == "ES提出済" { return hasWebTest ? "Webテスト" : "1次面接" }
     if let i = PROGRESS_FLOW.firstIndex(of: current), i < PROGRESS_FLOW.count - 1 {
         return PROGRESS_FLOW[i + 1]
     }

@@ -2477,7 +2477,7 @@ export default function App() {
   // target を渡すと次段階ではなくそこへ直接移す。
   // 内定は「承諾」か「辞退」かの分岐で一本道にならないため、カード側から明示的に指定する。
   const advanceStatus = async (item: Schedule, target?: string) => {
-    const ns = target ?? nextStatus(item.status, !!(item.webTestType || item.webTestDeadline));
+    const ns = target ?? nextStatus(item.status);
     if (!ns) return;
     // 内定・不合格・辞退のような後戻りしづらい変更だけ確認を挟む。
     // 段階送りは1日に何度も使うので、即時反映して取り消せるようにする。
@@ -3071,7 +3071,7 @@ export default function App() {
                   const sc = statusColorOf(item.status);
                   const isInternal = item.status === '内定';
                   const isInactive = INACTIVE.includes(item.status);
-                  const ns = nextStatus(item.status, !!(item.webTestType || item.webTestDeadline));
+                  const ns = nextStatus(item.status);
                   const cdLabel = countdownLabel(item.date);
                   return (
                     <ScaleDecorator activeScale={1.02}>
@@ -3133,7 +3133,7 @@ export default function App() {
                   const sc = statusColorOf(item.status);
                   const isInternal = item.status === '内定';
                   const isInactive = INACTIVE.includes(item.status);
-                  const ns = nextStatus(item.status, !!(item.webTestType || item.webTestDeadline));
+                  const ns = nextStatus(item.status);
                   const cdLabel = countdownLabel(item.date);
                   return (
                     <ReAnimated.View

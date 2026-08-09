@@ -97,7 +97,8 @@ describe('複数日の予定', () => {
 describe('ステータス遷移', () => {
   test('本選考は順に進む', () => {
     expect(nextStatus('検討中')).toBe('ES提出済');
-    expect(nextStatus('ES提出済')).toBe('1次面接');
+    expect(nextStatus('ES提出済')).toBe('Webテスト');
+    expect(nextStatus('Webテスト')).toBe('1次面接');
     expect(nextStatus('1次面接')).toBe('2次面接');
     expect(nextStatus('2次面接')).toBe('最終面接');
     expect(nextStatus('最終面接')).toBe('内定');
@@ -146,12 +147,9 @@ const ev = (id: string, hour: string, minute = '00', venueType?: 'online' | 'ons
   ({ id, company: id, date: '2026-05-09', hour, minute, venueType });
 
 describe('Webテストを挟むステータス遷移', () => {
-  test('テスト情報が無ければ ES提出済 → 1次面接（従来どおり）', () => {
-    expect(nextStatus('ES提出済')).toBe('1次面接');
-    expect(nextStatus('ES提出済', false)).toBe('1次面接');
-  });
-
-  test('テスト情報があれば ES提出済 → Webテスト', () => {
+  test('ES提出済の次は常にWebテスト（テスト情報の登録有無によらない）', () => {
+    expect(nextStatus('ES提出済')).toBe('Webテスト');
+    expect(nextStatus('ES提出済', false)).toBe('Webテスト');
     expect(nextStatus('ES提出済', true)).toBe('Webテスト');
   });
 
@@ -159,13 +157,13 @@ describe('Webテストを挟むステータス遷移', () => {
     expect(nextStatus('Webテスト')).toBe('1次面接');
   });
 
-  test('Webテストを挟んでも終端に到達する', () => {
+  test('検討中から進め続けると PROGRESS_FLOW をそのままなぞる', () => {
     let s: string | null = '検討中';
     const seen: string[] = [];
     while (s) {
       expect(seen).not.toContain(s);
       seen.push(s);
-      s = nextStatus(s, s === 'ES提出済');
+      s = nextStatus(s);
     }
     expect(seen).toEqual(PROGRESS_FLOW);
   });
