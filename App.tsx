@@ -40,7 +40,7 @@ import { LISTED_COMPANIES, CompanyEntry } from './companies_v2';
 // 日付・ステータス遷移のロジックは lib/ に切り出してテストしている（__tests__/schedule.test.ts）
 import {
   addDaysYmd, collectTodos, formatYmd, parseYmd, coversDate, dateRangeStr, expandDateRange,
-  findConflicts, nextStatus, needsGdChoice, PREP_TEMPLATES,
+  findConflicts, nextStatus, needsGdChoice, entryKind, PREP_TEMPLATES,
   stageDistribution, weeklyActivity, weeklyTrend,
 } from './lib/schedule';
 import type { TodoItem, VenueType, Presence } from './lib/schedule';
@@ -467,6 +467,12 @@ const todoDueLabel = (t: TodoItem): string => {
   if (t.daysLeft === 0) return '今日';
   if (t.daysLeft === 1) return '明日';
   return `あと${t.daysLeft}日`;
+};
+
+// 種別ごとの記号。色は 青=操作 / 橙=期限間近 / 赤=期限切れ に固定しているので、
+// ここでは色を使わず記号と語だけで区別する。
+const KIND_MARK: Record<'event' | 'deadline' | 'state', string> = {
+  event: '📅', deadline: '⏰', state: '',
 };
 
 const TODO_KIND_LABEL: Record<TodoItem['kind'], string> = {
@@ -2937,7 +2943,12 @@ export default function App() {
                         <TouchableOpacity key={item.id} style={[styles.upcomingCard, { backgroundColor: C.bg3 }]} onPress={() => openDetail(item)}>
                           <View style={{ flex: 1 }}>
                             <Text style={[styles.itemTitle, { color: C.text }]}>{item.company}</Text>
-                            <Text style={[styles.itemStatus, { color: C.text2 }]}>{item.date.replace(/-/g, '/')} {timeStr(item.hour, item.minute) ? timeStr(item.hour, item.minute) + '〜 · ' : ''}{item.status}</Text>
+                            <Text style={[styles.itemStatus, { color: C.text2 }]}>
+                              {KIND_MARK[entryKind(item.status)] ? KIND_MARK[entryKind(item.status)] + ' ' : ''}
+                              {item.date.replace(/-/g, '/')}{' '}
+                              {entryKind(item.status) === 'event' && timeStr(item.hour, item.minute) ? timeStr(item.hour, item.minute) + '〜 · ' : ''}
+                              {item.status}
+                            </Text>
                           </View>
                           <View style={[styles.rankBadge, { backgroundColor: C.badgeBg }]}>
                             <Text style={[styles.rankBadgeText, { color: C.badgeText }]}>{item.rank}</Text>
@@ -2967,7 +2978,11 @@ export default function App() {
                             onPress={() => openDetail(item)}>
                             <View style={{ flex: 1 }}>
                               <Text style={[styles.itemTitle, { color: C.text }]}>{item.company}</Text>
-                              <Text style={[styles.itemStatus, { color: C.text2 }]}>{timeStr(item.hour, item.minute) ? timeStr(item.hour, item.minute) + '〜 · ' : ''}{item.status}</Text>
+                              <Text style={[styles.itemStatus, { color: C.text2 }]}>
+                                {KIND_MARK[entryKind(item.status)] ? KIND_MARK[entryKind(item.status)] + ' ' : ''}
+                                {entryKind(item.status) === 'event' && timeStr(item.hour, item.minute) ? timeStr(item.hour, item.minute) + '〜 · ' : ''}
+                                {item.status}
+                              </Text>
                             </View>
                             <View style={[styles.rankBadge, { backgroundColor: C.badgeBg }]}>
                               <Text style={[styles.rankBadgeText, { color: C.badgeText }]}>{item.rank}</Text>
@@ -3210,6 +3225,9 @@ export default function App() {
 
                           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                             <Text style={{ fontSize: 11, color: C.text2 }}>現在</Text>
+                            {KIND_MARK[entryKind(item.status)] ? (
+                              <Text style={{ fontSize: 11 }}>{KIND_MARK[entryKind(item.status)]}</Text>
+                            ) : null}
                             <Text style={{ fontSize: 13, color: C.text2, flex: 1 }} numberOfLines={1}>{item.status}</Text>
                           </View>
 
@@ -3217,9 +3235,15 @@ export default function App() {
                             <Text style={styles.dateText}>
                               {item.date
                                 ? dateRangeStr(item).replace(new RegExp(`${new Date().getFullYear()}/`, 'g'), '')
-                                  + (timeStr(item.hour, item.minute) ? ' ' + timeStr(item.hour, item.minute) : '')
+                                  // 締切に時刻は要らない。予定のときだけ開始時刻を出す
+                                  + (entryKind(item.status) === 'event' && timeStr(item.hour, item.minute)
+                                    ? ' ' + timeStr(item.hour, item.minute) : '')
                                 : '日付未定'}
                             </Text>
+                            {/* 締切は「いつまでか」が本体なので、残り日数を必ず添える */}
+                            {entryKind(item.status) === 'deadline' && item.date && !cdLabel ? (
+                              <Text style={{ fontSize: 11, color: C.text3 }}>まで</Text>
+                            ) : null}
                             {cdLabel ? (
                               <Text style={{ fontSize: 11, fontWeight: 'bold', color: cdLabel === '今日' ? DANGER : WARNING }}>
                                 ・{cdLabel}

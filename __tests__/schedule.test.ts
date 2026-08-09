@@ -4,7 +4,7 @@ import {
   eventsConflict, findConflicts, collectTodos, daysBetween,
   EVENT_DURATION_MIN, TRAVEL_BUFFER_MIN, PREP_TEMPLATES, PROGRESS_FLOW,
   stageDistribution, startOfWeekYmd, weeklyActivity, weeklyTrend, STAGE_BUCKETS, layoutDayEvents,
-  needsGdChoice,
+  needsGdChoice, entryKind,
 } from '../lib/schedule';
 
 describe('日付ユーティリティ', () => {
@@ -547,5 +547,35 @@ describe('Webテスト後の分岐', () => {
 
   test('GDの次は1次面接', () => {
     expect(nextStatus('GD')).toBe('1次面接');
+  });
+});
+
+describe('予定の種別', () => {
+  test('締切は deadline', () => {
+    expect(entryKind('ES締切')).toBe('deadline');
+    expect(entryKind('インターンES締切')).toBe('deadline');
+  });
+
+  test('出向くものは event', () => {
+    for (const st of ['説明会', 'ワークショップ', 'GD', 'Webテスト', '1次面接', '2次面接', '最終面接', 'インターン面接']) {
+      expect(entryKind(st)).toBe('event');
+    }
+  });
+
+  test('状態は state', () => {
+    for (const st of ['検討中', 'ES提出済', '内定', '内定承諾', 'インターン確定', '内定辞退', '不合格', '完了']) {
+      expect(entryKind(st)).toBe('state');
+    }
+  });
+
+  test('ユーザーが足した未知のステータスは予定として扱う', () => {
+    expect(entryKind('リクルーター面談')).toBe('event');
+    expect(entryKind('')).toBe('event');
+  });
+
+  test('選考の各段階はどれか1つの種別にだけ属する', () => {
+    for (const st of PROGRESS_FLOW) {
+      expect(['event', 'deadline', 'state']).toContain(entryKind(st));
+    }
   });
 });

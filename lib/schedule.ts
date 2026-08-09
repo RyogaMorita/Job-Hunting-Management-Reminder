@@ -94,6 +94,32 @@ export const nextStatus = (current: string, gd: Presence = 'unknown'): string | 
   return null;
 };
 
+// ─── 予定の種別 ────────────────────────────────────────────────
+//
+// 予定・締切・やることを同じ見た目で並べると、何をすればいいか読み取れない。
+// 種別はステータスから決まるので保存フィールドにはしない。
+// （hasWebTest のときと同じで、導出できる値を別に持つと片方だけ古くなる）
+//
+// 色は 青=操作 / 橙=期限間近 / 赤=期限切れ に固定してあるので、
+// 種別はアイコン・ラベル・形で表す。「面接だから赤」のような使い方をすると
+// 警告色としての意味が壊れる。
+
+export type EntryKind = 'event' | 'deadline' | 'state';
+
+const DEADLINE_STATUSES = ['ES締切', 'インターンES締切'];
+const STATE_STATUSES = [
+  '検討中', 'ES提出済', '内定', '内定承諾', 'インターン確定',
+  '内定辞退', '不合格', '完了', '辞退',
+];
+
+/// 出向く予定なのか、間に合わせる締切なのか、単なる状態なのか。
+/// ユーザーが自分で足したステータスは予定として扱う。
+export const entryKind = (status: string): EntryKind => {
+  if (DEADLINE_STATUSES.includes(status)) return 'deadline';
+  if (STATE_STATUSES.includes(status)) return 'state';
+  return 'event';
+};
+
 // ─── 日程の重複検知 ────────────────────────────────────────────
 //
 // 一次面接はWeb 89.2%、最終面接は対面のみが73.0%。
