@@ -1477,6 +1477,10 @@ export default function App() {
   const [settingsPage, setSettingsPage] = useState<SettingsPage>(null);
   const [sortSheet, setSortSheet] = useState(false);
   const [analyticsVisible, setAnalyticsVisible] = useState(false);
+  // 保存できる＝変更がある、を伝えるための差分判定。
+  // openDetail/openAdd の setState は同じレンダーにまとまるので、
+  // モーダルが開いた直後のレンダー後にこの値を基準として控えれば正確に取れる。
+  const [formBaseline, setFormBaseline] = useState('');
   const [genreSheet, setGenreSheet] = useState(false);
   const [statusSheet, setStatusSheet] = useState(false);
   const settingsScrollRef = useRef<ScrollView | null>(null);
@@ -1830,6 +1834,20 @@ export default function App() {
   const EXCLUDE_FROM_COUNT = [...OFFER_STATUSES, '内定辞退', '不合格', '完了', ...EVENT_STATUSES, ...INTERN_STATUSES];
   const activeCount = useMemo(() => schedules.filter(s => !EXCLUDE_FROM_COUNT.includes(s.status)).length, [schedules]);
   const internalCount = useMemo(() => schedules.filter(s => OFFER_STATUSES.includes(s.status)).length, [schedules]);
+
+  const formSignature = JSON.stringify([
+    companyName, note, selStatus, selDate, selEndDate, selHour, selMinute,
+    url, userId, password, rank, selGenreId, selVenueType, meetingUrl, venue,
+    webTestType, webTestDeadline, webTestBookedAt, webTestVenue,
+    itemNotifyEnabled, notifyDaysList, notifyHour, notifyMinute,
+    offerDeadline, internshipStart, internshipEnd,
+    memoResearch, memoPR, memoQuestions,
+  ]);
+  useEffect(() => {
+    if (isModalVisible || isDetailVisible) setFormBaseline(formSignature);
+    // 開いた瞬間だけ基準を取る。以後の入力では取り直さない
+  }, [isModalVisible, isDetailVisible]);
+  const isFormDirty = formSignature !== formBaseline;
 
   const upcomingSchedules = useMemo(() => {
     const today = new Date().toISOString().split('T')[0];
@@ -2286,8 +2304,10 @@ export default function App() {
   };
 
   const deleteSchedule = (id: string) => {
-    Alert.alert('削除', 'このデータを削除しますか？', [
-      { text: '戻る', style: 'cancel' },
+    // 削除は取り消せないので、トーストではなく確認を出す
+    const name = schedules.find(s => s.id === id)?.company ?? 'この企業';
+    Alert.alert(`${name}を削除しますか？`, 'この操作は取り消せません。', [
+      { text: 'キャンセル', style: 'cancel' },
       {
         text: '削除', style: 'destructive', onPress: async () => {
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
@@ -2577,7 +2597,7 @@ export default function App() {
                 <TouchableOpacity onPress={() => setAnalyticsVisible(true)}
                   accessibilityRole="button" accessibilityLabel="就活の状況"
                   style={{ minHeight: 44, justifyContent: 'center', paddingLeft: 10 }}>
-                  <Text style={{ fontSize: 13, color: ACCENT, fontWeight: 'bold' }}>分析</Text>
+                  <Text style={{ fontSize: 13, color: ACCENT }}>分析</Text>
                 </TouchableOpacity>
               </>
             ) : null}
@@ -3016,9 +3036,11 @@ export default function App() {
               </View>
             )}
 
-            {/* ヘッダーの社数は「選考中」、ここは表示中の件数。区別が付かず矛盾に見えていた */}
+            {/* 絞り込みや検索で件数が減っているときだけ分母を出す */}
             <Text style={{ paddingHorizontal: 16, fontSize: 11, color: C.text3, marginBottom: 4 }}>
-              表示 {filteredSorted.length}社 / 登録 {deduplicatedSchedules.length}社
+              {filteredSorted.length === deduplicatedSchedules.length
+                ? `${filteredSorted.length}社`
+                : `${filteredSorted.length} / ${deduplicatedSchedules.length}社`}
             </Text>
 
             {sortType === '手動' ? (
@@ -3168,7 +3190,7 @@ export default function App() {
                               style={{ alignSelf: 'flex-start', paddingVertical: 6, paddingRight: 12, marginTop: 1 }}
                               onPress={() => advanceStatus(item)}>
                               <Text style={{ fontSize: 13, color: ACCENT, fontWeight: 'bold' }}>
-                                次へ：{ns} →
+                                {ns === '完了' ? `${item.status}を完了 →` : `次へ：${ns} →`}
                               </Text>
                             </TouchableOpacity>
                           ) : null}
@@ -3177,7 +3199,7 @@ export default function App() {
                               style={{ alignSelf: 'flex-start', paddingVertical: 6, paddingRight: 12, marginTop: 1 }}
                               onPress={() => completeStatus(item)}>
                               <Text style={{ fontSize: 13, color: ACCENT, fontWeight: 'bold' }}>
-                                次へ：完了 →
+                                {item.status}を完了 →
                               </Text>
                             </TouchableOpacity>
                           ) : null}
@@ -3744,22 +3766,33 @@ export default function App() {
               paddingHorizontal: 16, paddingVertical: 10,
               borderBottomWidth: 1, borderColor: C.border,
             }}>
-              <TouchableOpacity onPress={() => closeModal()} style={{ minHeight: 44, justifyContent: 'center' }}>
+              <TouchableOpacity
+                onPress={() => {
+                  // 何も変えていなければそのまま閉じる。毎回確認は出さない
+                  if (!isFormDirty) { closeModal(); return; }
+                  Alert.alert('変更を破棄しますか？', '保存していない変更は失われます。', [
+                    { text: '編集を続ける', style: 'cancel' },
+                    { text: '破棄する', style: 'destructive', onPress: () => closeModal() },
+                  ]);
+                }}
+                style={{ minHeight: 44, justifyContent: 'center' }}>
                 <Text style={{ fontSize: 15, color: ACCENT }}>キャンセル</Text>
               </TouchableOpacity>
               <Text accessibilityRole="header" numberOfLines={1}
                 style={{ flex: 1, textAlign: 'center', fontSize: 16, fontWeight: '700', color: C.text, marginHorizontal: 8 }}>
                 {isDetailVisible ? (selectedItem?.company || '編集') : '新規企業登録'}
               </Text>
-              <TouchableOpacity onPress={() => handleSave()} disabled={!companyName.trim()}
+              <TouchableOpacity onPress={() => handleSave()}
+                disabled={!companyName.trim() || !isFormDirty}
                 style={{ minHeight: 44, justifyContent: 'center' }}>
-                <Text style={{ fontSize: 15, fontWeight: 'bold', color: companyName.trim() ? ACCENT : C.text3 }}>保存</Text>
+                <Text style={{ fontSize: 15, fontWeight: 'bold', color: companyName.trim() && isFormDirty ? ACCENT : C.text3 }}>保存</Text>
               </TouchableOpacity>
             </View>
             <ScrollView ref={modalScrollRef} style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 12 }}
               showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled"
               onScroll={(e) => { modalScrollY.current = e.nativeEvent.contentOffset.y; }} scrollEventThrottle={16}>
 
+                <Text style={[styles.formSection, { color: C.text3, marginTop: 4 }]}>基本情報</Text>
                 <Text style={[styles.label, { color: C.text3 }]}>企業名 *</Text>
                 <View style={{ position: 'relative', zIndex: 10 }}>
                   <TextInput
@@ -3831,6 +3864,7 @@ export default function App() {
 
                 {/* iOSのホイールは幅を詰めるとクリップされるので、
                     ピッカーを開く行はすべて全幅にする（横並びにしない） */}
+                <Text style={[styles.formSection, { color: C.text3 }]}>日程</Text>
                 <Text style={[styles.label, { color: C.text3 }]}>日付</Text>
                 <WheelDateField value={selDate} onChange={setSelDate} C={C} placeholder="日付なし" />
                 <WheelDateField
@@ -3887,6 +3921,7 @@ export default function App() {
                 )}
 
                 {/* Webテスト（ES締切とは別軸の期限） */}
+                <Text style={[styles.formSection, { color: C.text3 }]}>選考情報</Text>
                 <Text style={[styles.label, { color: C.text3 }]}>Webテスト</Text>
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 6 }}>
                   {WEB_TEST_TYPES.map(t => {
@@ -3933,7 +3968,7 @@ export default function App() {
                 </View>
 
                 {/* ── 通知設定 ── */}
-                <Text style={[styles.label, { color: C.text3, marginTop: 4 }]}>リマインド通知</Text>
+                <Text style={[styles.formSection, { color: C.text3 }]}>通知</Text>
                 <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
                   <Text style={{ color: C.text, fontSize: 14 }}>この企業の通知</Text>
                   <Switch value={itemNotifyEnabled} onValueChange={setItemNotifyEnabled} trackColor={{ true: TDU_BLUE }} />
@@ -4025,7 +4060,7 @@ export default function App() {
                 ) : null}
 
                 {/* ⑫ メモタブ */}
-                <Text style={[styles.label, { color: C.text3 }]}>メモ・対策</Text>
+                <Text style={[styles.formSection, { color: C.text3 }]}>メモ・対策</Text>
                 <View style={{ flexDirection: 'row', gap: 4, marginBottom: 6 }}>
                   {['全般', '企業研究', '自己PR', '質問リスト'].map((tab, i) => (
                     <TouchableOpacity key={tab} style={{ paddingHorizontal: 10, paddingVertical: 5, borderRadius: 12,
@@ -4503,6 +4538,8 @@ const styles = StyleSheet.create({
   screenTitle: { fontSize: 26, fontWeight: '700', letterSpacing: -0.3, fontFamily: 'NotoSansJP_700Bold' },
   // 設定アプリ型の行。ラベル左・値右・シェブロン。タップ領域は44pt確保する
   formRow: { flexDirection: 'row', alignItems: 'center', minHeight: 44, paddingVertical: 10 },
+  // セクションはカード化せず、見出し＋余白＋区切り線で分ける
+  formSection: { fontSize: 12, fontWeight: '700', letterSpacing: 0.5, marginTop: 28, marginBottom: 8, fontFamily: 'NotoSansJP_700Bold' },
   formRowLabel: { fontSize: 15, flex: 1, fontFamily: 'NotoSansJP_400Regular' },
   statNum: { fontSize: 18, fontWeight: 'bold', color: TDU_BLUE },
   statLabel: { fontSize: 9, color: TDU_BLUE },
