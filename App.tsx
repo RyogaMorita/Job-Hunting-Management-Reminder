@@ -469,12 +469,6 @@ const todoDueLabel = (t: TodoItem): string => {
   return `あと${t.daysLeft}日`;
 };
 
-// 種別ごとの記号。色は 青=操作 / 橙=期限間近 / 赤=期限切れ に固定しているので、
-// ここでは色を使わず記号と語だけで区別する。
-const KIND_MARK: Record<'event' | 'deadline' | 'state', string> = {
-  event: '📅', deadline: '⏰', state: '',
-};
-
 const TODO_KIND_LABEL: Record<TodoItem['kind'], string> = {
   es: 'ES', webtest: 'Webテスト', offer: '内定', decline: '辞退連絡', custom: 'メモ',
 };
@@ -2775,7 +2769,7 @@ export default function App() {
                 {dueTodos.length > 0 ? (
                   <>
                     <Text style={[styles.formSection, { color: C.text3, marginTop: 0 }]}>
-                      ⏰ 今日までの締切・やること
+                      今日までの締切・やること
                     </Text>
                     {dueTodos.map(t => {
                       const item = schedules.find(x => x.id === t.scheduleId);
@@ -2806,7 +2800,7 @@ export default function App() {
                 {/* 今日出向く予定。面接なら参加導線をその場に置く */}
                 {todayEvents.length > 0 ? (
                   <>
-                    <Text style={[styles.formSection, { color: C.text3 }]}>📅 今日の予定</Text>
+                    <Text style={[styles.formSection, { color: C.text3 }]}>今日の予定</Text>
                     {todayEvents.map(ev2 => (
                       <TouchableOpacity key={ev2.id}
                         style={{ paddingVertical: 12, borderBottomWidth: 1, borderColor: C.border2 }}
@@ -3111,7 +3105,6 @@ export default function App() {
                           <View style={{ flex: 1 }}>
                             <Text style={[styles.itemTitle, { color: C.text }]}>{item.company}</Text>
                             <Text style={[styles.itemStatus, { color: C.text2 }]}>
-                              {KIND_MARK[entryKind(item.status)] ? KIND_MARK[entryKind(item.status)] + ' ' : ''}
                               {item.date.replace(/-/g, '/')}{' '}
                               {entryKind(item.status) === 'event' && timeStr(item.hour, item.minute) ? timeStr(item.hour, item.minute) + '〜 · ' : ''}
                               {item.status}
@@ -3146,7 +3139,6 @@ export default function App() {
                             <View style={{ flex: 1 }}>
                               <Text style={[styles.itemTitle, { color: C.text }]}>{item.company}</Text>
                               <Text style={[styles.itemStatus, { color: C.text2 }]}>
-                                {KIND_MARK[entryKind(item.status)] ? KIND_MARK[entryKind(item.status)] + ' ' : ''}
                                 {entryKind(item.status) === 'event' && timeStr(item.hour, item.minute) ? timeStr(item.hour, item.minute) + '〜 · ' : ''}
                                 {item.status}
                               </Text>
@@ -3393,9 +3385,6 @@ export default function App() {
 
                           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                             <Text style={{ fontSize: 11, color: C.text2 }}>現在</Text>
-                            {KIND_MARK[entryKind(item.status)] ? (
-                              <Text style={{ fontSize: 11 }}>{KIND_MARK[entryKind(item.status)]}</Text>
-                            ) : null}
                             <Text style={{ fontSize: 13, color: C.text2, flex: 1 }} numberOfLines={1}>{item.status}</Text>
                           </View>
 
