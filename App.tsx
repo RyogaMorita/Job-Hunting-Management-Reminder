@@ -1395,6 +1395,7 @@ export default function App() {
   const [analyticsVisible, setAnalyticsVisible] = useState(false);
   // GDの有無が未確認の企業で、進める前に行き先を選ばせる
   const [gdChoiceItem, setGdChoiceItem] = useState<Schedule | null>(null);
+  const [showAllToday, setShowAllToday] = useState(false);
   // 進めた直後に次の日程を聞く。
   // これまでは進めても date が前の段階のままで、カードに古い日付が残っていた。
   const [nextDateItem, setNextDateItem] = useState<Schedule | null>(null);
@@ -2069,8 +2070,12 @@ export default function App() {
   // 今日これから始まる予定のうち一番近いもの
   const nextUpEvent = useMemo(() => {
     const mins = (e: Schedule) => e.hour ? Number(e.hour) * 60 + Number(e.minute || '0') : -1;
-    return todayEvents.find(e => mins(e) < 0 || mins(e) >= nowMin) ?? todayEvents[0];
-  }, [todayEvents, nowMin]);
+    // 今日これから始まるもの → 今日の残り → 先の予定、の順で拾う。
+    // 今日が空でも「次に何があるか」は出したい。
+    return todayEvents.find(e => mins(e) < 0 || mins(e) >= nowMin)
+      ?? todayEvents[0]
+      ?? upcomingEvents[0];
+  }, [todayEvents, upcomingEvents, nowMin]);
   const todayEmpty = todayEvents.length === 0 && todayDeadlines.length === 0 && todayTasks.length === 0;
 
 
@@ -2783,10 +2788,13 @@ export default function App() {
                   {todayYmd.slice(5).replace('-', '月')}日（{['日','月','火','水','木','金','土'][parseYmd(todayYmd).getDay()]}）
                 </Text>
 
-                {todayEmpty ? (
-                  <View style={{ paddingVertical: 24, alignItems: 'center' }}>
-                    <Text style={{ fontSize: 14, color: C.text2 }}>今日の予定と締切はありません</Text>
+                {todayEmpty && !nextUpEvent ? (
+                  <View style={{ paddingVertical: 28, alignItems: 'center' }}>
+                    <Text style={{ fontSize: 14, color: C.text2 }}>予定はありません</Text>
+                    <Text style={{ fontSize: 12, color: C.text3, marginTop: 4 }}>右下の＋から企業を追加できます</Text>
                   </View>
+                ) : todayEmpty ? (
+                  <Text style={{ fontSize: 13, color: C.text3, marginTop: 6 }}>今日の予定と締切はありません</Text>
                 ) : null}
 
                 {/* ① 直近の予定を一番大きく。面接直前に開いても意味があるように */}
@@ -2804,11 +2812,28 @@ export default function App() {
                           {nextUpEvent.company}
                         </Text>
                         {(() => {
+                          // 今日でなければ残り時間ではなく日付を出す
+                          if (nextUpEvent.date !== todayYmd) {
+                            return (
+                              <Text style={{ fontSize: 13, color: C.text2 }}>
+                                {daysBetween(todayYmd, nextUpEvent.date) === 1
+                                  ? '明日'
+                                  : nextUpEvent.date.slice(5).replace('-', '/')}
+                              </Text>
+                            );
+                          }
                           if (!nextUpEvent.hour) return null;
                           const diff = Number(nextUpEvent.hour) * 60 + Number(nextUpEvent.minute || '0') - nowMin;
                           if (diff < 0) return null;
+                          // 差し迫っているときだけ強くする。数時間先まで橙にすると意味が薄れる
+                          const urgent = diff <= 30;
+                          const soon2 = diff <= 120;
                           return (
-                            <Text style={{ fontSize: 13, fontWeight: 'bold', color: diff <= 120 ? WARNING : C.text2 }}>
+                            <Text style={{
+                              fontSize: urgent ? 14 : 13,
+                              fontWeight: soon2 ? 'bold' : '400',
+                              color: urgent ? DANGER : soon2 ? WARNING : C.text2,
+                            }}>
                               {diff < 60 ? `あと${diff}分` : `あと${Math.floor(diff / 60)}時間`}
                             </Text>
                           );
@@ -2847,11 +2872,30 @@ export default function App() {
                         ) : null}
                       </View>
                     </TouchableOpacity>
-                    {/* 今日まだ他にもあるなら畳んで示す */}
-                    {todayEvents.length > 1 ? (
-                      <Text style={{ fontSize: 12, color: C.text3, marginTop: 6 }}>
-                        今日は他に{todayEvents.length - 1}件の予定があります
-                      </Text>
+                    {/* 今日まだ他にもあるなら畳んでおき、押したら開く */}
+                    {todayEvents.filter(e => e.id !== nextUpEvent.id).length > 0 ? (
+                      <>
+                        <TouchableOpacity
+                          style={{ flexDirection: 'row', alignItems: 'center', minHeight: 40 }}
+                          onPress={() => setShowAllToday(v => !v)}>
+                          <Text style={{ fontSize: 13, color: ACCENT, flex: 1 }}>
+                            他に{todayEvents.filter(e => e.id !== nextUpEvent.id).length}件の予定
+                          </Text>
+                          <Text style={{ fontSize: 13, color: ACCENT }}>{showAllToday ? '⌃' : '›'}</Text>
+                        </TouchableOpacity>
+                        {showAllToday ? todayEvents.filter(e => e.id !== nextUpEvent.id).map(ev2 => (
+                          <TouchableOpacity key={ev2.id}
+                            style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 10, borderTopWidth: 1, borderColor: C.border2 }}
+                            onPress={() => openDetail(ev2)}>
+                            <Text style={{ fontSize: 13, color: C.text2, minWidth: 44, fontFamily: 'IBMPlexSans_400Regular' }}>
+                              {timeStr(ev2.hour, ev2.minute) || '未定'}
+                            </Text>
+                            <View style={[styles.statusDot, { backgroundColor: statusColorOf(ev2.status) }]} />
+                            <Text style={{ fontSize: 14, color: C.text, flex: 1 }} numberOfLines={1}>{ev2.company}</Text>
+                            <Text style={{ fontSize: 12, color: C.text2 }}>{ev2.status}</Text>
+                          </TouchableOpacity>
+                        )) : null}
+                      </>
                     ) : null}
                   </>
                 ) : null}
@@ -2909,7 +2953,7 @@ export default function App() {
                 {upcomingEvents.length > 0 ? (
                   <>
                     <Text style={[styles.formSection, { color: C.text3 }]}>近日</Text>
-                    {upcomingEvents.map(ev2 => (
+                    {upcomingEvents.filter(e => e.id !== nextUpEvent?.id).slice(0, 3).map(ev2 => (
                       <TouchableOpacity key={ev2.id}
                         style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 10, borderBottomWidth: 1, borderColor: C.border2 }}
                         onPress={() => openDetail(ev2)}>
@@ -2923,6 +2967,15 @@ export default function App() {
                         <Text style={{ fontSize: 12, color: C.text2 }}>{ev2.status}</Text>
                       </TouchableOpacity>
                     ))}
+                    {upcomingEvents.filter(e => e.id !== nextUpEvent?.id).length > 3 ? (
+                      <TouchableOpacity
+                        style={{ minHeight: 40, justifyContent: 'center' }}
+                        onPress={() => setCalendarMode('week')}>
+                        <Text style={{ fontSize: 12, color: ACCENT }}>
+                          週表示で残り{upcomingEvents.filter(e => e.id !== nextUpEvent?.id).length - 3}件を見る ›
+                        </Text>
+                      </TouchableOpacity>
+                    ) : null}
                   </>
                 ) : null}
 
