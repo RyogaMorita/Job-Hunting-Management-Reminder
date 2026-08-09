@@ -1730,9 +1730,26 @@ export default function App() {
         try {
           const raw = JSON.parse(s);
           if (!Array.isArray(raw)) throw new Error('not an array');
-          // 壊れた要素だけ落として残りは活かす
-          parsed = raw.filter((x: unknown): x is Schedule =>
-            !!x && typeof x === 'object' && typeof (x as Schedule).id === 'string');
+          // id が無いものだけ捨て、残りは必須項目を文字列へ寄せて活かす。
+          // company は s.company.trim() / toLowerCase() が各所にあり、
+          // date も dateRangeStr で replace するため、型が崩れていると落ちる。
+          const str = (v: unknown, fallback = '') =>
+            typeof v === 'string' ? v : (typeof v === 'number' ? String(v) : fallback);
+          parsed = raw
+            .filter((x: unknown) => !!x && typeof x === 'object' && !!(x as Schedule).id)
+            .map((x: Schedule) => ({
+              ...x,
+              id: str(x.id),
+              company: str(x.company, '(名称なし)'),
+              date: str(x.date),
+              hour: str(x.hour), minute: str(x.minute),
+              status: str(x.status, '検討中'),
+              note: str(x.note), url: str(x.url),
+              userId: str(x.userId), password: str(x.password),
+              rank: str(x.rank, 'B'), genreId: str(x.genreId, 'other'),
+              checklist: (x.checklist && typeof x.checklist === 'object') ? x.checklist : {},
+              customChecklist: Array.isArray(x.customChecklist) ? x.customChecklist : [],
+            }));
         } catch {
           // 壊れた値は上書きせず残す（後から取り出せる可能性を潰さない）。
           // ウィジェットにも空を書かない。次回の正常な読み込みで復帰できる。
