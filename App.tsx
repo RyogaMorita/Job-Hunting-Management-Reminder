@@ -85,6 +85,16 @@ const STATUS_OPTIONS_KEY = '@status_options_v1';
 // v2 へ一度だけ差し込み直す。以降のユーザー削除は v2 側で保持される。
 const STATUS_OPTIONS_KEY_V2 = '@status_options_v2';
 const SWIPE_HINT_KEY = '@swipe_hint_shown_v1';
+const LIST_FIELDS_KEY = '@list_fields_v1';
+
+// 一覧カードに何を出すか。
+// 「絞り込み＝どの企業を出すか」「表示＝企業の何を出すか」「並び替え＝どの順で出すか」
+// と役割が分かれるので、絞り込みとは別の入口にする。
+type ListDensity = 'compact' | 'standard' | 'detailed';
+type ListFields = { url: boolean; id: boolean; password: boolean; memo: boolean; density: ListDensity };
+const DEFAULT_LIST_FIELDS: ListFields = {
+  url: true, id: true, password: false, memo: true, density: 'standard',
+};
 // カレンダー1行の高さ。日付の丸26 + 予定2行(12+2)×2 = 54 に
 // weekVerticalMargin の上下4を足して58。少し余裕を見て60。
 // 52 のままだと最終行の予定が枠外に出て overflow で切られていた。
@@ -1530,6 +1540,12 @@ export default function App() {
   const [checkModalItem, setCheckModalItem] = useState<Schedule | null>(null);
   const [settingsPage, setSettingsPage] = useState<SettingsPage>(null);
   const [sortSheet, setSortSheet] = useState(false);
+  const [fieldSheet, setFieldSheet] = useState(false);
+  const [listFields, setListFields] = useState<ListFields>(DEFAULT_LIST_FIELDS);
+  const saveListFields = async (f: ListFields) => {
+    setListFields(f);
+    await AsyncStorage.setItem(LIST_FIELDS_KEY, JSON.stringify(f));
+  };
   // スワイプ削除のヒントは一度だけ。先頭カードにのみ出す
   const [swipeHintDone, setSwipeHintDone] = useState(true);
   const markSwipeHintShown = () => {
@@ -1822,6 +1838,9 @@ export default function App() {
       // v2 があればそれが正。無ければ v1 に既定値の不足分を差し込んで v2 として保存する。
       // 差し込み位置は DEFAULT_STATUS_OPTIONS の並び順に合わせるので、
       // Webテストは「ES提出済」の直後、内定承諾は「内定」の直後に入る。
+      const lf = await AsyncStorage.getItem(LIST_FIELDS_KEY);
+      if (lf) setListFields({ ...DEFAULT_LIST_FIELDS, ...JSON.parse(lf) });
+
       const hinted = await AsyncStorage.getItem(SWIPE_HINT_KEY);
       setSwipeHintDone(hinted === 'true');
 
@@ -3196,6 +3215,14 @@ export default function App() {
               </TouchableOpacity>
               <View style={{ flex: 1 }} />
               <TouchableOpacity
+                style={{ flexDirection: 'row', alignItems: 'center', gap: 4, minHeight: 44, paddingHorizontal: 8 }}
+                accessibilityRole="button"
+                accessibilityLabel="カードの表示項目"
+                onPress={() => setFieldSheet(true)}>
+                <Text style={{ fontSize: 13, color: ACCENT }}>表示</Text>
+                <Text style={{ fontSize: 10, color: ACCENT }}>⌄</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
                 style={{ flexDirection: 'row', alignItems: 'center', gap: 4, minHeight: 44, paddingHorizontal: 4 }}
                 accessibilityRole="button"
                 accessibilityLabel={`並び順 ${sortType}`}
@@ -3304,7 +3331,6 @@ export default function App() {
                             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                               <Text style={styles.dateText}>{item.date ? dateRangeStr(item) + (timeStr(item.hour, item.minute) ? ' ' + timeStr(item.hour, item.minute) + '〜' : '') : '日付未定'}</Text>
                             </View>
-                            {item.note ? <Text style={styles.notePreview} numberOfLines={1}>📝 {item.note}</Text> : null}
                             {!isInactive && <MiniStepper status={item.status} statusColors={statusColors} isDark={isDark} animTrigger={advanceAnimMap[item.id] ?? 0} />}
                           </View>
                           <View style={{ alignItems: 'flex-end', gap: 6 }}>
@@ -3407,6 +3433,55 @@ export default function App() {
                               <Text style={{ fontSize: 11, fontWeight: 'bold', color: DANGER }}>・辞退未連絡</Text>
                             ) : null}
                           </View>
+
+                          {/* よく参照する情報へのクイックアクセス。
+                              登録されていない項目は行ごと出さないので、
+                              持っていない企業のカードは高さが増えない。
+                              淡いピルを3個並べるのはやめ、背景なしのテキスト操作にする。 */}
+                          {listFields.density !== 'compact' && (() => {
+                            const showUrl = listFields.url && !!item.url;
+                            const showId = listFields.id && !!item.userId;
+                            const showPw = listFields.password && !!item.password;
+                            if (!showUrl && !showId && !showPw) return null;
+                            return (
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16, flexWrap: 'wrap', marginTop: 3 }}>
+                                {showUrl ? (
+                                  <TouchableOpacity
+                                    style={{ flexDirection: 'row', alignItems: 'center', gap: 3, minHeight: 32 }}
+                                    onPress={() => Linking.openURL(item.url.startsWith('http') ? item.url : 'https://' + item.url)}>
+                                    <Text style={{ fontSize: 12, color: ACCENT }}>マイページ</Text>
+                                    <Text style={{ fontSize: 11, color: ACCENT }}>↗</Text>
+                                  </TouchableOpacity>
+                                ) : null}
+                                {showId ? (
+                                  <TouchableOpacity
+                                    style={{ flexDirection: 'row', alignItems: 'center', gap: 4, minHeight: 32, flexShrink: 1 }}
+                                    onPress={() => { Clipboard.setString(item.userId); showToast('IDをコピーしました', () => setToast(null)); }}>
+                                    <Text style={{ fontSize: 12, color: C.text3 }}>ID</Text>
+                                    <Text style={{ fontSize: 12, color: C.text2, maxWidth: 110 }} numberOfLines={1}>{item.userId}</Text>
+                                    <Text style={{ fontSize: 12, color: ACCENT }}>⧉</Text>
+                                  </TouchableOpacity>
+                                ) : null}
+                                {showPw ? (
+                                  <TouchableOpacity
+                                    style={{ flexDirection: 'row', alignItems: 'center', gap: 4, minHeight: 32 }}
+                                    onPress={() => { Clipboard.setString(item.password); showToast('パスワードをコピーしました', () => setToast(null)); }}>
+                                    <Text style={{ fontSize: 12, color: C.text3 }}>PW</Text>
+                                    <Text style={{ fontSize: 12, color: C.text2 }}>••••••</Text>
+                                    <Text style={{ fontSize: 12, color: ACCENT }}>⧉</Text>
+                                  </TouchableOpacity>
+                                ) : null}
+                              </View>
+                            );
+                          })()}
+                          {/* メモは全文を出すと一覧が崩れるので行数を絞る。全文は詳細で */}
+                          {listFields.density !== 'compact' && listFields.memo && item.note ? (
+                            <Text
+                              style={{ fontSize: 12, color: C.text2, marginTop: 3, lineHeight: 16 }}
+                              numberOfLines={listFields.density === 'detailed' ? 4 : 2}>
+                              {item.note}
+                            </Text>
+                          ) : null}
 
                           {/* 副次操作は背景なしのテキスト。1カードに1つまで */}
                           {!isInactive && (ns || askGd) ? (
@@ -4618,6 +4693,66 @@ export default function App() {
                 </TouchableOpacity>
               ))}
               <View style={{ height: 12 }} />
+            </View>
+          </View>
+        </Modal>
+
+        {/* カードの表示項目。「どの企業を出すか（絞り込み）」とは別の軸なので入口を分ける */}
+        <Modal visible={fieldSheet} transparent animationType="slide" onRequestClose={() => setFieldSheet(false)}>
+          <View style={styles.pickerOverlay}>
+            <TouchableOpacity style={StyleSheet.absoluteFillObject} activeOpacity={1} onPress={() => setFieldSheet(false)} />
+            <View style={[styles.modalContent, { maxHeight: '85%', backgroundColor: C.bg }]} onStartShouldSetResponder={() => true}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                <Text accessibilityRole="header" style={[styles.modalTitle, { color: C.text, flex: 1, marginBottom: 0 }]}>カードの表示項目</Text>
+                <TouchableOpacity onPress={() => setFieldSheet(false)} style={{ minHeight: 44, justifyContent: 'center', paddingHorizontal: 8 }}>
+                  <Text style={{ fontSize: 15, color: ACCENT, fontWeight: 'bold' }}>完了</Text>
+                </TouchableOpacity>
+              </View>
+              <ScrollView>
+                <Text style={[styles.formSection, { color: C.text3, marginTop: 0 }]}>常に表示</Text>
+                {['企業名', '現在ステータス', '日付・残り日数', '志望度'].map(l => (
+                  <View key={l} style={{ flexDirection: 'row', alignItems: 'center', minHeight: 40 }}>
+                    <Text style={{ fontSize: 15, color: C.text3, flex: 1 }}>{l}</Text>
+                    <Text style={{ fontSize: 15, color: C.text3 }}>✓</Text>
+                  </View>
+                ))}
+
+                <Text style={[styles.formSection, { color: C.text3 }]}>追加情報</Text>
+                {([
+                  { k: 'url' as const, label: 'マイページ' },
+                  { k: 'id' as const, label: 'ログインID' },
+                  { k: 'password' as const, label: 'パスワード（伏字＋コピー）' },
+                  { k: 'memo' as const, label: 'メモ（最大2行）' },
+                ]).map(o => (
+                  <TouchableOpacity key={o.k}
+                    style={{ flexDirection: 'row', alignItems: 'center', minHeight: 44, borderBottomWidth: 1, borderColor: C.border2 }}
+                    onPress={() => saveListFields({ ...listFields, [o.k]: !listFields[o.k] })}>
+                    <Text style={{ fontSize: 15, color: C.text, flex: 1 }}>{o.label}</Text>
+                    {listFields[o.k] ? <Text style={{ fontSize: 16, color: ACCENT, fontWeight: 'bold' }}>✓</Text> : null}
+                  </TouchableOpacity>
+                ))}
+                <Text style={{ fontSize: 11, color: C.text3, marginTop: 6 }}>
+                  登録されていない項目は、設定に関わらずカードに出ません。
+                </Text>
+
+                <Text style={[styles.formSection, { color: C.text3 }]}>表示密度</Text>
+                {([
+                  { v: 'compact' as ListDensity, label: 'コンパクト', desc: '追加情報を出さない' },
+                  { v: 'standard' as ListDensity, label: '標準', desc: 'メモは2行まで' },
+                  { v: 'detailed' as ListDensity, label: '詳細', desc: 'メモは4行まで' },
+                ]).map(o => (
+                  <TouchableOpacity key={o.v}
+                    style={{ flexDirection: 'row', alignItems: 'center', minHeight: 44, borderBottomWidth: 1, borderColor: C.border2 }}
+                    onPress={() => saveListFields({ ...listFields, density: o.v })}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 15, color: C.text }}>{o.label}</Text>
+                      <Text style={{ fontSize: 11, color: C.text3 }}>{o.desc}</Text>
+                    </View>
+                    {listFields.density === o.v ? <Text style={{ fontSize: 16, color: ACCENT, fontWeight: 'bold' }}>✓</Text> : null}
+                  </TouchableOpacity>
+                ))}
+                <View style={{ height: 16 }} />
+              </ScrollView>
             </View>
           </View>
         </Modal>
