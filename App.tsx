@@ -39,7 +39,7 @@ import {
 import { LISTED_COMPANIES, CompanyEntry } from './companies_v2';
 // 日付・ステータス遷移のロジックは lib/ に切り出してテストしている（__tests__/schedule.test.ts）
 import {
-  addDaysYmd, collectTodos, formatYmd, parseYmd, coversDate, dateRangeStr, expandDateRange,
+  addDaysYmd, collectTodos, daysBetween, formatYmd, parseYmd, coversDate, dateRangeStr, expandDateRange,
   findConflicts, nextStatus, needsGdChoice, entryKind, PREP_TEMPLATES,
   stageDistribution, weeklyActivity, weeklyTrend,
 } from './lib/schedule';
@@ -222,7 +222,7 @@ type TabType = 'calendar' | 'list' | 'settings';
 // 設定タブ内の階層。null がトップの一覧
 type SettingsPage = 'genre' | 'status' | 'cal' | 'notify' | 'data' | 'help' | 'support' | null;
 // 月グリッドと週1行の2モード
-type CalendarMode = 'month' | 'week';
+type CalendarMode = 'today' | 'month' | 'week';
 type SortType = '登録順' | '直近順' | '五十音' | '志望度' | 'ステータス' | 'ジャンル' | '手動';
 
 // ─── デフォルトジャンル ───────────────────────────────────────────
@@ -1202,7 +1202,7 @@ function CalendarHeader({ isDark, C, currentDate, weekStart, onOpenDatePicker, c
         <Text style={{ fontSize: 10, color: C.text3, marginLeft: 2 }}>▾</Text>
       </TouchableOpacity>
       <View style={[styles.segmented, { marginBottom: 0, borderColor: C.border }]}>
-        {(['month', 'week'] as CalendarMode[]).map((m, i) => (
+        {(['today', 'month', 'week'] as CalendarMode[]).map((m, i) => (
           <TouchableOpacity key={m}
             accessibilityRole="button"
             accessibilityState={{ selected: calendarMode === m }}
@@ -1211,7 +1211,7 @@ function CalendarHeader({ isDark, C, currentDate, weekStart, onOpenDatePicker, c
               calendarMode === m && { backgroundColor: ACCENT }]}
             onPress={() => onSetMode(m)}>
             <Text style={{ fontSize: 12, fontWeight: 'bold', color: calendarMode === m ? '#fff' : C.text2 }}>
-              {m === 'month' ? '月' : '週'}
+              {m === 'today' ? '今日' : m === 'month' ? '月' : '週'}
             </Text>
           </TouchableOpacity>
         ))}
@@ -2026,6 +2026,32 @@ export default function App() {
     return map;
   }, [schedules, todayYmd]);
 
+  // ─── 今日 ─────────────────────────────────────────────────
+  // 「今日なにをすればいいか」を、カレンダーを見に行かなくても分かるようにする。
+  // 予定・締切・やることを1画面に集約するが、種別ごとに節を分けて混ぜない。
+  const byTime = (a: Schedule, b: Schedule) =>
+    (a.date + (a.hour || '99')).localeCompare(b.date + (b.hour || '99'));
+
+  const todayEvents = useMemo(
+    () => schedules
+      .filter(s => coversDate(s, todayYmd) && entryKind(s.status) === 'event' && !INACTIVE.includes(s.status))
+      .sort(byTime),
+    [schedules, todayYmd],
+  );
+  const upcomingEvents = useMemo(
+    () => schedules
+      .filter(s => s.date && s.date > todayYmd && daysBetween(todayYmd, s.date) <= 7
+        && entryKind(s.status) !== 'state' && !INACTIVE.includes(s.status))
+      .sort(byTime),
+    [schedules, todayYmd],
+  );
+  const dueTodos = useMemo(
+    () => todos.filter(t => t.daysLeft !== undefined && t.daysLeft <= 0),
+    [todos],
+  );
+  const todayEmpty = todayEvents.length === 0 && dueTodos.length === 0;
+
+
 
   // 内定が出るまで通過率は動かないので、内定前でも毎週動く指標を並べる
   const stages = useMemo(() => stageDistribution(schedules), [schedules]);
@@ -2706,8 +2732,121 @@ export default function App() {
           <View style={{ flex: 1, backgroundColor: C.bg, position: 'relative' }}
             onLayout={(e) => setScreenWidth(e.nativeEvent.layout.width)}>
             <CalendarHeader isDark={isDark} C={C} currentDate={currentCalDate} weekStart={weekStart} onOpenDatePicker={() => setDatePickerVisible(true)} calendarMode={calendarMode} onSetMode={setCalendarMode} />
-            <WeekdayHeader C={C} weekStart={weekStart} />
-            {screenWidth > 0 && (
+            {calendarMode !== 'today' ? <WeekdayHeader C={C} weekStart={weekStart} /> : null}
+            {calendarMode === 'today' ? (
+              <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 90 }}>
+                <Text style={{ fontSize: 15, fontWeight: '700', color: C.text, marginTop: 4, marginBottom: 12 }}>
+                  {todayYmd.slice(5).replace('-', '月')}日（{['日','月','火','水','木','金','土'][parseYmd(todayYmd).getDay()]}）
+                </Text>
+
+                {todayEmpty ? (
+                  <View style={{ paddingVertical: 28, alignItems: 'center' }}>
+                    <Text style={{ fontSize: 14, color: C.text2 }}>今日の予定と締切はありません</Text>
+                    <Text style={{ fontSize: 12, color: C.text3, marginTop: 4 }}>先の予定は下に出ています</Text>
+                  </View>
+                ) : null}
+
+                {/* 期限が来ている／過ぎているものを最優先で出す */}
+                {dueTodos.length > 0 ? (
+                  <>
+                    <Text style={[styles.formSection, { color: C.text3, marginTop: 0 }]}>
+                      ⏰ 今日までの締切・やること
+                    </Text>
+                    {dueTodos.map(t => {
+                      const item = schedules.find(x => x.id === t.scheduleId);
+                      const over = (t.daysLeft ?? 0) < 0;
+                      return (
+                        <View key={t.key} style={{ flexDirection: 'row', alignItems: 'center', gap: 4, borderBottomWidth: 1, borderColor: C.border2 }}>
+                          <TouchableOpacity
+                            accessibilityRole="checkbox"
+                            accessibilityLabel={`${t.company} ${t.label} を完了にする`}
+                            style={{ width: 40, height: 48, alignItems: 'center', justifyContent: 'center' }}
+                            onPress={() => completeTodo(t)}>
+                            <AnimatedCheckmark checked={false} color={SUCCESS} />
+                          </TouchableOpacity>
+                          <TouchableOpacity style={{ flex: 1, paddingVertical: 10 }}
+                            onPress={() => item && openDetail(item)}>
+                            <Text style={{ fontSize: 14, fontWeight: '600', color: C.text }} numberOfLines={1}>{t.company}</Text>
+                            <Text style={{ fontSize: 12, color: C.text2 }} numberOfLines={1}>{t.label}</Text>
+                          </TouchableOpacity>
+                          <Text style={{ fontSize: 12, fontWeight: 'bold', color: over ? DANGER : WARNING }}>
+                            {todoDueLabel(t)}
+                          </Text>
+                        </View>
+                      );
+                    })}
+                  </>
+                ) : null}
+
+                {/* 今日出向く予定。面接なら参加導線をその場に置く */}
+                {todayEvents.length > 0 ? (
+                  <>
+                    <Text style={[styles.formSection, { color: C.text3 }]}>📅 今日の予定</Text>
+                    {todayEvents.map(ev2 => (
+                      <TouchableOpacity key={ev2.id}
+                        style={{ paddingVertical: 12, borderBottomWidth: 1, borderColor: C.border2 }}
+                        onPress={() => openDetail(ev2)}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                          <Text style={{ fontSize: 15, fontWeight: '700', color: C.text, minWidth: 52, fontFamily: 'IBMPlexSans_700Bold' }}>
+                            {timeStr(ev2.hour, ev2.minute) || '時刻未定'}
+                          </Text>
+                          <View style={[styles.statusDot, { backgroundColor: statusColorOf(ev2.status) }]} />
+                          <Text style={{ fontSize: 15, fontWeight: '600', color: C.text, flex: 1 }} numberOfLines={1}>{ev2.company}</Text>
+                        </View>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 3, paddingLeft: 60 }}>
+                          <Text style={{ fontSize: 12, color: C.text2 }}>{ev2.status}</Text>
+                          {ev2.venueType ? (
+                            <Text style={{ fontSize: 12, color: C.text3 }}>
+                              {ev2.venueType === 'onsite' ? '対面' : 'オンライン'}
+                            </Text>
+                          ) : null}
+                          {hasConflict(ev2) ? (
+                            <Text style={{ fontSize: 12, fontWeight: 'bold', color: DANGER }}>日程重複</Text>
+                          ) : null}
+                        </View>
+                        {ev2.meetingUrl || ev2.venue ? (
+                          <View style={{ flexDirection: 'row', gap: 16, paddingLeft: 60, marginTop: 4 }}>
+                            {ev2.meetingUrl ? (
+                              <TouchableOpacity style={{ minHeight: 36, justifyContent: 'center' }}
+                                onPress={() => Linking.openURL(ev2.meetingUrl!.startsWith('http') ? ev2.meetingUrl! : 'https://' + ev2.meetingUrl)}>
+                                <Text style={{ fontSize: 13, color: ACCENT, fontWeight: 'bold' }}>面接に参加 ↗</Text>
+                              </TouchableOpacity>
+                            ) : null}
+                            {!ev2.meetingUrl && ev2.venue ? (
+                              <TouchableOpacity style={{ minHeight: 36, justifyContent: 'center' }}
+                                onPress={() => Linking.openURL(`http://maps.apple.com/?q=${encodeURIComponent(ev2.venue!)}`)}>
+                                <Text style={{ fontSize: 13, color: ACCENT }}>地図を開く ↗</Text>
+                              </TouchableOpacity>
+                            ) : null}
+                          </View>
+                        ) : null}
+                      </TouchableOpacity>
+                    ))}
+                  </>
+                ) : null}
+
+                {/* 先の見通し。1週間ぶんだけ */}
+                {upcomingEvents.length > 0 ? (
+                  <>
+                    <Text style={[styles.formSection, { color: C.text3 }]}>これから7日間</Text>
+                    {upcomingEvents.map(ev2 => (
+                      <TouchableOpacity key={ev2.id}
+                        style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 10, borderBottomWidth: 1, borderColor: C.border2 }}
+                        onPress={() => openDetail(ev2)}>
+                        <Text style={{ fontSize: 12, color: C.text3, minWidth: 44, fontFamily: 'IBMPlexSans_400Regular' }}>
+                          {ev2.date.slice(5).replace('-', '/')}
+                        </Text>
+                        <View style={[styles.statusDot, { backgroundColor: statusColorOf(ev2.status) }]} />
+                        <Text style={{ fontSize: 14, color: C.text, flex: 1 }} numberOfLines={1}>{ev2.company}</Text>
+                        <Text style={{ fontSize: 12, color: C.text2 }}>{ev2.status}</Text>
+                        <Text style={{ fontSize: 11, color: C.text3 }}>{countdownLabel(ev2.date) ?? ''}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </>
+                ) : null}
+                <View style={{ height: 24 }} />
+              </ScrollView>
+            ) : screenWidth > 0 && (
               <ReAnimated.View style={[calHeightStyle, { overflow: 'hidden' }]}>
               {calendarMode === 'week'
                 ? (
@@ -2916,6 +3055,7 @@ export default function App() {
             )}
             {/* タップでも切り替わる。掴む線は4pxしかないので、
                 当たり判定は44pt確保する */}
+            {calendarMode !== 'today' && (
             <GestureDetector gesture={sheetDrag}>
               <TouchableOpacity
                 activeOpacity={0.6}
@@ -2929,6 +3069,8 @@ export default function App() {
                 </Text>
               </TouchableOpacity>
             </GestureDetector>
+            )}
+            {calendarMode !== 'today' && (
             <View style={[styles.todoArea, { backgroundColor: C.bg }]}>
               {!calDaySelected ? (
                 <>
@@ -2997,6 +3139,7 @@ export default function App() {
                 </>
               )}
             </View>
+            )}
             {/* カレンダータブのFAB */}
             <Pressable
               style={styles.fab}
