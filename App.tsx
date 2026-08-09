@@ -2731,17 +2731,38 @@ export default function App() {
             <Text style={[styles.screenTitle, { color: C.text }]}>
               {activeTab === 'calendar' ? 'カレンダー' : activeTab === 'list' ? '持ち駒' : '設定'}
             </Text>
-            {activeTab === 'list' ? (
-              <>
-                <Text style={{ fontSize: 13, color: C.text3 }}>選考中 {activeCount}社</Text>
-                <TouchableOpacity onPress={() => setAnalyticsVisible(true)}
-                  accessibilityRole="button" accessibilityLabel="就活の状況"
-                  style={{ minHeight: 44, justifyContent: 'center', paddingLeft: 10 }}>
-                  <Text style={{ fontSize: 13, color: ACCENT }}>分析 ›</Text>
-                </TouchableOpacity>
-              </>
-            ) : null}
           </View>
+
+          {/* 分析への入口。小さな青リンクだと見落とされるので、
+              数字そのものを入口にして面積と情報量の両方を持たせる。
+              ベタ塗りにはせず、遷移を示すシェブロンだけ添える。 */}
+          {activeTab === 'list' ? (
+            <TouchableOpacity
+              accessibilityRole="button" accessibilityLabel="就活の状況を見る"
+              onPress={() => setAnalyticsVisible(true)}
+              style={{
+                flexDirection: 'row', alignItems: 'center', gap: 14,
+                marginHorizontal: 16, marginBottom: 8,
+                paddingHorizontal: 14, paddingVertical: 10,
+                backgroundColor: C.card, borderRadius: 10, borderWidth: 1, borderColor: C.border,
+              }}>
+              {([
+                { label: '選考中', value: activeCount, color: C.text },
+                { label: '面接中', value: stages.find(x => x.key === 'interview')?.count ?? 0, color: C.text },
+                { label: '内定', value: internalCount, color: internalCount > 0 ? SUCCESS : C.text },
+              ]).map(st => (
+                <View key={st.label} style={{ flexDirection: 'row', alignItems: 'baseline', gap: 4 }}>
+                  <Text style={{ fontSize: 11, color: C.text3 }}>{st.label}</Text>
+                  <Text style={{ fontSize: 17, fontWeight: '700', color: st.color, fontFamily: 'IBMPlexSans_700Bold' }}>
+                    {st.value}
+                  </Text>
+                </View>
+              ))}
+              <View style={{ flex: 1 }} />
+              <Text style={{ fontSize: 12, color: ACCENT }}>分析</Text>
+              <Text style={{ fontSize: 15, color: C.text3 }}>›</Text>
+            </TouchableOpacity>
+          ) : null}
 
           {/* やること。設定画面では出さない（設定は挙動を変える場所に寄せる） */}
           {todos.length > 0 && activeTab !== 'settings' && (
