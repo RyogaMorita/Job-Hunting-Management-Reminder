@@ -1296,6 +1296,8 @@ const LIGHT = {
   calBg: '#ffffff', calText: '#222222',
   tabBar: '#ffffff', inputBg: '#f8f9fa', searchBg: '#f5f5f5',
   filterBg: '#f8faff', statChip: '#e8f0fe', headerBorder: '#f0f0f0',
+  // 志望度バッジ。意味を持たない中立面。ランクごとに色分けはしない
+  badgeBg: '#f1f3f5', badgeText: '#5f6368',
 };
 // セマンティックカラー。
 // StyleSheet.create は静的で C（ダーク/ライト）を参照できないため、
@@ -1327,6 +1329,7 @@ const DARK = {
   calBg: '#0d1117', calText: '#e6edf3',
   tabBar: '#161b22', inputBg: '#21262d', searchBg: '#21262d',
   filterBg: '#1c2333', statChip: '#1c2333', headerBorder: '#30363d',
+  badgeBg: '#21262d', badgeText: '#8b949e',
 };
 
 // カレンダーヘッダー
@@ -3118,7 +3121,9 @@ export default function App() {
                             <Text style={[styles.itemTitle, { color: C.text }]}>{item.company}</Text>
                             <Text style={[styles.itemStatus, { color: C.text2 }]}>{item.date.replace(/-/g, '/')} {timeStr(item.hour, item.minute) ? timeStr(item.hour, item.minute) + '〜 · ' : ''}{item.status}</Text>
                           </View>
-                          <Text style={{ fontSize: 12, color: C.text3, fontFamily: 'IBMPlexSans_400Regular' }}>{item.rank}</Text>
+                          <View style={[styles.rankBadge, { backgroundColor: C.badgeBg }]}>
+                            <Text style={[styles.rankBadgeText, { color: C.badgeText }]}>{item.rank}</Text>
+                          </View>
                         </TouchableOpacity>
                       ))
                     }
@@ -3146,7 +3151,9 @@ export default function App() {
                               <Text style={[styles.itemTitle, { color: C.text }]}>{item.company}</Text>
                               <Text style={[styles.itemStatus, { color: C.text2 }]}>{timeStr(item.hour, item.minute) ? timeStr(item.hour, item.minute) + '〜 · ' : ''}{item.status}</Text>
                             </View>
-                            <Text style={{ fontSize: 12, color: C.text2, fontFamily: 'IBMPlexSans_400Regular' }}>{item.rank}</Text>
+                            <View style={[styles.rankBadge, { backgroundColor: C.badgeBg }]}>
+                              <Text style={[styles.rankBadgeText, { color: C.badgeText }]}>{item.rank}</Text>
+                            </View>
                             <Text style={styles.itemArrow}>›</Text>
                           </TouchableOpacity>
                         );
@@ -3284,7 +3291,9 @@ export default function App() {
                             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                               <View style={[styles.statusDot, { backgroundColor: sc }]} />
                               <HighlightText text={item.company + (isInternal ? ' 🌸' : '')} query={searchQuery} style={[styles.itemTitle, { color: C.text, flex: 1 }]} />
-                              <Text style={{ fontSize: 12, color: C.text2, fontFamily: 'IBMPlexSans_400Regular' }}>{item.rank}</Text>
+                              <View style={[styles.rankBadge, { backgroundColor: C.badgeBg }]}>
+                              <Text style={[styles.rankBadgeText, { color: C.badgeText }]}>{item.rank}</Text>
+                            </View>
                               {hasConflict(item) && <View style={{ backgroundColor: DANGER, borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2 }}>
                                 <Text style={{ color: '#fff', fontSize: 10, fontWeight: 'bold' }}>日程重複</Text>
                               </View>}
@@ -3369,7 +3378,9 @@ export default function App() {
                             {item.pinned ? (
                               <Image source={ICONS.pin} style={{ width: 12, height: 12, tintColor: ACCENT }} />
                             ) : null}
-                            <Text style={{ fontSize: 12, color: C.text2, fontFamily: 'IBMPlexSans_400Regular' }}>{item.rank}</Text>
+                            <View style={[styles.rankBadge, { backgroundColor: C.badgeBg }]}>
+                              <Text style={[styles.rankBadgeText, { color: C.badgeText }]}>{item.rank}</Text>
+                            </View>
                           </View>
 
                           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
@@ -4935,7 +4946,8 @@ const styles = StyleSheet.create({
   notePreview: { fontSize: 10, color: '#aaa', marginTop: 2 },
   statusBadge: { backgroundColor: TDU_BLUE, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
   statusBadgeText: { color: '#fff', fontSize: 9, fontWeight: 'bold', fontFamily: 'NotoSansJP_700Bold' },
-  rankBadge: { width: 22, height: 22, borderRadius: 6, alignItems: 'center', justifyContent: 'center' },
+  rankBadge: { width: 30, height: 30, borderRadius: 9, alignItems: 'center', justifyContent: 'center' },
+  rankBadgeText: { fontSize: 13, fontWeight: '600', fontFamily: 'IBMPlexSans_700Bold' },
   rankText: { color: '#fff', fontSize: 10, fontWeight: 'bold', fontFamily: 'IBMPlexSans_700Bold' },
   checkBtn: { backgroundColor: LIGHT.bg3, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
   checkBtnText: { fontSize: 10, color: TDU_BLUE, fontWeight: 'bold' },
