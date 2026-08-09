@@ -18,7 +18,7 @@ import {
   StyleSheet, Text, View, TouchableOpacity, ScrollView,
   SafeAreaView, Modal, TextInput, Alert, KeyboardAvoidingView,
   Platform, Switch, Animated, PanResponder, Linking, Clipboard, Image, Dimensions,
-  NativeModules, AppState, BackHandler, AccessibilityInfo, findNodeHandle,
+  NativeModules, AppState, BackHandler, AccessibilityInfo,
   StyleProp, ViewStyle, TextStyle, ImageSourcePropType,
 } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
@@ -259,11 +259,14 @@ const COLOR_PALETTE = [
 // gesture-handler + reanimated はUIスレッドで完結するので指に貼り付く。
 const SWIPE_OPEN_X = -80;
 
-function SwipeableRow({ children, onDelete, hint = false }: {
+function SwipeableRow({ children, onDelete, hint = false, onHintShown }: {
   children: React.ReactNode; onDelete: () => void;
   /// 初回だけ少し引いて戻し、スワイプできることを見せる。
   /// カードは枠と余白を持つのでリスト行に比べてスワイプの手掛かりが弱い。
   hint?: boolean;
+  /// 実際にヒントを出せたときだけ呼ぶ。
+  /// 裏で条件が揃っただけで「表示済み」にしてしまわないため。
+  onHintShown?: () => void;
 }) {
   const translateX = useSharedValue(0);
   // ドラッグ開始時点の位置。開いた状態から続けて引いても飛ばないようにする
@@ -274,14 +277,23 @@ function SwipeableRow({ children, onDelete, hint = false }: {
   const hintRef = useRef(hint);
   useEffect(() => {
     if (!hintRef.current) return;
-    const t = setTimeout(() => {
-      translateX.value = withSequence(
-        withTiming(-44, { duration: 320 }),
-        withTiming(-44, { duration: 420 }),
-        withSpring(0, { damping: 15, stiffness: 150 }),
-      );
-    }, 700);
-    return () => clearTimeout(t);
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let cancelled = false;
+    // 視差効果を減らす設定では動かさない。
+    // 存在を教えるのが目的なので、この場合はヒント自体を省く。
+    AccessibilityInfo.isReduceMotionEnabled().then(reduced => {
+      if (cancelled) return;
+      onHintShown?.();
+      if (reduced) return;
+      timer = setTimeout(() => {
+        translateX.value = withSequence(
+          withTiming(-44, { duration: 320 }),
+          withTiming(-44, { duration: 420 }),
+          withSpring(0, { damping: 15, stiffness: 150 }),
+        );
+      }, 700);
+    });
+    return () => { cancelled = true; if (timer) clearTimeout(timer); };
   }, []);
 
   const pan = Gesture.Pan()
@@ -1499,11 +1511,10 @@ export default function App() {
   const [sortSheet, setSortSheet] = useState(false);
   // スワイプ削除のヒントは一度だけ。先頭カードにのみ出す
   const [swipeHintDone, setSwipeHintDone] = useState(true);
-  useEffect(() => {
-    if (swipeHintDone || activeTab !== 'list' || schedules.length === 0) return;
+  const markSwipeHintShown = () => {
     setSwipeHintDone(true);
     AsyncStorage.setItem(SWIPE_HINT_KEY, 'true');
-  }, [swipeHintDone, activeTab, schedules.length]);
+  };
   const [analyticsVisible, setAnalyticsVisible] = useState(false);
   // 保存できる＝変更がある、を伝えるための差分判定。
   // openDetail/openAdd の setState は同じレンダーにまとまるので、
@@ -2160,11 +2171,19 @@ export default function App() {
   }, [filteredSorted]);
 
   // ─── 保存ロジック ──────────────────────────────────────────────
+  // 保存の二重実行を防ぐ。処理が終わるまで保持し、少しだけ余韻を持たせる
   const savingRef = useRef(false);
   const handleSave = async () => {
     if (companyName.trim() === '' || savingRef.current) return;
     savingRef.current = true;
-    setTimeout(() => { savingRef.current = false; }, 800);
+    try {
+      await runSave();
+    } finally {
+      setTimeout(() => { savingRef.current = false; }, 300);
+    }
+  };
+
+  const runSave = async () => {
     const name = companyName.trim();
 
     if (!selectedItem) {
@@ -2173,10 +2192,10 @@ export default function App() {
       const sameStatusIds = schedules
         .filter(s => s.company.trim() === name && s.status === selStatus)
         .map(s => s.id);
-      doSave(sameStatusIds);
+      await doSave(sameStatusIds);
     } else {
       // 編集: 通常の上書き保存
-      doSave([]);
+      await doSave([]);
     }
   };
 
@@ -2544,13 +2563,16 @@ export default function App() {
     applyStatus(item, ns, true);
   };
 
-  // 高頻度で押される操作なので、連打で2段階進まないよう企業ごとに短時間ロックする
+  // 高頻度で押される操作なので、連打で2段階進まないよう企業ごとにロックする。
+  // 保存とウィジェット同期が終わるまで保持し、そのあと再描画が届くまでの
+  // わずかな隙間を埋めるためだけ短く延長する（固定時間だけのロックだと
+  // AsyncStorage が遅れたときに二重実行を許してしまう）。
   const advancingRef = useRef<Set<string>>(new Set());
 
   const applyStatus = async (item: Schedule, ns: string, undoable: boolean) => {
     if (advancingRef.current.has(item.id)) return;
     advancingRef.current.add(item.id);
-    setTimeout(() => advancingRef.current.delete(item.id), 600);
+    const unlock = () => setTimeout(() => advancingRef.current.delete(item.id), 300);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     const autoChecks = STATUS_TO_CHECKS[ns] ?? [];
     const initCL: Record<string, boolean> = { ...(item.checklist ?? {}) };
@@ -2562,7 +2584,11 @@ export default function App() {
       // カードから進めた場合も履歴に残す（ダッシュボードの「今週の前進」に効く）
       statusHistory: [...(s.statusHistory ?? []), { status: ns, changedAt: new Date().toISOString() }],
     });
-    await saveSchedules(updated);
+    try {
+      await saveSchedules(updated);
+    } finally {
+      unlock();
+    }
     setAdvanceAnimMap(prev => ({ ...prev, [item.id]: (prev[item.id] ?? 0) + 1 }));
     if (undoable && before) {
       showToast(`${item.company} を ${ns} にしました`, () => {
@@ -3204,7 +3230,8 @@ export default function App() {
                       layout={LinearTransition.springify()}>
                     <SwipeableRow
                       onDelete={() => deleteSchedule(item.id)}
-                      hint={!swipeHintDone && index === 0}>
+                      hint={!swipeHintDone && index === 0}
+                      onHintShown={markSwipeHintShown}>
                       {/* 一覧で一瞬で知りたいのは 企業 / 現在ステータス / 次の日付 まで。
                           ランクバッジ・進捗ステッパー・各種ピルは詳細側へ寄せた。
                           ステータスは「状態」なのでボタンの見た目にしない。 */}
