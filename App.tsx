@@ -1420,7 +1420,9 @@ export default function App() {
   const [rewardedTip, setRewardedTip] = useState<{ title: string; content: string } | null>(null);
   const [offerModalVisible, setOfferModalVisible] = useState(false);
   const [firstLaunchModal, setFirstLaunchModal] = useState(false);
-  const [adFree, setAdFree] = useState(false);
+  // ⚠️ App Store のスクリーンショット撮影用に一時的に true にしている。
+  // 提出用のビルドを作る前に必ず false へ戻すこと。
+  const [adFree, setAdFree] = useState(true);
   const [actionCount, setActionCount] = useState(0);
   const [bannerKey, setBannerKey] = useState(0);
   const [pendingInternalCompany, setPendingInternalCompany] = useState<string>(''); // 内定企業名
