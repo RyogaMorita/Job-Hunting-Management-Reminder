@@ -11,6 +11,9 @@ struct WidgetSchedule: Codable, Identifiable, Hashable {
     let minute: String
     let status: String
     let calendarColor: String?
+    /// Webテスト後にGDがあるか。"unknown" / "yes" / "no"。
+    /// 未確認の企業はウィジェットからは進められない（アプリ側で選ばせる）。
+    let gdPresence: String
 
     /// 1件でも欠けたフィールドがあると配列全体のデコードが失敗し、
     /// 4つのウィジェットが同時に真っ白になる。欠損・型違いは空文字で受ける。
@@ -29,14 +32,16 @@ struct WidgetSchedule: Codable, Identifiable, Hashable {
         minute = str(.minute)
         status = str(.status)
         calendarColor = try? c.decode(String.self, forKey: .calendarColor)
+        gdPresence = (try? c.decode(String.self, forKey: .gdPresence)) ?? "unknown"
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, company, date, endDate, hour, minute, status, calendarColor
+        case id, company, date, endDate, hour, minute, status, calendarColor, gdPresence
     }
 
     init(id: String, company: String, date: String, endDate: String?,
-         hour: String, minute: String, status: String, calendarColor: String?) {
+         hour: String, minute: String, status: String, calendarColor: String?,
+         gdPresence: String = "unknown") {
         self.id = id
         self.company = company
         self.date = date
@@ -45,6 +50,7 @@ struct WidgetSchedule: Codable, Identifiable, Hashable {
         self.minute = minute
         self.status = status
         self.calendarColor = calendarColor
+        self.gdPresence = gdPresence
     }
 
     /// 終了日（未設定・不正な場合は開始日）
@@ -200,7 +206,7 @@ enum AppGroupHelper {
             return WidgetSchedule(
                 id: s.id, company: s.company, date: s.date, endDate: s.endDate,
                 hour: s.hour, minute: s.minute, status: newStatus,
-                calendarColor: statusColors[newStatus]
+                calendarColor: statusColors[newStatus], gdPresence: s.gdPresence
             )
         }
     }
@@ -265,14 +271,21 @@ let statusColors: [String: String] = [
 ]
 
 /// lib/schedule.ts の PROGRESS_FLOW / INTERN_FLOW と同一に保つこと
-private let PROGRESS_FLOW = ["検討中", "ES提出済", "Webテスト", "1次面接", "2次面接", "最終面接", "内定"]
+private let PROGRESS_FLOW = ["検討中", "ES提出済", "Webテスト", "GD", "1次面接", "2次面接", "最終面接", "内定"]
 private let INTERN_FLOW = ["インターンES締切", "インターン面接", "インターン確定"]
 
 /// 次の選考段階。これ以上進めないものは nil。
 ///
 /// ES提出済の次は常に Webテスト（lib/schedule.ts と揃えること）。
-func nextStatus(_ current: String) -> String? {
+/// Webテスト後にGDがあるかは企業ごとに違う。未確認の場合はここでは進めず、
+/// アプリ側で選ばせる（ウィジェットは選択UIを出せないため）。
+func nextStatus(_ current: String, gdPresence: String = "unknown") -> String? {
     if current == "ES締切" { return "ES提出済" }
+    if current == "Webテスト" {
+        if gdPresence == "yes" { return "GD" }
+        if gdPresence == "no" { return "1次面接" }
+        return nil
+    }
     if let i = PROGRESS_FLOW.firstIndex(of: current), i < PROGRESS_FLOW.count - 1 {
         return PROGRESS_FLOW[i + 1]
     }

@@ -4,6 +4,7 @@ import {
   eventsConflict, findConflicts, collectTodos, daysBetween,
   EVENT_DURATION_MIN, TRAVEL_BUFFER_MIN, PREP_TEMPLATES, PROGRESS_FLOW,
   stageDistribution, startOfWeekYmd, weeklyActivity, weeklyTrend, STAGE_BUCKETS, layoutDayEvents,
+  needsGdChoice,
 } from '../lib/schedule';
 
 describe('日付ユーティリティ', () => {
@@ -98,7 +99,7 @@ describe('ステータス遷移', () => {
   test('本選考は順に進む', () => {
     expect(nextStatus('検討中')).toBe('ES提出済');
     expect(nextStatus('ES提出済')).toBe('Webテスト');
-    expect(nextStatus('Webテスト')).toBe('1次面接');
+    expect(nextStatus('Webテスト', 'no')).toBe('1次面接');
     expect(nextStatus('1次面接')).toBe('2次面接');
     expect(nextStatus('2次面接')).toBe('最終面接');
     expect(nextStatus('最終面接')).toBe('内定');
@@ -130,14 +131,16 @@ describe('ステータス遷移', () => {
   });
 
   test('繰り返し進めると必ず終端に到達し、途中で戻らない', () => {
-    let s: string | null = '検討中';
-    const seen: string[] = [];
-    while (s) {
-      expect(seen).not.toContain(s); // ループしない
-      seen.push(s);
-      s = nextStatus(s);
+    for (const gd of ['yes', 'no'] as const) {
+      let s: string | null = '検討中';
+      const seen: string[] = [];
+      while (s) {
+        expect(seen).not.toContain(s); // ループしない
+        seen.push(s);
+        s = nextStatus(s, gd);
+      }
+      expect(seen[seen.length - 1]).toBe('内定');
     }
-    expect(seen[seen.length - 1]).toBe('内定');
   });
 });
 
@@ -151,17 +154,18 @@ describe('Webテストを挟むステータス遷移', () => {
     expect(nextStatus('ES提出済')).toBe('Webテスト');
   });
 
-  test('Webテストの次は1次面接', () => {
-    expect(nextStatus('Webテスト')).toBe('1次面接');
+  test('Webテストの次はGDの有無で決まる', () => {
+    expect(nextStatus('Webテスト', 'no')).toBe('1次面接');
+    expect(nextStatus('Webテスト', 'yes')).toBe('GD');
   });
 
-  test('検討中から進め続けると PROGRESS_FLOW をそのままなぞる', () => {
+  test('GDありの企業は PROGRESS_FLOW をそのままなぞる', () => {
     let s: string | null = '検討中';
     const seen: string[] = [];
     while (s) {
       expect(seen).not.toContain(s);
       seen.push(s);
-      s = nextStatus(s);
+      s = nextStatus(s, 'yes');
     }
     expect(seen).toEqual(PROGRESS_FLOW);
   });
@@ -516,5 +520,32 @@ describe('やることの完了', () => {
     const src = { ...base, customChecklist: [{ id: 'c1', label: '適性検査', checked: false }] };
     const t = collectTodos([src], '2026-05-09').find(x => x.kind === 'custom');
     expect(t?.customId).toBe('c1');
+  });
+});
+
+describe('Webテスト後の分岐', () => {
+  test('GDありならGDへ、なしなら1次面接へ', () => {
+    expect(nextStatus('Webテスト', 'yes')).toBe('GD');
+    expect(nextStatus('Webテスト', 'no')).toBe('1次面接');
+  });
+
+  test('未確認のときは進めず、選ばせる合図を返す', () => {
+    expect(nextStatus('Webテスト', 'unknown')).toBeNull();
+    expect(needsGdChoice('Webテスト', 'unknown')).toBe(true);
+  });
+
+  test('未指定は未確認として扱う（既存データが勝手に飛ばされない）', () => {
+    expect(nextStatus('Webテスト')).toBeNull();
+    expect(needsGdChoice('Webテスト')).toBe(true);
+  });
+
+  test('Webテスト以外では選択を求めない', () => {
+    for (const st of ['検討中', 'ES提出済', 'GD', '1次面接', '最終面接']) {
+      expect(needsGdChoice(st, 'unknown')).toBe(false);
+    }
+  });
+
+  test('GDの次は1次面接', () => {
+    expect(nextStatus('GD')).toBe('1次面接');
   });
 });

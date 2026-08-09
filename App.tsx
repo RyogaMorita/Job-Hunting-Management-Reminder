@@ -40,10 +40,10 @@ import { LISTED_COMPANIES, CompanyEntry } from './companies_v2';
 // 日付・ステータス遷移のロジックは lib/ に切り出してテストしている（__tests__/schedule.test.ts）
 import {
   addDaysYmd, collectTodos, formatYmd, parseYmd, coversDate, dateRangeStr, expandDateRange,
-  findConflicts, nextStatus, PREP_TEMPLATES,
+  findConflicts, nextStatus, needsGdChoice, PREP_TEMPLATES,
   stageDistribution, weeklyActivity, weeklyTrend, layoutDayEvents, TRAVEL_BUFFER_MIN,
 } from './lib/schedule';
-import type { TodoItem, VenueType } from './lib/schedule';
+import type { TodoItem, VenueType, Presence } from './lib/schedule';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -95,7 +95,8 @@ const ACCENT = '#1a6bcc';
 
 const INTERN_STATUSES = ['インターンES締切', 'インターン面接', 'インターン確定'];
 // 本選考の段階とは別に数える単発イベント
-const EVENT_STATUSES = ['説明会', 'ワークショップ', 'GD'];
+// GDは選考段階なので本選考トラックに入れる。説明会・ワークショップだけが単発イベント。
+const EVENT_STATUSES = ['説明会', 'ワークショップ'];
 const SEPARATE_STATUSES = [...EVENT_STATUSES, ...INTERN_STATUSES]; // 本選考と別トラック
 const DEFAULT_STATUS_OPTIONS = [
   '検討中', '説明会', 'ワークショップ', 'ES締切', 'ES提出済', 'Webテスト', 'GD',
@@ -190,6 +191,8 @@ interface Schedule {
   webTestBookedAt?: string;  // 予約日時（会場受検の場合）
   webTestVenue?: string;
   webTestDone?: boolean;     // 受検済み。やること一覧から消すために持つ
+  // Webテストの後にGDがあるか。「未確認」と「無い」は別物なので3値で持つ
+  gdPresence?: Presence;
   // 辞退の連絡を済ませたか
   declineContacted?: boolean;
   // 一覧・カレンダーで常に上に出す
@@ -959,8 +962,11 @@ const STEPPER_STAGES = ['検討中', 'ES締切', '1次面接', '2次面接', '�
 // ステッパーは6段のままにして、Webテストは書類フェーズに含める。
 // ステータス名自体はバッジで出るので情報は失われない。
 const STATUS_TO_STAGE: Record<string, number> = {
-  '検討中': 0, '説明会': 0, 'ワークショップ': 0, 'GD': 0,
-  'ES締切': 1, 'ES提出済': 1, 'Webテスト': 1,
+  '検討中': 0, '説明会': 0, 'ワークショップ': 0,
+  // GDは選考段階。Webテストより後・1次面接より前なので書類フェーズに含める。
+  // 0のままだと Webテスト→GD が「ステータスが下がった」と判定され、
+  // チェックリストがリセットされてしまう。
+  'ES締切': 1, 'ES提出済': 1, 'Webテスト': 1, 'GD': 1,
   '1次面接': 2,
   '2次面接': 3,
   '最終面接': 4,
@@ -1528,6 +1534,10 @@ export default function App() {
     AsyncStorage.setItem(SWIPE_HINT_KEY, 'true');
   };
   const [analyticsVisible, setAnalyticsVisible] = useState(false);
+  // GDの有無が未確認の企業で、進める前に行き先を選ばせる
+  const [gdChoiceItem, setGdChoiceItem] = useState<Schedule | null>(null);
+  const [gdPresence, setGdPresence] = useState<Presence>('unknown');
+  const [gdSheet, setGdSheet] = useState(false);
   // 保存できる＝変更がある、を伝えるための差分判定。
   // openDetail/openAdd の setState は同じレンダーにまとまるので、
   // モーダルが開いた直後のレンダー後にこの値を基準として控えれば正確に取れる。
@@ -1877,7 +1887,9 @@ export default function App() {
         minute: s.minute,
         status: s.status,
         calendarColor: s.calendarColor ?? colors[s.status] ?? null,
-        // ウィジェットの→ボタンの遷移先をアプリ側と揃えるために渡す
+        // ウィジェットの→ボタンの遷移先をアプリ側と揃えるために渡す。
+        // 未確認の企業はウィジェットからは進められない（選択UIを出せないため）
+        gdPresence: s.gdPresence ?? 'unknown',
       }));
       await SharedGroupPreferences.setItem(
         WIDGET_SCHEDULES_KEY,
@@ -1924,7 +1936,7 @@ export default function App() {
   const formSignature = JSON.stringify([
     companyName, note, selStatus, selDate, selEndDate, selHour, selMinute,
     url, userId, password, rank, selGenreId, selVenueType, meetingUrl, venue,
-    webTestType, webTestDeadline, webTestBookedAt, webTestVenue,
+    webTestType, webTestDeadline, webTestBookedAt, webTestVenue, gdPresence,
     itemNotifyEnabled,
     // 順序に意味がないので正規化。[1,3] と [3,1] を別物と見なさない
     [...notifyDaysList].sort((a, b) => Number(a) - Number(b)),
@@ -2295,6 +2307,7 @@ export default function App() {
       webTestDeadline: webTestDeadline || undefined,
       webTestBookedAt: webTestBookedAt || undefined,
       webTestVenue: webTestVenue.trim() || undefined,
+      gdPresence,
       declineContacted: storedItem?.declineContacted ?? selectedItem?.declineContacted,
       calendarColor: selectedItem
         ? (statusColors[selStatus] ?? selectedItem.calendarColor ?? '#95A5A6') // 編集時: 新ステータス色で更新
@@ -2330,7 +2343,7 @@ export default function App() {
     setSelHour(''); setSelMinute(''); setUrl(''); setUserId(''); setPassword('');
     setRank('B'); setSelGenreId('other'); setChecklist({});
     setSelVenueType(undefined); setMeetingUrl(''); setVenue('');
-    setWebTestType(''); setWebTestDeadline(''); setWebTestBookedAt(''); setWebTestVenue('');
+    setWebTestType(''); setWebTestDeadline(''); setWebTestBookedAt(''); setWebTestVenue(''); setGdPresence('unknown');
     setItemNotifyEnabled(true); setNotifyDaysList(['1']); setNotifyHour('09'); setNotifyMinute('00');
     setOfferDeadline(''); setMemoResearch(''); setMemoPR(''); setMemoQuestions(''); setActiveMemoTab(0);
     setInternshipStart(''); setInternshipEnd('');
@@ -2415,6 +2428,7 @@ export default function App() {
     setWebTestDeadline(item.webTestDeadline ?? '');
     setWebTestBookedAt(item.webTestBookedAt ?? '');
     setWebTestVenue(item.webTestVenue ?? '');
+    setGdPresence(item.gdPresence ?? 'unknown');
     setDetailVisible(true);
   };
 
@@ -2608,6 +2622,15 @@ export default function App() {
     [],
   );
 
+  const chooseGdRoute = async (item: Schedule, gd: Presence) => {
+    const updated = schedules.map(s => s.id !== item.id ? s : { ...s, gdPresence: gd });
+    await saveSchedules(updated);
+    setGdChoiceItem(null);
+    // 覚えさせたうえで、そのまま次へ進める
+    const ns = nextStatus(item.status, gd);
+    if (ns) applyStatus({ ...item, gdPresence: gd }, ns, true);
+  };
+
   const togglePinned = async (item: Schedule) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     await saveSchedules(schedules.map(s => s.id !== item.id ? s : { ...s, pinned: !s.pinned }));
@@ -2616,7 +2639,13 @@ export default function App() {
   // target を渡すと次段階ではなくそこへ直接移す。
   // 内定は「承諾」か「辞退」かの分岐で一本道にならないため、カード側から明示的に指定する。
   const advanceStatus = async (item: Schedule, target?: string) => {
-    const ns = target ?? nextStatus(item.status);
+    // GDがあるか分からない企業は、最初の1回だけ行き先を選ばせる。
+    // 選んだ結果は企業に覚えさせるので、次からは1タップで進む。
+    if (!target && needsGdChoice(item.status, item.gdPresence ?? 'unknown')) {
+      setGdChoiceItem(item);
+      return;
+    }
+    const ns = target ?? nextStatus(item.status, item.gdPresence ?? 'unknown');
     if (!ns) return;
     // 内定・不合格・辞退のような後戻りしづらい変更だけ確認を挟む。
     // 段階送りは1日に何度も使うので、即時反映して取り消せるようにする。
@@ -3238,7 +3267,8 @@ export default function App() {
                   const sc = statusColorOf(item.status);
                   const isInternal = item.status === '内定';
                   const isInactive = INACTIVE.includes(item.status);
-                  const ns = nextStatus(item.status);
+                  const ns = nextStatus(item.status, item.gdPresence ?? 'unknown');
+                  const askGd = needsGdChoice(item.status, item.gdPresence ?? 'unknown');
                   const cdLabel = countdownLabel(item.date);
                   return (
                     <ScaleDecorator activeScale={1.02}>
@@ -3305,7 +3335,8 @@ export default function App() {
                   const sc = statusColorOf(item.status);
                   const isInternal = item.status === '内定';
                   const isInactive = INACTIVE.includes(item.status);
-                  const ns = nextStatus(item.status);
+                  const ns = nextStatus(item.status, item.gdPresence ?? 'unknown');
+                  const askGd = needsGdChoice(item.status, item.gdPresence ?? 'unknown');
                   const cdLabel = countdownLabel(item.date);
                   return (
                     <ReAnimated.View
@@ -3367,12 +3398,12 @@ export default function App() {
                           </View>
 
                           {/* 副次操作は背景なしのテキスト。1カードに1つまで */}
-                          {!isInactive && ns ? (
+                          {!isInactive && (ns || askGd) ? (
                             <TouchableOpacity
                               style={{ alignSelf: 'flex-start', paddingVertical: 6, paddingRight: 12, marginTop: 1 }}
                               onPress={() => advanceStatus(item)}>
                               <Text style={{ fontSize: 13, color: ACCENT, fontWeight: 'bold' }}>
-                                {ns === '完了' ? `${item.status}を完了 →` : `次へ：${ns} →`}
+                                {askGd ? '次へ →' : ns === '完了' ? `${item.status}を完了 →` : `次へ：${ns} →`}
                               </Text>
                             </TouchableOpacity>
                           ) : null}
@@ -4104,6 +4135,17 @@ export default function App() {
 
                 {/* Webテスト（ES締切とは別軸の期限） */}
                 <Text style={[styles.formSection, { color: C.text3 }]}>選考情報</Text>
+                {/* 「次の選考」だと現在ステータス次第で意味が変わるので、
+                    データとして明確な「Webテスト後」にする */}
+                <View style={{ height: 1, backgroundColor: C.border2 }} />
+                <TouchableOpacity style={styles.formRow} onPress={() => setGdSheet(true)}>
+                  <Text style={[styles.formRowLabel, { color: C.text }]}>Webテスト後の選考</Text>
+                  <Text style={{ fontSize: 14, color: C.text3 }}>
+                    {gdPresence === 'yes' ? 'GD' : gdPresence === 'no' ? '1次面接' : '未確認'}
+                  </Text>
+                  <Text style={{ fontSize: 15, color: C.text3, marginLeft: 6 }}>›</Text>
+                </TouchableOpacity>
+                <View style={{ height: 1, backgroundColor: C.border2, marginBottom: 10 }} />
                 <Text style={[styles.label, { color: C.text3 }]}>Webテスト</Text>
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 6 }}>
                   {WEB_TEST_TYPES.map(t => {
@@ -4516,6 +4558,58 @@ export default function App() {
         </Modal>
 
 
+
+        {/* Webテスト後の行き先。未確認の企業で「次へ」を押したときだけ出す */}
+        <Modal visible={!!gdChoiceItem} transparent animationType="slide"
+          onRequestClose={() => setGdChoiceItem(null)}>
+          <View style={styles.pickerOverlay}>
+            <TouchableOpacity style={StyleSheet.absoluteFillObject} activeOpacity={1}
+              onPress={() => setGdChoiceItem(null)} />
+            <View style={[styles.modalContent, { backgroundColor: C.bg }]} onStartShouldSetResponder={() => true}>
+              <Text accessibilityRole="header" style={[styles.modalTitle, { color: C.text, marginBottom: 2 }]}>
+                次の選考は？
+              </Text>
+              <Text style={{ fontSize: 12, color: C.text3, marginBottom: 10 }}>
+                {gdChoiceItem?.company}・一度選ぶと次からは聞きません
+              </Text>
+              {([
+                { gd: 'yes' as Presence, label: 'GD（グループディスカッション）' },
+                { gd: 'no' as Presence, label: '1次面接' },
+              ]).map(o => (
+                <TouchableOpacity key={o.gd}
+                  style={{ flexDirection: 'row', alignItems: 'center', minHeight: 48, borderBottomWidth: 1, borderColor: C.border2 }}
+                  onPress={() => gdChoiceItem && chooseGdRoute(gdChoiceItem, o.gd)}>
+                  <Text style={{ fontSize: 15, color: C.text, flex: 1 }}>{o.label}</Text>
+                  <Text style={{ fontSize: 15, color: C.text3 }}>›</Text>
+                </TouchableOpacity>
+              ))}
+              <View style={{ height: 12 }} />
+            </View>
+          </View>
+        </Modal>
+
+        {/* Webテスト後の選考 */}
+        <Modal visible={gdSheet} transparent animationType="slide" onRequestClose={() => setGdSheet(false)}>
+          <View style={styles.pickerOverlay}>
+            <TouchableOpacity style={StyleSheet.absoluteFillObject} activeOpacity={1} onPress={() => setGdSheet(false)} />
+            <View style={[styles.modalContent, { backgroundColor: C.bg }]} onStartShouldSetResponder={() => true}>
+              <Text accessibilityRole="header" style={[styles.modalTitle, { color: C.text }]}>Webテスト後の選考</Text>
+              {([
+                { v: 'unknown' as Presence, label: '未確認' },
+                { v: 'yes' as Presence, label: 'GD（グループディスカッション）がある' },
+                { v: 'no' as Presence, label: 'GDはなく1次面接へ進む' },
+              ]).map(o => (
+                <TouchableOpacity key={o.v}
+                  style={{ flexDirection: 'row', alignItems: 'center', minHeight: 44, borderBottomWidth: 1, borderColor: C.border2 }}
+                  onPress={() => { setGdPresence(o.v); setGdSheet(false); }}>
+                  <Text style={{ fontSize: 15, color: C.text, flex: 1 }}>{o.label}</Text>
+                  {gdPresence === o.v ? <Text style={{ fontSize: 16, color: ACCENT, fontWeight: 'bold' }}>✓</Text> : null}
+                </TouchableOpacity>
+              ))}
+              <View style={{ height: 12 }} />
+            </View>
+          </View>
+        </Modal>
 
         {/* 並び順シート */}
         <Modal visible={sortSheet} transparent animationType="slide" onRequestClose={() => setSortSheet(false)}>

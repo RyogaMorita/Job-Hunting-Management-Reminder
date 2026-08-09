@@ -59,8 +59,17 @@ export const expandDateRange = (s: DateSpan): string[] => {
 
 // ─── ステータス遷移 ────────────────────────────────────────────
 
-export const PROGRESS_FLOW = ['検討中', 'ES提出済', 'Webテスト', '1次面接', '2次面接', '最終面接', '内定'];
+export const PROGRESS_FLOW = ['検討中', 'ES提出済', 'Webテスト', 'GD', '1次面接', '2次面接', '最終面接', '内定'];
 export const INTERN_FLOW = ['インターンES締切', 'インターン面接', 'インターン確定'];
+
+/// 「未確認」と「無い」は別物なので真偽値にしない。
+/// 未入力なだけの企業を、無いものとして飛ばしてしまうのを防ぐ。
+export type Presence = 'unknown' | 'yes' | 'no';
+
+/// Webテストの後にGDがあるか分からない状態か。
+/// このときだけ「次へ」で行き先を選ばせる。
+export const needsGdChoice = (current: string, gd: Presence = 'unknown'): boolean =>
+  current === 'Webテスト' && gd === 'unknown';
 
 /// 次の選考段階。これ以上進めないものは null。
 ///
@@ -68,9 +77,16 @@ export const INTERN_FLOW = ['インターンES締切', 'インターン面接', 
 /// 以前はテスト情報を登録した企業だけ挟んでいたが、「未登録」と「テストが無い」は
 /// 別物で、入力していないだけの企業まで飛ばしてしまう。
 /// テストが無い企業は手動で 1次面接 に進めてもらう。
-export const nextStatus = (current: string): string | null => {
+export const nextStatus = (current: string, gd: Presence = 'unknown'): string | null => {
   // ES締切は「提出前」の状態なので、進めると提出済になる
   if (current === 'ES締切') return 'ES提出済';
+  // GDの有無は企業ごとに違う。分かっている企業は1タップで進み、
+  // 分からない企業だけ needsGdChoice 側で選ばせる。
+  if (current === 'Webテスト') {
+    if (gd === 'yes') return 'GD';
+    if (gd === 'no') return '1次面接';
+    return null;
+  }
   const idx = PROGRESS_FLOW.indexOf(current);
   if (idx !== -1 && idx < PROGRESS_FLOW.length - 1) return PROGRESS_FLOW[idx + 1];
   const iIdx = INTERN_FLOW.indexOf(current);
