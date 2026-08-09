@@ -1398,6 +1398,12 @@ export default function App() {
   const [analyticsVisible, setAnalyticsVisible] = useState(false);
   // GDの有無が未確認の企業で、進める前に行き先を選ばせる
   const [gdChoiceItem, setGdChoiceItem] = useState<Schedule | null>(null);
+  // 進めた直後に次の日程を聞く。
+  // これまでは進めても date が前の段階のままで、カードに古い日付が残っていた。
+  const [nextDateItem, setNextDateItem] = useState<Schedule | null>(null);
+  const [nextDate, setNextDate] = useState('');
+  const [nextHour, setNextHour] = useState('');
+  const [nextMinute, setNextMinute] = useState('');
   const [gdPresence, setGdPresence] = useState<Presence>('unknown');
   const [gdSheet, setGdSheet] = useState(false);
   // 保存できる＝変更がある、を伝えるための差分判定。
@@ -2534,6 +2540,16 @@ export default function App() {
     if (ns) applyStatus({ ...item, gdPresence: gd }, ns, true);
   };
 
+  const saveNextDate = async () => {
+    if (!nextDateItem || !nextDate) { setNextDateItem(null); return; }
+    await saveSchedules(schedulesRef.current.map(s => s.id !== nextDateItem.id ? s : {
+      ...s, date: nextDate, hour: nextHour, minute: nextMinute,
+      // 前の段階の終了日が残っていると期間がおかしくなる
+      endDate: undefined,
+    }));
+    setNextDateItem(null);
+  };
+
   const togglePinned = async (item: Schedule) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     await saveSchedules(schedules.map(s => s.id !== item.id ? s : { ...s, pinned: !s.pinned }));
@@ -2593,6 +2609,15 @@ export default function App() {
       unlock();
     }
     setAdvanceAnimMap(prev => ({ ...prev, [item.id]: (prev[item.id] ?? 0) + 1 }));
+    // 出向く段階へ進んだなら、その日程を続けて聞く。
+    // 面接に進んだのに日付が前の段階のままなのが一番混乱するため。
+    if (entryKind(ns) === 'event') {
+      const moved = updated.find(x => x.id === item.id);
+      if (moved) {
+        setNextDate(''); setNextHour(''); setNextMinute('');
+        setNextDateItem(moved);
+      }
+    }
     if (undoable && before) {
       showToast(`${item.company} を ${ns} にしました`, () => {
         const cur = schedulesRef.current.find(s => s.id === before.id);
@@ -4389,26 +4414,78 @@ export default function App() {
                 {activeMemoTab === 2 && <TextInput style={[styles.input, styles.textArea, { backgroundColor: C.inputBg, color: C.text }]} multiline placeholder="ガクチカ・志望動機・強み弱みなど..." value={memoPR} onChangeText={setMemoPR} onFocus={scrollToMemo} />}
                 {activeMemoTab === 3 && <TextInput style={[styles.input, styles.textArea, { backgroundColor: C.inputBg, color: C.text }]} multiline placeholder="面接で聞くこと・逆質問リストなど..." value={memoQuestions} onChangeText={setMemoQuestions} onFocus={scrollToMemo} />}
 
-                {/* ⑬ ステータス変更履歴 */}
-                {selectedItem?.statusHistory && selectedItem.statusHistory.length > 0 && (
-                  <>
-                    <Text style={[styles.label, { color: C.text3, marginTop: 8 }]}>ステータス履歴</Text>
-                    <View style={{ backgroundColor: C.bg2, borderRadius: 10, padding: 10, gap: 4 }}>
-                      {[...selectedItem.statusHistory].reverse().slice(0, 5).map((h, i) => {
-                        const sc2 = statusColors[h.status] ?? '#95A5A6';
-                        const d = new Date(h.changedAt);
-                        const dateLabel = `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`;
-                        return (
-                          <View key={i} style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                            <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: sc2 }} />
-                            <Text style={{ flex: 1, fontSize: 12, color: C.text2 }}>{h.status}</Text>
-                            <Text style={{ fontSize: 11, color: C.text3 }}>{dateLabel}</Text>
-                          </View>
-                        );
-                      })}
-                    </View>
-                  </>
-                )}
+                {/* 選考タイムライン。
+                    履歴を並べるだけでなく、これから通る段階も薄く出して
+                    「今どこにいて、あと何が残っているか」を1枚で見せる。
+                    普通のカレンダーには作れない部分なので、ここは独自に伸ばす。 */}
+                {isDetailVisible && (() => {
+                  const hist = selectedItem?.statusHistory ?? [];
+                  const doneAt: Record<string, string> = {};
+                  for (const h of hist) {
+                    const d = new Date(h.changedAt);
+                    doneAt[h.status] = `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`;
+                  }
+                  // インターンは別トラックなので、いまいる側の流れだけ出す
+                  const flow = INTERN_STATUSES.includes(selStatus)
+                    ? ['インターンES締切', 'インターン面接', 'インターン確定']
+                    : (() => {
+                      const base = ['ES締切', 'ES提出済', 'Webテスト', 'GD', '1次面接', '2次面接', '最終面接', '内定'];
+                      // GDが無いと分かっている企業では出さない
+                      return gdPresence === 'no' ? base.filter(x => x !== 'GD') : base;
+                    })();
+                  const curIdx = flow.indexOf(selStatus);
+                  return (
+                    <>
+                      <Text style={[styles.formSection, { color: C.text3 }]}>選考の流れ</Text>
+                      <View style={{ paddingLeft: 2 }}>
+                        {flow.map((st, i) => {
+                          const passed = curIdx >= 0 && i < curIdx;
+                          const current = st === selStatus;
+                          const sc2 = statusColors[st] ?? NEUTRAL_GRAY;
+                          const done = doneAt[st];
+                          return (
+                            <View key={st} style={{ flexDirection: 'row' }}>
+                              {/* 縦線と点 */}
+                              <View style={{ width: 20, alignItems: 'center' }}>
+                                <View style={{
+                                  width: current ? 12 : 9, height: current ? 12 : 9,
+                                  borderRadius: 6, marginTop: 5,
+                                  backgroundColor: passed || current ? sc2 : 'transparent',
+                                  borderWidth: passed || current ? 0 : 1.5,
+                                  borderColor: C.border,
+                                }} />
+                                {i < flow.length - 1 ? (
+                                  <View style={{ width: 1.5, flex: 1, minHeight: 18, backgroundColor: passed ? sc2 : C.border2 }} />
+                                ) : null}
+                              </View>
+                              <View style={{ flex: 1, paddingBottom: 12, paddingLeft: 6 }}>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                                  <Text style={{
+                                    fontSize: 14,
+                                    fontWeight: current ? '700' : '400',
+                                    color: current ? C.text : passed ? C.text2 : C.text3,
+                                  }}>{st}</Text>
+                                  {current ? (
+                                    <Text style={{ fontSize: 10, color: ACCENT, fontWeight: 'bold' }}>いまここ</Text>
+                                  ) : null}
+                                  {done ? <Text style={{ fontSize: 11, color: C.text3 }}>{done}</Text> : null}
+                                </View>
+                                {/* いまいる段階だけ、日程と会場を添える */}
+                                {current && selDate ? (
+                                  <Text style={{ fontSize: 12, color: C.text2, marginTop: 2 }}>
+                                    {selDate.replace(/-/g, '/')}
+                                    {timeStr(selHour, selMinute) ? ` ${timeStr(selHour, selMinute)}` : ''}
+                                    {selVenueType === 'onsite' ? '・対面' : selVenueType === 'online' ? '・オンライン' : ''}
+                                  </Text>
+                                ) : null}
+                              </View>
+                            </View>
+                          );
+                        })}
+                      </View>
+                    </>
+                  );
+                })()}
 
                 {/* 削除は保存と同じ領域で競わせず最下部に置く */}
                 {isDetailVisible && (
@@ -4757,6 +4834,36 @@ export default function App() {
                 ))}
                 <View style={{ height: 16 }} />
               </ScrollView>
+            </View>
+          </View>
+        </Modal>
+
+        {/* 進めた直後に次の日程を聞く。カレンダー・今日・持ち駒・ウィジェットに一度に反映される */}
+        <Modal visible={!!nextDateItem} transparent animationType="slide"
+          onRequestClose={() => setNextDateItem(null)}>
+          <View style={styles.pickerOverlay}>
+            <TouchableOpacity style={StyleSheet.absoluteFillObject} activeOpacity={1}
+              onPress={() => setNextDateItem(null)} />
+            <View style={[styles.modalContent, { backgroundColor: C.bg }]} onStartShouldSetResponder={() => true}>
+              <Text accessibilityRole="header" style={[styles.modalTitle, { color: C.text, marginBottom: 2 }]}>
+                {nextDateItem?.status}の日程は決まっていますか？
+              </Text>
+              <Text style={{ fontSize: 12, color: C.text3, marginBottom: 10 }}>{nextDateItem?.company}</Text>
+              <WheelDateField value={nextDate} onChange={setNextDate} C={C} placeholder="日付を選ぶ" />
+              <WheelTimeField hour={nextHour} minute={nextMinute}
+                onChange={(h, m) => { setNextHour(h); setNextMinute(m); }} C={C} />
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 12 }}>
+                <TouchableOpacity style={{ minHeight: 44, justifyContent: 'center', paddingRight: 16 }}
+                  onPress={() => setNextDateItem(null)}>
+                  <Text style={{ fontSize: 15, color: C.text3 }}>まだ決まっていない</Text>
+                </TouchableOpacity>
+                <View style={{ flex: 1 }} />
+                <TouchableOpacity style={{ minHeight: 44, justifyContent: 'center' }}
+                  disabled={!nextDate} onPress={saveNextDate}>
+                  <Text style={{ fontSize: 15, fontWeight: 'bold', color: nextDate ? ACCENT : C.text3 }}>登録</Text>
+                </TouchableOpacity>
+              </View>
+              <View style={{ height: 8 }} />
             </View>
           </View>
         </Modal>
