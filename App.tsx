@@ -1216,13 +1216,15 @@ function CalendarHeader({
 
   return (
     <View style={{ backgroundColor: C.appBg, paddingTop: 10, paddingBottom: 8 }}>
-      <View style={{ flexDirection: 'row', justifyContent: 'center', paddingHorizontal: 20 }}>
-        <View style={[styles.segmented, { marginBottom: 0, borderColor: C.border, backgroundColor: C.card }]}>
+      {/* segment は flex:1 なので、親に幅が無いと 0 に潰れる。
+          容器側を伸ばして幅を確定させる。 */}
+      <View style={{ flexDirection: 'row', paddingHorizontal: 20 }}>
+        <View style={[styles.segmented, { flex: 1, marginBottom: 0, borderColor: C.border, backgroundColor: C.card }]}>
           {(['today', 'month', 'week'] as CalendarMode[]).map((m, i) => (
             <TouchableOpacity key={m}
               accessibilityRole="button"
               accessibilityState={{ selected: calendarMode === m }}
-              style={[styles.segment, { minWidth: 72, minHeight: 32 },
+              style={[styles.segment, { minHeight: 34 },
                 i > 0 && { borderLeftWidth: 1, borderLeftColor: C.border },
                 calendarMode === m && { backgroundColor: ACCENT }]}
               onPress={() => onSetMode(m)}>
