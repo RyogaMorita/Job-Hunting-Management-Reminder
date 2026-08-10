@@ -40,7 +40,7 @@ import { LISTED_COMPANIES, CompanyEntry } from './companies_v2';
 // 日付・ステータス遷移のロジックは lib/ に切り出してテストしている（__tests__/schedule.test.ts）
 import {
   addDaysYmd, collectTodos, daysBetween, formatYmd, parseYmd, coversDate, dateRangeStr, expandDateRange,
-  findConflicts, nextStatus, needsGdChoice, entryKind, PREP_TEMPLATES,
+  findConflicts, nextStatus, needsGdChoice, entryKind, PREP_TEMPLATES, PROGRESS_FLOW,
   stageDistribution, weeklyActivity, weeklyTrend,
 } from './lib/schedule';
 import type { TodoItem, VenueType, Presence } from './lib/schedule';
@@ -86,6 +86,8 @@ const STATUS_OPTIONS_KEY = '@status_options_v1';
 const STATUS_OPTIONS_KEY_V2 = '@status_options_v2';
 const SWIPE_HINT_KEY = '@swipe_hint_shown_v1';
 const LIST_FIELDS_KEY = '@list_fields_v1';
+// ⚠️ App Store のスクリーンショット撮影用。提出前に広告と一緒に削除すること。
+const DEMO_BACKUP_KEY = '@demo_backup_v1';
 
 // 一覧カードに何を出すか。
 // 「絞り込み＝どの企業を出すか」「表示＝企業の何を出すか」「並び替え＝どの順で出すか」
@@ -1429,6 +1431,83 @@ export default function App() {
     setListFields(f);
     await AsyncStorage.setItem(LIST_FIELDS_KEY, JSON.stringify(f));
   };
+  // ⚠️ App Store のスクリーンショット撮影用。提出前に広告と一緒に削除すること。
+  //
+  // 日付は固定値ではなく「今日からの相対」で作る。
+  // 2026年10月で固定すると、撮影日によっては今日の締切も期限切れも
+  // 空になり、Todayと分析のスクショが撮れない。
+  const loadDemoData = async () => {
+    const d = (n: number) => addDaysYmd(todayYmd, n);
+    const iso = (n: number) => { const t = parseYmd(addDaysYmd(todayYmd, n)); return t.toISOString(); };
+    const hist = (...offsets: number[]) =>
+      offsets.map((o, i) => ({ status: PROGRESS_FLOW[Math.min(i, PROGRESS_FLOW.length - 1)], changedAt: iso(o) }));
+    const base = {
+      note: '', url: '', userId: '', password: '', rank: 'B', genreId: 'other',
+      checklist: {}, customChecklist: [] as Schedule['customChecklist'],
+      hour: '', minute: '', endDate: undefined as string | undefined,
+    };
+    const demo: Schedule[] = [
+      { ...base, id: 'demo1', company: '明和インフォメーション', status: '1次面接', rank: 'S', genreId: 'it',
+        date: d(0), hour: '14', minute: '00', venueType: 'online',
+        meetingUrl: 'https://meet.example.com/meiwa', url: 'https://mypage.example.com/meiwa',
+        userId: 'morita2027', password: 'pw',
+        note: '金融DXの実績が強い。逆質問は配属とチーム構成を聞く。',
+        customChecklist: [
+          { id: 'c1', label: '提出したESを読み返す', checked: true },
+          { id: 'c2', label: '逆質問を3つ用意する', checked: false, due: d(0) },
+        ],
+        statusHistory: hist(-42, -35, -28, -14, -3), gdPresence: 'no' },
+      { ...base, id: 'demo2', company: '大成生命', status: 'インターン確定', rank: 'A', genreId: 'finance',
+        date: d(0), endDate: d(4), venueType: 'onsite', venue: '東京都千代田区丸の内1-1',
+        internshipStart: d(0), internshipEnd: d(4),
+        note: '5日間の実務型。持ち物は筆記用具とPC。',
+        statusHistory: hist(-38, -30, -20) },
+      { ...base, id: 'demo3', company: '中央総研', status: 'ES締切', rank: 'A', genreId: 'consult',
+        date: d(0), url: 'https://mypage.example.com/chuo', userId: 'r.morita@example.com',
+        note: 'ガクチカは長期インターンの自動化。文字数400。',
+        statusHistory: hist(-21) },
+      { ...base, id: 'demo4', company: '双葉テックイノベーション', status: 'Webテスト', rank: 'B', genreId: 'it',
+        date: d(2), webTestType: 'SPI（テストセンター）', webTestDeadline: d(2),
+        webTestVenue: '新宿テストセンター',
+        statusHistory: hist(-25, -18, -6), gdPresence: 'yes' },
+      { ...base, id: 'demo5', company: 'みらい銀行', status: '最終面接', rank: 'S', genreId: 'finance',
+        date: d(3), hour: '13', minute: '00', venueType: 'onsite', venue: '東京都中央区日本橋2-3',
+        note: '入社後にやりたいことを言語化し直す。',
+        statusHistory: hist(-50, -44, -33, -22, -10, -2) },
+      { ...base, id: 'demo6', company: 'さくら情報テクノ', status: 'GD', rank: 'A', genreId: 'it',
+        date: d(6), hour: '10', minute: '30', venueType: 'online',
+        statusHistory: hist(-30, -24, -12, -5), gdPresence: 'yes' },
+      { ...base, id: 'demo7', company: '第一ライフシステム', status: 'ES提出済', rank: 'B', genreId: 'finance',
+        date: d(8), statusHistory: hist(-16, -4) },
+      { ...base, id: 'demo8', company: '日本ビジネスソリューション', status: '2次面接', rank: 'S', genreId: 'it',
+        date: d(10), hour: '15', minute: '00', venueType: 'online',
+        url: 'https://mypage.example.com/nbs', userId: 'morita_r',
+        statusHistory: hist(-40, -32, -19, -8, -1) },
+      { ...base, id: 'demo9', company: 'あおば銀行', status: '検討中', rank: 'C', genreId: 'finance',
+        date: '', statusHistory: hist(-9) },
+      { ...base, id: 'demo10', company: '大和情報システム', status: 'ES締切', rank: 'B', genreId: 'it',
+        date: d(-5), note: '締切を過ぎている。', statusHistory: hist(-26) },
+      { ...base, id: 'demo11', company: '北都メディカル', status: 'ES締切', rank: 'C', genreId: 'medical',
+        date: d(-12), statusHistory: hist(-31) },
+      { ...base, id: 'demo12', company: '山陽エナジー', status: '不合格', rank: 'C', genreId: 'infra',
+        date: d(-20), statusHistory: hist(-45, -36, -20) },
+    ];
+    const cur = await AsyncStorage.getItem(STORAGE_KEY);
+    if (cur && !(await AsyncStorage.getItem(DEMO_BACKUP_KEY))) {
+      await AsyncStorage.setItem(DEMO_BACKUP_KEY, cur);
+    }
+    await saveSchedules(demo);
+    Alert.alert('撮影用データを読み込みました', '元のデータは退避してあります。「元のデータに戻す」で復元できます。');
+  };
+
+  const restoreFromDemo = async () => {
+    const backup = await AsyncStorage.getItem(DEMO_BACKUP_KEY);
+    if (!backup) { Alert.alert('退避データがありません'); return; }
+    await saveSchedules(JSON.parse(backup));
+    await AsyncStorage.removeItem(DEMO_BACKUP_KEY);
+    Alert.alert('元のデータに戻しました');
+  };
+
   // スワイプ削除のヒントは一度だけ。先頭カードにのみ出す
   const [swipeHintDone, setSwipeHintDone] = useState(true);
   const markSwipeHintShown = () => {
@@ -2374,7 +2453,18 @@ export default function App() {
     setMemoQuestions(match.memoQuestions ?? '');
   };
 
-  const openDetail = (item: Schedule) => {
+  // カードのタップは「読む」ための画面へ。編集はそこから1タップで入る。
+  // 以前はいきなり全画面の編集フォームが開き、日程を確認するだけでも
+  // 設定画面のような見た目に飛ばされていた。
+  const [viewItem, setViewItem] = useState<Schedule | null>(null);
+  const openDetail = (item: Schedule) => setViewItem(item);
+  const openEditFromView = (item: Schedule) => {
+    setViewItem(null);
+    // 閉じ切る前に次を出すと表示されないことがある
+    setTimeout(() => openEdit(item), 300);
+  };
+
+  const openEdit = (item: Schedule) => {
     setSelectedItem(item); setCompanyName(item.company);
     setNote(item.note ?? ''); setSelStatus(item.status); setSelDate(item.date);
     setSelEndDate(item.endDate ?? '');
@@ -3967,6 +4057,20 @@ export default function App() {
             </TouchableOpacity>
               </>
             )}
+            {settingsPage === 'data' && (
+              <>
+                {/* ⚠️ 撮影用。提出前に広告と一緒に削除すること */}
+                <View style={{ height: 1, backgroundColor: C.border2, marginTop: 24 }} />
+                <Text style={{ fontSize: 11, color: C.text3, marginTop: 12 }}>撮影用（提出前に削除）</Text>
+                <TouchableOpacity style={styles.formRow} onPress={loadDemoData}>
+                  <Text style={[styles.formRowLabel, { color: ACCENT }]}>撮影用データを読み込む</Text>
+                </TouchableOpacity>
+                <View style={{ height: 1, backgroundColor: C.border2 }} />
+                <TouchableOpacity style={styles.formRow} onPress={restoreFromDemo}>
+                  <Text style={[styles.formRowLabel, { color: ACCENT }]}>元のデータに戻す</Text>
+                </TouchableOpacity>
+              </>
+            )}
             {settingsPage === 'help' && (
               <>
             {([
@@ -4685,6 +4789,196 @@ export default function App() {
 
           {/* フルスクリーンModalの兄弟に置くと下に隠れて開けないので、
               選択シートは編集モーダルの内側に置く */}
+        {/* 企業詳細（閲覧）。編集は右上から入る */}
+        <Modal visible={!!viewItem} animationType="slide" presentationStyle="pageSheet"
+          onRequestClose={() => setViewItem(null)}>
+          <SafeAreaView style={{ flex: 1, backgroundColor: C.appBg }}>
+          {(() => {
+            // 表示中に「次へ」などで変わることがあるので、常に最新を引く
+            const v = viewItem ? schedules.find(x => x.id === viewItem.id) ?? viewItem : null;
+            if (!v) return null;
+            const vNs = nextStatus(v.status, v.gdPresence ?? 'unknown');
+            const vAsk = needsGdChoice(v.status, v.gdPresence ?? 'unknown');
+            const nx = nextEventByCompany[v.company.trim()];
+            const flow = INTERN_STATUSES.includes(v.status)
+              ? ['インターンES締切', 'インターン面接', 'インターン確定']
+              : (() => {
+                const b = ['ES締切', 'ES提出済', 'Webテスト', 'GD', '1次面接', '2次面接', '最終面接', '内定'];
+                return v.gdPresence === 'no' ? b.filter(x => x !== 'GD') : b;
+              })();
+            const curIdx = flow.indexOf(v.status);
+            const doneAt: Record<string, string> = {};
+            for (const h of v.statusHistory ?? []) {
+              const dd = new Date(h.changedAt);
+              doneAt[h.status] = `${String(dd.getMonth() + 1).padStart(2, '0')}/${String(dd.getDate()).padStart(2, '0')}`;
+            }
+            const cl = v.customChecklist ?? [];
+            return (
+              <>
+                <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: 1, borderColor: C.border, backgroundColor: C.card }}>
+                  <TouchableOpacity onPress={() => setViewItem(null)} style={{ minHeight: 44, justifyContent: 'center' }}>
+                    <Text style={{ fontSize: 15, color: ACCENT }}>閉じる</Text>
+                  </TouchableOpacity>
+                  <View style={{ flex: 1 }} />
+                  <TouchableOpacity onPress={() => openEditFromView(v)} style={{ minHeight: 44, justifyContent: 'center' }}>
+                    <Text style={{ fontSize: 15, color: ACCENT, fontWeight: 'bold' }}>編集</Text>
+                  </TouchableOpacity>
+                </View>
+                <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
+                  {/* 見出し */}
+                  <View style={{ backgroundColor: C.card, borderRadius: 10, borderWidth: 1, borderColor: C.border, padding: 16 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                      <Text accessibilityRole="header" style={{ fontSize: 20, fontWeight: '700', color: C.text, flex: 1 }}>
+                        {v.company}
+                      </Text>
+                      <View style={[styles.rankBadge, { backgroundColor: C.badgeBg }]}>
+                        <Text style={[styles.rankBadgeText, { color: C.badgeText }]}>{v.rank}</Text>
+                      </View>
+                    </View>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 }}>
+                      <View style={[styles.statusDot, { backgroundColor: statusColorOf(v.status) }]} />
+                      <Text style={{ fontSize: 14, color: C.text2 }}>{v.status}</Text>
+                      <Text style={{ fontSize: 12, color: C.text3 }}>{genreOf(v.genreId)?.name ?? ''}</Text>
+                    </View>
+                    {v.date ? (
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8 }}>
+                        <Text style={{ fontSize: 15, color: C.text, fontFamily: 'IBMPlexSans_400Regular' }}>
+                          {dateRangeStr(v).replace(/-/g, '/')}
+                          {entryKind(v.status) === 'event' && timeStr(v.hour, v.minute) ? ` ${timeStr(v.hour, v.minute)}` : ''}
+                        </Text>
+                        {countdownLabel(v.date) ? (
+                          <Text style={{ fontSize: 12, fontWeight: 'bold', color: countdownLabel(v.date) === '今日' ? DANGER : WARNING }}>
+                            {countdownLabel(v.date)}
+                          </Text>
+                        ) : null}
+                        {v.venueType ? (
+                          <Text style={{ fontSize: 12, color: C.text3 }}>{v.venueType === 'onsite' ? '対面' : 'オンライン'}</Text>
+                        ) : null}
+                      </View>
+                    ) : null}
+                    {/* その場でできる操作 */}
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 18, marginTop: 10 }}>
+                      {v.meetingUrl ? (
+                        <TouchableOpacity style={{ minHeight: 36, justifyContent: 'center' }}
+                          onPress={() => Linking.openURL(v.meetingUrl!.startsWith('http') ? v.meetingUrl! : 'https://' + v.meetingUrl)}>
+                          <Text style={{ fontSize: 13, color: ACCENT, fontWeight: 'bold' }}>面接に参加 ↗</Text>
+                        </TouchableOpacity>
+                      ) : null}
+                      {v.venue ? (
+                        <TouchableOpacity style={{ minHeight: 36, justifyContent: 'center' }}
+                          onPress={() => Linking.openURL(`http://maps.apple.com/?q=${encodeURIComponent(v.venue!)}`)}>
+                          <Text style={{ fontSize: 13, color: ACCENT }}>地図を開く ↗</Text>
+                        </TouchableOpacity>
+                      ) : null}
+                      {v.url ? (
+                        <TouchableOpacity style={{ minHeight: 36, justifyContent: 'center' }}
+                          onPress={() => Linking.openURL(v.url.startsWith('http') ? v.url : 'https://' + v.url)}>
+                          <Text style={{ fontSize: 13, color: ACCENT }}>マイページ ↗</Text>
+                        </TouchableOpacity>
+                      ) : null}
+                      {v.userId ? (
+                        <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', gap: 4, minHeight: 36 }}
+                          onPress={() => { Clipboard.setString(v.userId); showToast('IDをコピーしました', () => setToast(null)); }}>
+                          <Text style={{ fontSize: 12, color: C.text3 }}>ID</Text>
+                          <Text style={{ fontSize: 13, color: C.text2, maxWidth: 140 }} numberOfLines={1}>{v.userId}</Text>
+                          <Text style={{ fontSize: 13, color: ACCENT }}>⧉</Text>
+                        </TouchableOpacity>
+                      ) : null}
+                      {v.password ? (
+                        <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', gap: 4, minHeight: 36 }}
+                          onPress={() => { Clipboard.setString(v.password); showToast('パスワードをコピーしました', () => setToast(null)); }}>
+                          <Text style={{ fontSize: 12, color: C.text3 }}>PW</Text>
+                          <Text style={{ fontSize: 13, color: C.text2 }}>••••••</Text>
+                          <Text style={{ fontSize: 13, color: ACCENT }}>⧉</Text>
+                        </TouchableOpacity>
+                      ) : null}
+                    </View>
+                    {/* 次へ */}
+                    {!INACTIVE.includes(v.status) && (vNs || vAsk) ? (
+                      <TouchableOpacity style={{ minHeight: 44, justifyContent: 'center', marginTop: 6 }}
+                        onPress={() => advanceStatus(v)}>
+                        <Text style={{ fontSize: 14, color: ACCENT, fontWeight: 'bold' }}>
+                          {vAsk ? '次へ →' : vNs === '完了' ? `${v.status}を完了 →` : `次へ：${vNs} →`}
+                        </Text>
+                      </TouchableOpacity>
+                    ) : null}
+                  </View>
+
+                  {nx && nx.id !== v.id ? (
+                    <>
+                      <Text style={[styles.formSection, { color: C.text3 }]}>次の予定</Text>
+                      <View style={{ backgroundColor: C.card, borderRadius: 10, borderWidth: 1, borderColor: C.border, padding: 14 }}>
+                        <Text style={{ fontSize: 14, color: C.text }}>
+                          {nx.date.replace(/-/g, '/')}{timeStr(nx.hour, nx.minute) ? ` ${timeStr(nx.hour, nx.minute)}` : ''}　{nx.status}
+                        </Text>
+                      </View>
+                    </>
+                  ) : null}
+
+                  {/* 選考の流れ */}
+                  <Text style={[styles.formSection, { color: C.text3 }]}>選考の流れ</Text>
+                  <View style={{ backgroundColor: C.card, borderRadius: 10, borderWidth: 1, borderColor: C.border, padding: 14 }}>
+                    {flow.map((st, i) => {
+                      const passed = curIdx >= 0 && i < curIdx;
+                      const cur2 = st === v.status;
+                      const sc2 = statusColors[st] ?? NEUTRAL_GRAY;
+                      return (
+                        <View key={st} style={{ flexDirection: 'row' }}>
+                          <View style={{ width: 20, alignItems: 'center' }}>
+                            <View style={{
+                              width: cur2 ? 12 : 9, height: cur2 ? 12 : 9, borderRadius: 6, marginTop: 5,
+                              backgroundColor: passed || cur2 ? sc2 : 'transparent',
+                              borderWidth: passed || cur2 ? 0 : 1.5, borderColor: C.border,
+                            }} />
+                            {i < flow.length - 1 ? (
+                              <View style={{ width: 1.5, flex: 1, minHeight: 16, backgroundColor: passed ? sc2 : C.border2 }} />
+                            ) : null}
+                          </View>
+                          <View style={{ flex: 1, paddingBottom: 10, paddingLeft: 6, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                            <Text style={{ fontSize: 14, fontWeight: cur2 ? '700' : '400', color: cur2 ? C.text : passed ? C.text2 : C.text3 }}>{st}</Text>
+                            {cur2 ? <Text style={{ fontSize: 10, color: ACCENT, fontWeight: 'bold' }}>いまここ</Text> : null}
+                            {doneAt[st] ? <Text style={{ fontSize: 11, color: C.text3 }}>{doneAt[st]}</Text> : null}
+                          </View>
+                        </View>
+                      );
+                    })}
+                  </View>
+
+                  {/* やること */}
+                  <View style={{ flexDirection: 'row', alignItems: 'flex-end' }}>
+                    <Text style={[styles.formSection, { color: C.text3, flex: 1 }]}>やること</Text>
+                    <TouchableOpacity onPress={() => { setViewItem(null); setTimeout(() => setCheckModalItem(v), 300); }}
+                      style={{ minHeight: 36, justifyContent: 'center' }}>
+                      <Text style={{ fontSize: 13, color: ACCENT, paddingBottom: 6 }}>編集 ›</Text>
+                    </TouchableOpacity>
+                  </View>
+                  <View style={{ backgroundColor: C.card, borderRadius: 10, borderWidth: 1, borderColor: C.border, paddingHorizontal: 14 }}>
+                    {cl.length === 0 ? (
+                      <Text style={{ fontSize: 13, color: C.text3, paddingVertical: 14 }}>まだありません</Text>
+                    ) : cl.map(c => (
+                      <View key={c.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 10 }}>
+                        <AnimatedCheckmark checked={c.checked} color={SUCCESS} />
+                        <Text style={{ fontSize: 14, flex: 1, color: c.checked ? C.text3 : C.text }}>{c.label}</Text>
+                        {c.due ? <Text style={{ fontSize: 11, color: C.text3 }}>{c.due.slice(5).replace('-', '/')}</Text> : null}
+                      </View>
+                    ))}
+                  </View>
+
+                  {v.note ? (
+                    <>
+                      <Text style={[styles.formSection, { color: C.text3 }]}>メモ</Text>
+                      <View style={{ backgroundColor: C.card, borderRadius: 10, borderWidth: 1, borderColor: C.border, padding: 14 }}>
+                        <Text style={{ fontSize: 14, color: C.text, lineHeight: 21 }}>{v.note}</Text>
+                      </View>
+                    </>
+                  ) : null}
+                </ScrollView>
+              </>
+            );
+          })()}
+          </SafeAreaView>
+        </Modal>
+
         {/* ジャンル選択シート */}
         <Modal visible={genreSheet} transparent animationType="slide" onRequestClose={() => setGenreSheet(false)}>
           <View style={styles.pickerOverlay}>
