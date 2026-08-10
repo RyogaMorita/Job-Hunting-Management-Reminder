@@ -40,7 +40,7 @@ import { LISTED_COMPANIES, CompanyEntry } from './companies_v2';
 // 日付・ステータス遷移のロジックは lib/ に切り出してテストしている（__tests__/schedule.test.ts）
 import {
   addDaysYmd, collectTodos, daysBetween, formatYmd, parseYmd, coversDate, dateRangeStr, expandDateRange,
-  findConflicts, nextStatus, needsGdChoice, entryKind, PREP_TEMPLATES, PROGRESS_FLOW,
+  findConflicts, nextStatus, needsGdChoice, entryKind, PREP_TEMPLATES,
   stageDistribution, weeklyActivity, weeklyTrend,
 } from './lib/schedule';
 import type { TodoItem, VenueType, Presence } from './lib/schedule';
@@ -86,8 +86,6 @@ const STATUS_OPTIONS_KEY = '@status_options_v1';
 const STATUS_OPTIONS_KEY_V2 = '@status_options_v2';
 const SWIPE_HINT_KEY = '@swipe_hint_shown_v1';
 const LIST_FIELDS_KEY = '@list_fields_v1';
-// ⚠️ App Store のスクリーンショット撮影用。提出前に広告と一緒に削除すること。
-const DEMO_BACKUP_KEY = '@demo_backup_v1';
 
 // 一覧カードに何を出すか。
 // 「絞り込み＝どの企業を出すか」「表示＝企業の何を出すか」「並び替え＝どの順で出すか」
@@ -1326,9 +1324,7 @@ export default function App() {
   const [rewardedTip, setRewardedTip] = useState<{ title: string; content: string } | null>(null);
   const [offerModalVisible, setOfferModalVisible] = useState(false);
   const [firstLaunchModal, setFirstLaunchModal] = useState(false);
-  // ⚠️ App Store のスクリーンショット撮影用に一時的に true にしている。
-  // 提出用のビルドを作る前に必ず false へ戻すこと。
-  const [adFree, setAdFree] = useState(true);
+  const [adFree, setAdFree] = useState(false);
   const [actionCount, setActionCount] = useState(0);
   const [bannerKey, setBannerKey] = useState(0);
   const [pendingInternalCompany, setPendingInternalCompany] = useState<string>(''); // 内定企業名
@@ -1433,83 +1429,6 @@ export default function App() {
     setListFields(f);
     await AsyncStorage.setItem(LIST_FIELDS_KEY, JSON.stringify(f));
   };
-  // ⚠️ App Store のスクリーンショット撮影用。提出前に広告と一緒に削除すること。
-  //
-  // 日付は固定値ではなく「今日からの相対」で作る。
-  // 2026年10月で固定すると、撮影日によっては今日の締切も期限切れも
-  // 空になり、Todayと分析のスクショが撮れない。
-  const loadDemoData = async () => {
-    const d = (n: number) => addDaysYmd(todayYmd, n);
-    const iso = (n: number) => { const t = parseYmd(addDaysYmd(todayYmd, n)); return t.toISOString(); };
-    const hist = (...offsets: number[]) =>
-      offsets.map((o, i) => ({ status: PROGRESS_FLOW[Math.min(i, PROGRESS_FLOW.length - 1)], changedAt: iso(o) }));
-    const base = {
-      note: '', url: '', userId: '', password: '', rank: 'B', genreId: 'other',
-      checklist: {}, customChecklist: [] as Schedule['customChecklist'],
-      hour: '', minute: '', endDate: undefined as string | undefined,
-    };
-    const demo: Schedule[] = [
-      { ...base, id: 'demo1', company: '株式会社A', status: '1次面接', rank: 'S', genreId: 'it',
-        date: d(0), hour: '14', minute: '00', venueType: 'online',
-        meetingUrl: 'https://meet.example.com/a', url: 'https://mypage.example.com/a',
-        userId: 'morita2027', password: 'pw',
-        note: '金融DXの実績が強い。逆質問は配属とチーム構成を聞く。',
-        customChecklist: [
-          { id: 'c1', label: '提出したESを読み返す', checked: true },
-          { id: 'c2', label: '逆質問を3つ用意する', checked: false, due: d(0) },
-        ],
-        statusHistory: hist(-42, -35, -28, -14, -3), gdPresence: 'no' },
-      { ...base, id: 'demo2', company: '株式会社Bホールディングス', status: 'インターン確定', rank: 'A', genreId: 'finance',
-        date: d(0), endDate: d(4), venueType: 'onsite', venue: '東京都千代田区丸の内1-1',
-        internshipStart: d(0), internshipEnd: d(4),
-        note: '5日間の実務型。持ち物は筆記用具とPC。',
-        statusHistory: hist(-38, -30, -20) },
-      { ...base, id: 'demo3', company: '株式会社C', status: 'ES締切', rank: 'A', genreId: 'consult',
-        date: d(0), url: 'https://mypage.example.com/c', userId: 'r.morita@example.com',
-        note: 'ガクチカは長期インターンの自動化。文字数400。',
-        statusHistory: hist(-21) },
-      { ...base, id: 'demo4', company: '株式会社Dシステムズ', status: 'Webテスト', rank: 'B', genreId: 'it',
-        date: d(2), webTestType: 'SPI（テストセンター）', webTestDeadline: d(2),
-        webTestVenue: '新宿テストセンター',
-        statusHistory: hist(-25, -18, -6), gdPresence: 'yes' },
-      { ...base, id: 'demo5', company: '株式会社E', status: '最終面接', rank: 'S', genreId: 'finance',
-        date: d(3), hour: '13', minute: '00', venueType: 'onsite', venue: '東京都中央区日本橋2-3',
-        note: '入社後にやりたいことを言語化し直す。',
-        statusHistory: hist(-50, -44, -33, -22, -10, -2) },
-      { ...base, id: 'demo6', company: '株式会社F', status: 'GD', rank: 'A', genreId: 'it',
-        date: d(6), hour: '10', minute: '30', venueType: 'online',
-        statusHistory: hist(-30, -24, -12, -5), gdPresence: 'yes' },
-      { ...base, id: 'demo7', company: '株式会社G', status: 'ES提出済', rank: 'B', genreId: 'finance',
-        date: d(8), statusHistory: hist(-16, -4) },
-      { ...base, id: 'demo8', company: '株式会社Hインフォメーションテクノロジー', status: '2次面接', rank: 'S', genreId: 'it',
-        date: d(10), hour: '15', minute: '00', venueType: 'online',
-        url: 'https://mypage.example.com/h', userId: 'morita_r',
-        statusHistory: hist(-40, -32, -19, -8, -1) },
-      { ...base, id: 'demo9', company: '株式会社I', status: '検討中', rank: 'C', genreId: 'finance',
-        date: '', statusHistory: hist(-9) },
-      { ...base, id: 'demo10', company: '株式会社J', status: 'ES締切', rank: 'B', genreId: 'it',
-        date: d(-5), note: '締切を過ぎている。', statusHistory: hist(-26) },
-      { ...base, id: 'demo11', company: '株式会社K', status: 'ES締切', rank: 'C', genreId: 'medical',
-        date: d(-12), statusHistory: hist(-31) },
-      { ...base, id: 'demo12', company: '株式会社L', status: '不合格', rank: 'C', genreId: 'infra',
-        date: d(-20), statusHistory: hist(-45, -36, -20) },
-    ];
-    const cur = await AsyncStorage.getItem(STORAGE_KEY);
-    if (cur && !(await AsyncStorage.getItem(DEMO_BACKUP_KEY))) {
-      await AsyncStorage.setItem(DEMO_BACKUP_KEY, cur);
-    }
-    await saveSchedules(demo);
-    Alert.alert('撮影用データを読み込みました', '元のデータは退避してあります。「元のデータに戻す」で復元できます。');
-  };
-
-  const restoreFromDemo = async () => {
-    const backup = await AsyncStorage.getItem(DEMO_BACKUP_KEY);
-    if (!backup) { Alert.alert('退避データがありません'); return; }
-    await saveSchedules(JSON.parse(backup));
-    await AsyncStorage.removeItem(DEMO_BACKUP_KEY);
-    Alert.alert('元のデータに戻しました');
-  };
-
   // スワイプ削除のヒントは一度だけ。先頭カードにのみ出す
   const [swipeHintDone, setSwipeHintDone] = useState(true);
   const markSwipeHintShown = () => {
@@ -4059,20 +3978,6 @@ export default function App() {
             </TouchableOpacity>
               </>
             )}
-            {settingsPage === 'data' && (
-              <>
-                {/* ⚠️ 撮影用。提出前に広告と一緒に削除すること */}
-                <View style={{ height: 1, backgroundColor: C.border2, marginTop: 24 }} />
-                <Text style={{ fontSize: 11, color: C.text3, marginTop: 12 }}>撮影用（提出前に削除）</Text>
-                <TouchableOpacity style={styles.formRow} onPress={loadDemoData}>
-                  <Text style={[styles.formRowLabel, { color: ACCENT }]}>撮影用データを読み込む</Text>
-                </TouchableOpacity>
-                <View style={{ height: 1, backgroundColor: C.border2 }} />
-                <TouchableOpacity style={styles.formRow} onPress={restoreFromDemo}>
-                  <Text style={[styles.formRowLabel, { color: ACCENT }]}>元のデータに戻す</Text>
-                </TouchableOpacity>
-              </>
-            )}
             {settingsPage === 'help' && (
               <>
             {([
@@ -4834,6 +4739,28 @@ export default function App() {
             </View>
           </View>
         </Modal>
+        {/* Webテスト後の選考 */}
+        <Modal visible={gdSheet} transparent animationType="slide" onRequestClose={() => setGdSheet(false)}>
+          <View style={styles.pickerOverlay}>
+            <TouchableOpacity style={StyleSheet.absoluteFillObject} activeOpacity={1} onPress={() => setGdSheet(false)} />
+            <View style={[styles.modalContent, { backgroundColor: C.bg }]} onStartShouldSetResponder={() => true}>
+              <Text accessibilityRole="header" style={[styles.modalTitle, { color: C.text }]}>Webテスト後の選考</Text>
+              {([
+                { v: 'unknown' as Presence, label: '未確認' },
+                { v: 'yes' as Presence, label: 'GD（グループディスカッション）がある' },
+                { v: 'no' as Presence, label: 'GDはなく1次面接へ進む' },
+              ]).map(o => (
+                <TouchableOpacity key={o.v}
+                  style={{ flexDirection: 'row', alignItems: 'center', minHeight: 44, borderBottomWidth: 1, borderColor: C.border2 }}
+                  onPress={() => { setGdPresence(o.v); setGdSheet(false); }}>
+                  <Text style={{ fontSize: 15, color: C.text, flex: 1 }}>{o.label}</Text>
+                  {gdPresence === o.v ? <Text style={{ fontSize: 16, color: ACCENT, fontWeight: 'bold' }}>✓</Text> : null}
+                </TouchableOpacity>
+              ))}
+              <View style={{ height: 12 }} />
+            </View>
+          </View>
+        </Modal>
         {/* 通知タイミング選択シート。常時6チップを出す代わりに、触るときだけ開く */}
         <Modal visible={notifyDaysSheet} transparent animationType="slide"
           onRequestClose={() => setNotifyDaysSheet(false)}>
@@ -4973,7 +4900,12 @@ export default function App() {
                     {/* 次へ */}
                     {!INACTIVE.includes(v.status) && (vNs || vAsk) ? (
                       <TouchableOpacity style={{ minHeight: 44, justifyContent: 'center', marginTop: 6 }}
-                        onPress={() => advanceStatus(v)}>
+                        onPress={() => {
+                          // 進めると行き先選択や次予定登録のシートが出ることがある。
+                          // pageSheet の内側から兄弟のModalは出せないので先に閉じる。
+                          setViewItem(null);
+                          setTimeout(() => advanceStatus(v), 300);
+                        }}>
                         <Text style={{ fontSize: 14, color: ACCENT, fontWeight: 'bold' }}>
                           {vAsk ? '次へ →' : vNs === '完了' ? `${v.status}を完了 →` : `次へ：${vNs} →`}
                         </Text>
@@ -5236,28 +5168,6 @@ export default function App() {
           </View>
         </Modal>
 
-        {/* Webテスト後の選考 */}
-        <Modal visible={gdSheet} transparent animationType="slide" onRequestClose={() => setGdSheet(false)}>
-          <View style={styles.pickerOverlay}>
-            <TouchableOpacity style={StyleSheet.absoluteFillObject} activeOpacity={1} onPress={() => setGdSheet(false)} />
-            <View style={[styles.modalContent, { backgroundColor: C.bg }]} onStartShouldSetResponder={() => true}>
-              <Text accessibilityRole="header" style={[styles.modalTitle, { color: C.text }]}>Webテスト後の選考</Text>
-              {([
-                { v: 'unknown' as Presence, label: '未確認' },
-                { v: 'yes' as Presence, label: 'GD（グループディスカッション）がある' },
-                { v: 'no' as Presence, label: 'GDはなく1次面接へ進む' },
-              ]).map(o => (
-                <TouchableOpacity key={o.v}
-                  style={{ flexDirection: 'row', alignItems: 'center', minHeight: 44, borderBottomWidth: 1, borderColor: C.border2 }}
-                  onPress={() => { setGdPresence(o.v); setGdSheet(false); }}>
-                  <Text style={{ fontSize: 15, color: C.text, flex: 1 }}>{o.label}</Text>
-                  {gdPresence === o.v ? <Text style={{ fontSize: 16, color: ACCENT, fontWeight: 'bold' }}>✓</Text> : null}
-                </TouchableOpacity>
-              ))}
-              <View style={{ height: 12 }} />
-            </View>
-          </View>
-        </Modal>
 
         {/* カードの表示項目。「どの企業を出すか（絞り込み）」とは別の軸なので入口を分ける */}
         <Modal visible={fieldSheet} transparent animationType="slide" onRequestClose={() => setFieldSheet(false)}>
