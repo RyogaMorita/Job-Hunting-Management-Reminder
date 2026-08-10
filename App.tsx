@@ -41,7 +41,7 @@ import { LISTED_COMPANIES, CompanyEntry } from './companies_v2';
 import {
   addDaysYmd, collectTodos, daysBetween, formatYmd, parseYmd, coversDate, dateRangeStr, expandDateRange,
   findConflicts, nextStatus, needsGdChoice, entryKind, PREP_TEMPLATES,
-  stageDistribution, weeklyActivity, weeklyTrend, reachCounts, stalledCompanies,
+  stageDistribution, weeklyActivity, weeklyTrend, reachCounts, stalledCompanies, startOfWeekYmd,
 } from './lib/schedule';
 import type { TodoItem, VenueType, Presence } from './lib/schedule';
 
@@ -2603,7 +2603,10 @@ export default function App() {
 
   // 週表示の左右スワイプ。ジェスチャーはUIスレッドで走るので
   // 状態更新は runOnJS 経由で渡す。
+  // 週が入れ替わる向き。スライドの入場方向を決めるために持つ。
+  const [weekDir, setWeekDir] = useState(1);
   const shiftWeek = (dir: number) => {
+    setWeekDir(dir);
     setSelectedDate(d => addDaysYmd(d, dir * 7));
     setCalDaySelected(true);
   };
@@ -3090,13 +3093,20 @@ export default function App() {
                   // 週表示は月表示のような横ページャが無く、スワイプしても何も起きなかった。
                   // 左右に振れたら前後の週へ移す。
                   <GestureDetector gesture={weekSwipe}>
-                    <View>
-                      <WeekCalendarRow
-                        selectedDate={selectedDate} today={today} weekStart={weekStart}
-                        C={C} isDark={isDark} dateCompanyMap={dateCompanyMap} statusColorOf={statusColorOf}
-                        onDayPress={(ds) => { setSelectedDate(ds); setCalDaySelected(true); }}
-                        onDayDoubleTap={(ds) => { setSelectedDate(ds); setCalDaySelected(true); openAdd(ds); }}
-                      />
+                    {/* 週が変わったことを動きで示す。週の初日をキーにして
+                        差し替わったときだけ、めくった向きから滑り込ませる。
+                        動かすのは translateX だけなのでレイアウトは再計算されない。 */}
+                    <View style={{ overflow: 'hidden' }}>
+                      <ReAnimated.View
+                        key={startOfWeekYmd(selectedDate, weekStart)}
+                        entering={(weekDir > 0 ? SlideInRight : SlideInLeft).duration(220)}>
+                        <WeekCalendarRow
+                          selectedDate={selectedDate} today={today} weekStart={weekStart}
+                          C={C} isDark={isDark} dateCompanyMap={dateCompanyMap} statusColorOf={statusColorOf}
+                          onDayPress={(ds) => { setSelectedDate(ds); setCalDaySelected(true); }}
+                          onDayDoubleTap={(ds) => { setSelectedDate(ds); setCalDaySelected(true); openAdd(ds); }}
+                        />
+                      </ReAnimated.View>
                     </View>
                   </GestureDetector>
                 ) : (
