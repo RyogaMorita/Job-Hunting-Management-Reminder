@@ -4791,6 +4791,81 @@ export default function App() {
 
           {/* フルスクリーンModalの兄弟に置くと下に隠れて開けないので、
               選択シートは編集モーダルの内側に置く */}
+
+        {/* ジャンル選択シート */}
+        <Modal visible={genreSheet} transparent animationType="slide" onRequestClose={() => setGenreSheet(false)}>
+          <View style={styles.pickerOverlay}>
+            <TouchableOpacity style={StyleSheet.absoluteFillObject} activeOpacity={1} onPress={() => setGenreSheet(false)} />
+            <View style={[styles.modalContent, { maxHeight: '75%', backgroundColor: C.bg }]} onStartShouldSetResponder={() => true}>
+              <Text accessibilityRole="header" style={[styles.modalTitle, { color: C.text }]}>ジャンル</Text>
+              <ScrollView>
+                {genres.map(g => (
+                  <TouchableOpacity key={g.id}
+                    style={{ flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 44, borderBottomWidth: 1, borderColor: C.border2 }}
+                    onPress={() => { setSelGenreId(g.id); setGenreSheet(false); }}>
+                    <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: g.color }} />
+                    <Text style={{ fontSize: 15, color: C.text, flex: 1 }}>{g.name}</Text>
+                    {selGenreId === g.id ? <Text style={{ fontSize: 16, color: ACCENT, fontWeight: 'bold' }}>✓</Text> : null}
+                  </TouchableOpacity>
+                ))}
+                <View style={{ height: 12 }} />
+              </ScrollView>
+            </View>
+          </View>
+        </Modal>
+        {/* 選考ステータス選択シート */}
+        <Modal visible={statusSheet} transparent animationType="slide" onRequestClose={() => setStatusSheet(false)}>
+          <View style={styles.pickerOverlay}>
+            <TouchableOpacity style={StyleSheet.absoluteFillObject} activeOpacity={1} onPress={() => setStatusSheet(false)} />
+            <View style={[styles.modalContent, { maxHeight: '75%', backgroundColor: C.bg }]} onStartShouldSetResponder={() => true}>
+              <Text accessibilityRole="header" style={[styles.modalTitle, { color: C.text }]}>選考ステータス</Text>
+              <ScrollView>
+                {statusOptions.map(opt => (
+                  <TouchableOpacity key={opt}
+                    style={{ flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 44, borderBottomWidth: 1, borderColor: C.border2 }}
+                    onPress={() => { Haptics.selectionAsync(); setSelStatus(opt); setStatusSheet(false); }}>
+                    <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: statusColors[opt] ?? NEUTRAL_GRAY }} />
+                    <Text style={{ fontSize: 15, color: C.text, flex: 1 }}>{opt}</Text>
+                    {selStatus === opt ? <Text style={{ fontSize: 16, color: ACCENT, fontWeight: 'bold' }}>✓</Text> : null}
+                  </TouchableOpacity>
+                ))}
+                <View style={{ height: 12 }} />
+              </ScrollView>
+            </View>
+          </View>
+        </Modal>
+        {/* 通知タイミング選択シート。常時6チップを出す代わりに、触るときだけ開く */}
+        <Modal visible={notifyDaysSheet} transparent animationType="slide"
+          onRequestClose={() => setNotifyDaysSheet(false)}>
+          <View style={styles.pickerOverlay}>
+            <TouchableOpacity style={StyleSheet.absoluteFillObject} activeOpacity={1}
+              onPress={() => setNotifyDaysSheet(false)} />
+            <View style={[styles.modalContent, { backgroundColor: C.bg }]} onStartShouldSetResponder={() => true}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                <Text style={[styles.modalTitle, { color: C.text, flex: 1, marginBottom: 0 }]}>通知タイミング</Text>
+                <TouchableOpacity onPress={() => setNotifyDaysSheet(false)} style={{ paddingHorizontal: 8, paddingVertical: 6 }}>
+                  <Text style={{ fontSize: 15, color: ACCENT, fontWeight: 'bold' }}>完了</Text>
+                </TouchableOpacity>
+              </View>
+              {['0', '1', '2', '3', '5', '7'].map(nDay => {
+                const sel = notifyDaysList.includes(nDay);
+                return (
+                  <TouchableOpacity key={nDay}
+                    style={{ flexDirection: 'row', alignItems: 'center', minHeight: 44, borderBottomWidth: 1, borderColor: C.border2 }}
+                    onPress={() => setNotifyDaysList(prev =>
+                      prev.includes(nDay) ? prev.filter(x => x !== nDay) : [...prev, nDay].sort((a, b) => Number(a) - Number(b)))}>
+                    <Text style={{ fontSize: 15, color: C.text, flex: 1 }}>{nDay === '0' ? '当日' : `${nDay}日前`}</Text>
+                    {sel ? <Text style={{ fontSize: 16, color: ACCENT, fontWeight: 'bold' }}>✓</Text> : null}
+                  </TouchableOpacity>
+                );
+              })}
+              <View style={{ height: 12 }} />
+            </View>
+          </View>
+        </Modal>
+          </SafeAreaView>
+        </Modal>
+
         {/* 企業詳細（閲覧）。編集は右上から入る */}
         <Modal visible={!!viewItem} animationType="slide" presentationStyle="pageSheet"
           onRequestClose={() => setViewItem(null)}>
@@ -4978,80 +5053,6 @@ export default function App() {
               </>
             );
           })()}
-          </SafeAreaView>
-        </Modal>
-
-        {/* ジャンル選択シート */}
-        <Modal visible={genreSheet} transparent animationType="slide" onRequestClose={() => setGenreSheet(false)}>
-          <View style={styles.pickerOverlay}>
-            <TouchableOpacity style={StyleSheet.absoluteFillObject} activeOpacity={1} onPress={() => setGenreSheet(false)} />
-            <View style={[styles.modalContent, { maxHeight: '75%', backgroundColor: C.bg }]} onStartShouldSetResponder={() => true}>
-              <Text accessibilityRole="header" style={[styles.modalTitle, { color: C.text }]}>ジャンル</Text>
-              <ScrollView>
-                {genres.map(g => (
-                  <TouchableOpacity key={g.id}
-                    style={{ flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 44, borderBottomWidth: 1, borderColor: C.border2 }}
-                    onPress={() => { setSelGenreId(g.id); setGenreSheet(false); }}>
-                    <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: g.color }} />
-                    <Text style={{ fontSize: 15, color: C.text, flex: 1 }}>{g.name}</Text>
-                    {selGenreId === g.id ? <Text style={{ fontSize: 16, color: ACCENT, fontWeight: 'bold' }}>✓</Text> : null}
-                  </TouchableOpacity>
-                ))}
-                <View style={{ height: 12 }} />
-              </ScrollView>
-            </View>
-          </View>
-        </Modal>
-        {/* 選考ステータス選択シート */}
-        <Modal visible={statusSheet} transparent animationType="slide" onRequestClose={() => setStatusSheet(false)}>
-          <View style={styles.pickerOverlay}>
-            <TouchableOpacity style={StyleSheet.absoluteFillObject} activeOpacity={1} onPress={() => setStatusSheet(false)} />
-            <View style={[styles.modalContent, { maxHeight: '75%', backgroundColor: C.bg }]} onStartShouldSetResponder={() => true}>
-              <Text accessibilityRole="header" style={[styles.modalTitle, { color: C.text }]}>選考ステータス</Text>
-              <ScrollView>
-                {statusOptions.map(opt => (
-                  <TouchableOpacity key={opt}
-                    style={{ flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 44, borderBottomWidth: 1, borderColor: C.border2 }}
-                    onPress={() => { Haptics.selectionAsync(); setSelStatus(opt); setStatusSheet(false); }}>
-                    <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: statusColors[opt] ?? NEUTRAL_GRAY }} />
-                    <Text style={{ fontSize: 15, color: C.text, flex: 1 }}>{opt}</Text>
-                    {selStatus === opt ? <Text style={{ fontSize: 16, color: ACCENT, fontWeight: 'bold' }}>✓</Text> : null}
-                  </TouchableOpacity>
-                ))}
-                <View style={{ height: 12 }} />
-              </ScrollView>
-            </View>
-          </View>
-        </Modal>
-        {/* 通知タイミング選択シート。常時6チップを出す代わりに、触るときだけ開く */}
-        <Modal visible={notifyDaysSheet} transparent animationType="slide"
-          onRequestClose={() => setNotifyDaysSheet(false)}>
-          <View style={styles.pickerOverlay}>
-            <TouchableOpacity style={StyleSheet.absoluteFillObject} activeOpacity={1}
-              onPress={() => setNotifyDaysSheet(false)} />
-            <View style={[styles.modalContent, { backgroundColor: C.bg }]} onStartShouldSetResponder={() => true}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
-                <Text style={[styles.modalTitle, { color: C.text, flex: 1, marginBottom: 0 }]}>通知タイミング</Text>
-                <TouchableOpacity onPress={() => setNotifyDaysSheet(false)} style={{ paddingHorizontal: 8, paddingVertical: 6 }}>
-                  <Text style={{ fontSize: 15, color: ACCENT, fontWeight: 'bold' }}>完了</Text>
-                </TouchableOpacity>
-              </View>
-              {['0', '1', '2', '3', '5', '7'].map(nDay => {
-                const sel = notifyDaysList.includes(nDay);
-                return (
-                  <TouchableOpacity key={nDay}
-                    style={{ flexDirection: 'row', alignItems: 'center', minHeight: 44, borderBottomWidth: 1, borderColor: C.border2 }}
-                    onPress={() => setNotifyDaysList(prev =>
-                      prev.includes(nDay) ? prev.filter(x => x !== nDay) : [...prev, nDay].sort((a, b) => Number(a) - Number(b)))}>
-                    <Text style={{ fontSize: 15, color: C.text, flex: 1 }}>{nDay === '0' ? '当日' : `${nDay}日前`}</Text>
-                    {sel ? <Text style={{ fontSize: 16, color: ACCENT, fontWeight: 'bold' }}>✓</Text> : null}
-                  </TouchableOpacity>
-                );
-              })}
-              <View style={{ height: 12 }} />
-            </View>
-          </View>
-        </Modal>
           </SafeAreaView>
         </Modal>
 
