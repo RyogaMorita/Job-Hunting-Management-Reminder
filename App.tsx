@@ -17,7 +17,7 @@ import { NotoSansJP_400Regular, NotoSansJP_700Bold } from '@expo-google-fonts/no
 import {
   StyleSheet, Text, View, TouchableOpacity, ScrollView,
   SafeAreaView, Modal, TextInput, Alert, KeyboardAvoidingView,
-  Platform, Switch, Animated, PanResponder, Linking, Clipboard, Image, Dimensions,
+  Platform, Switch, Animated, Linking, Clipboard, Image, Dimensions,
   NativeModules, AppState, BackHandler, AccessibilityInfo,
   StyleProp, ViewStyle, TextStyle, ImageSourcePropType,
 } from 'react-native';
@@ -30,7 +30,6 @@ import SharedGroupPreferences from 'react-native-shared-group-preferences';
 import * as Notifications from 'expo-notifications';
 import * as StoreReview from 'expo-store-review';
 import * as Haptics from 'expo-haptics';
-import { SafeAreaProvider, SafeAreaView as SafeAreaViewContext } from 'react-native-safe-area-context';
 import {
   BannerAd, BannerAdSize, TestIds,
   AppOpenAd, AdEventType,
@@ -107,7 +106,6 @@ const INTERN_STATUSES = ['インターンES締切', 'インターン面接', '�
 // 本選考の段階とは別に数える単発イベント
 // GDは選考段階なので本選考トラックに入れる。説明会・ワークショップだけが単発イベント。
 const EVENT_STATUSES = ['説明会', 'ワークショップ'];
-const SEPARATE_STATUSES = [...EVENT_STATUSES, ...INTERN_STATUSES]; // 本選考と別トラック
 const DEFAULT_STATUS_OPTIONS = [
   '検討中', '説明会', 'ワークショップ', 'ES締切', 'ES提出済', 'Webテスト', 'GD',
   '1次面接', '2次面接', '最終面接', '内定', '内定承諾',
@@ -173,8 +171,6 @@ const ICONS = {
 const RANK_OPTIONS = ['S', 'A', 'B', 'C'];
 const SORT_OPTIONS = ['登録順', '直近順', '五十音', '志望度', 'ステータス', 'ジャンル', '手動'];
 const MANUAL_ORDER_KEY = '@manual_order_v1';
-const HOURS = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0'));
-const MINUTES = ['00', '15', '30', '45'];
 const INACTIVE = ['内定辞退', '不合格', '完了'];
 // 取り返しがつきにくい変更。ここへ移すときだけ確認を挟み、
 // 通常の段階送りは即時反映＋取り消しにする（高頻度操作に毎回確認を出すと使えない）。
@@ -820,86 +816,6 @@ const STATUS_TO_STAGE: Record<string, number> = {
   '内定': 5, '内定承諾': 5,
 };
 
-function StatusStepper({ status, statusColors, isDark }: { status: string; statusColors: Record<string, string>; isDark: boolean }) {
-  const currentStage = STATUS_TO_STAGE[status] ?? 0;
-  const dotScales = useRef(STEPPER_STAGES.map(() => new Animated.Value(0))).current;
-  const barAnims = useRef([0, 1, 2, 3, 4].map(() => new Animated.Value(0))).current;
-  const labelOpacities = useRef(STEPPER_STAGES.map(() => new Animated.Value(0))).current;
-  const labelTranslates = useRef(STEPPER_STAGES.map(() => new Animated.Value(8))).current;
-
-  useEffect(() => {
-    dotScales.forEach(d => d.setValue(0));
-    barAnims.forEach(b => b.setValue(0));
-    labelOpacities.forEach(l => l.setValue(0));
-    labelTranslates.forEach(l => l.setValue(8));
-
-    const seq: Animated.CompositeAnimation[] = [];
-    for (let i = 0; i <= Math.min(currentStage, STEPPER_STAGES.length - 1); i++) {
-      const isActive = i === currentStage;
-      seq.push(Animated.parallel([
-        isActive
-          ? Animated.sequence([
-              Animated.timing(dotScales[i], { toValue: 1.4, duration: 120, useNativeDriver: true }),
-              Animated.spring(dotScales[i], { toValue: 1, tension: 400, friction: 10, useNativeDriver: true }),
-            ])
-          : Animated.spring(dotScales[i], { toValue: 1, tension: 200, friction: 8, useNativeDriver: true }),
-        Animated.timing(labelOpacities[i], { toValue: 1, duration: 200, useNativeDriver: true }),
-        Animated.timing(labelTranslates[i], { toValue: 0, duration: 200, useNativeDriver: true }),
-      ]));
-      if (i < currentStage && i < 5) {
-        seq.push(Animated.timing(barAnims[i], { toValue: 1, duration: 320, useNativeDriver: true }));
-      }
-    }
-    Animated.sequence(seq).start();
-  }, [status]);
-
-  const stageColor = (i: number) => statusColors[STEPPER_STAGES[i]] ?? '#95A5A6';
-  const inactiveColor = isDark ? '#444' : '#ddd';
-
-  return (
-    <View style={{ marginTop: 4, marginBottom: 16 }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-        {STEPPER_STAGES.map((stage, i) => {
-          const done = i < currentStage;
-          const active = i === currentStage;
-          const color = done || active ? stageColor(i) : inactiveColor;
-          return (
-            <React.Fragment key={stage}>
-              <View style={{ alignItems: 'center' }}>
-                <Animated.View style={{
-                  width: 11, height: 11, borderRadius: 6,
-                  backgroundColor: done || active ? color : 'transparent',
-                  borderWidth: 1.5, borderColor: color,
-                  transform: [{ scale: dotScales[i] }],
-                }} />
-                <Animated.Text style={{
-                  fontSize: 8, marginTop: 4, width: 36, textAlign: 'center',
-                  color: done || active ? color : inactiveColor,
-                  opacity: labelOpacities[i],
-                  transform: [{ translateY: labelTranslates[i] }],
-                }}>
-                  {stage}
-                </Animated.Text>
-              </View>
-              {i < 5 && (
-                <View style={{ flex: 1, height: 2, backgroundColor: inactiveColor, marginBottom: 18, overflow: 'hidden' }}>
-                  <Animated.View style={{
-                    position: 'absolute', left: 0, top: 0, bottom: 0, right: 0,
-                    backgroundColor: stageColor(i),
-                    transform: [{ translateX: barAnims[i].interpolate({ inputRange: [0, 1], outputRange: [-300, 0] }) }],
-                  }} />
-                </View>
-              )}
-            </React.Fragment>
-          );
-        })}
-      </View>
-    </View>
-  );
-}
-
-// ─── チュートリアルモーダル ──────────────────────────────────────
-
 function PhoneMockup({ children, isDark }: { children: React.ReactNode; isDark: boolean }) {
   return (
     <View style={{
@@ -1325,7 +1241,6 @@ export default function App() {
   const [offerModalVisible, setOfferModalVisible] = useState(false);
   const [firstLaunchModal, setFirstLaunchModal] = useState(false);
   const [adFree, setAdFree] = useState(false);
-  const [actionCount, setActionCount] = useState(0);
   const [bannerKey, setBannerKey] = useState(0);
   const [pendingInternalCompany, setPendingInternalCompany] = useState<string>(''); // 内定企業名
   const appOpenRef = useRef<AppOpenAd | null>(null);
@@ -1387,12 +1302,12 @@ export default function App() {
   const [selHour, setSelHour] = useState('');
   const [selMinute, setSelMinute] = useState('');
   const [note, setNote] = useState('');
+  const [, setChecklist] = useState<Record<string, boolean>>({});
   const [url, setUrl] = useState('');
   const [userId, setUserId] = useState('');
   const [password, setPassword] = useState('');
   const [rank, setRank] = useState('B');
   const [selGenreId, setSelGenreId] = useState('other');
-  const [checklist, setChecklist] = useState<Record<string, boolean>>({});
 
   // ピッカー
 
@@ -1815,12 +1730,14 @@ export default function App() {
     }
   };
 
-  // 取り消しトーストは後から実行されるので、閉じ込めた配列だと
-  // その間の他の変更まで巻き戻してしまう。常に最新を見る。
+  // 保存直後に続けて別の更新を行うと、setSchedules の反映前なので
+  // state を読むと古い配列になり、直前の書き込みが消える。
+  // 保存と同時に ref を進め、書き込み系は必ず ref から読む。
   const schedulesRef = useRef<Schedule[]>([]);
   useEffect(() => { schedulesRef.current = schedules; }, [schedules]);
 
   const saveSchedules = async (data: Schedule[]) => {
+    schedulesRef.current = data;
     setSchedules(data);
     await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(data));
     await syncWidgetData(data);
@@ -2131,15 +2048,26 @@ export default function App() {
     [schedules, todayYmd, weekStart],
   );
   // 各段階に到達した社数。分母が読めない「通過率」ではなく実数で積む。
+  // 同じ企業が複数行（本選考とイベントなど）あると社数が二重に数えられる。
+  // 企業名でまとめてから集計する。
+  const byCompany = useMemo(() => {
+    const map = new Map<string, Schedule>();
+    for (const s of schedules) {
+      const k = s.company.trim();
+      const cur = map.get(k);
+      if (!cur || (STATUS_PRIORITY[s.status] ?? 0) > (STATUS_PRIORITY[cur.status] ?? 0)) map.set(k, s);
+    }
+    return Array.from(map.values());
+  }, [schedules]);
   const reach = useMemo(
-    () => reachCounts(schedules, ['ES締切', 'ES提出済', 'Webテスト', 'GD', '1次面接', '2次面接', '最終面接', '内定'])
+    () => reachCounts(byCompany, ['ES締切', 'ES提出済', 'Webテスト', 'GD', '1次面接', '2次面接', '最終面接', '内定'])
       .filter(r => r.count > 0),
-    [schedules],
+    [byCompany],
   );
   // しばらく動いていない企業。分析を「見て終わり」にしないための行動材料。
   const stalled = useMemo(
-    () => stalledCompanies(schedules.filter(s => !INACTIVE.includes(s.status)), todayYmd, 14),
-    [schedules, todayYmd],
+    () => stalledCompanies(byCompany.filter(s => !INACTIVE.includes(s.status)), todayYmd, 14),
+    [byCompany, todayYmd],
   );
 
   const trend = useMemo(
@@ -2156,7 +2084,6 @@ export default function App() {
     considering: NEUTRAL_GRAY, document: '#7E57C2', interview: '#26A69A', offer: '#EC407A',
   };
   // 辞退を決めたのに連絡できていない企業（調査では内々定保有者の57.4%が該当）
-  const declinePendingCount = todos.filter(t => t.kind === 'decline').length;
 
   // カレンダーの行数を計算（現在月のみ）
   const maxCalRows = useMemo(() => {
@@ -2239,7 +2166,7 @@ export default function App() {
   const doSave = async (deleteIds: string[]) => {
     // selectedItem はモーダルを開いた時点のコピーなので、
     // 保存時に触らない項目は保存先の最新値から拾う
-    const storedItem = selectedItem ? schedules.find(s => s.id === selectedItem.id) : undefined;
+    const storedItem = selectedItem ? schedulesRef.current.find(s => s.id === selectedItem.id) : undefined;
     const autoChecks = STATUS_TO_CHECKS[selStatus] ?? [];
     const initCL: Record<string, boolean> = {};
     CHECKLIST_STEPS.forEach(step => { initCL[step] = autoChecks.includes(step); });
@@ -2293,12 +2220,19 @@ export default function App() {
       webTestBookedAt: webTestBookedAt || undefined,
       webTestVenue: webTestVenue.trim() || undefined,
       gdPresence,
+      // フォームに無い項目は組み立て時に落ちる。保存先の現在値から拾い直す。
+      // ピン留めやWebテスト受検済みは編集画面の外で切り替わるため、
+      // ここで拾わないと編集するたびに解除されていた。
       declineContacted: storedItem?.declineContacted ?? selectedItem?.declineContacted,
+      pinned: storedItem?.pinned ?? selectedItem?.pinned,
+      webTestDone: storedItem?.webTestDone ?? selectedItem?.webTestDone,
       calendarColor: selectedItem
         ? (statusColors[selStatus] ?? selectedItem.calendarColor ?? '#95A5A6') // 編集時: 新ステータス色で更新
         : (statusColors[selStatus] ?? '#95A5A6'), // 新規: 登録時のステータス色で固定
     };
-    const base = deleteIds.length > 0 ? schedules.filter(s => !deleteIds.includes(s.id)) : schedules;
+    const base = deleteIds.length > 0
+      ? schedulesRef.current.filter(s => !deleteIds.includes(s.id))
+      : schedulesRef.current;
     const updated = selectedItem ? base.map(s => s.id === selectedItem.id ? newSchedule : s) : [...base, newSchedule];
     await saveSchedules(updated);
     await scheduleNotification(newSchedule);
@@ -2401,7 +2335,6 @@ export default function App() {
     setSelectedItem(item); setCompanyName(item.company);
     setNote(item.note ?? ''); setSelStatus(item.status); setSelDate(item.date);
     setSelEndDate(item.endDate ?? '');
-    const _d = item.date ? new Date(item.date) : new Date();
     setSelHour(item.hour ?? ''); setSelMinute(item.minute ?? '');
     setUrl(item.url ?? ''); setUserId(item.userId ?? ''); setPassword(item.password ?? '');
     setRank(item.rank ?? 'B'); setSelGenreId(item.genreId ?? 'other');
@@ -2436,9 +2369,9 @@ export default function App() {
       {
         text: '削除', style: 'destructive', onPress: async () => {
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-          const target = schedules.find(s => s.id === id);
+          const target = schedulesRef.current.find(s => s.id === id);
           await cancelNotification(id, target);
-          await saveSchedules(schedules.filter(s => s.id !== id));
+          await saveSchedules(schedulesRef.current.filter(s => s.id !== id));
           closeModal();
         }
       },
@@ -2492,7 +2425,7 @@ export default function App() {
 
   // ─── チェックリスト ────────────────────────────────────────────
   const toggleCheck = async (item: Schedule, step: string) => {
-    const updated = schedules.map(s => {
+    const updated = schedulesRef.current.map(s => {
       if (s.id !== item.id) return s;
       const newCL = { ...(s.checklist ?? {}), [step]: !(s.checklist ?? {})[step] };
       const newStatus = newCL['内定'] ? '内定' : s.status === '内定' ? '最終面接' : s.status;
@@ -2516,7 +2449,7 @@ export default function App() {
   };
 
   const toggleCustomCheck = async (item: Schedule, id: string) => {
-    const updated = schedules.map(s => {
+    const updated = schedulesRef.current.map(s => {
       if (s.id !== item.id) return s;
       const newCL = (s.customChecklist ?? []).map(c => c.id === id ? { ...c, checked: !c.checked } : c);
       return { ...s, customChecklist: newCL };
@@ -2531,7 +2464,7 @@ export default function App() {
     // 同じ内容を二重に足さない（テンプレートの連打対策）
     if ((item.customChecklist ?? []).some(c => c.label === text && !c.checked)) return;
     const newC = { id: `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, label: text, checked: false, due };
-    const updated = schedules.map(s => s.id !== item.id ? s : { ...s, customChecklist: [...(s.customChecklist ?? []), newC] });
+    const updated = schedulesRef.current.map(s => s.id !== item.id ? s : { ...s, customChecklist: [...(s.customChecklist ?? []), newC] });
     await saveSchedules(updated);
     setCheckModalItem(updated.find(s => s.id === item.id) ?? null);
     if (!label) setNewCheckLabel('');
@@ -2539,7 +2472,7 @@ export default function App() {
 
   /// チェック項目の期限を設定する
   const setCustomCheckDue = async (item: Schedule, id: string, due: string) => {
-    const updated = schedules.map(s => s.id !== item.id ? s : {
+    const updated = schedulesRef.current.map(s => s.id !== item.id ? s : {
       ...s,
       customChecklist: (s.customChecklist ?? []).map(c => c.id === id ? { ...c, due: due || undefined } : c),
     });
@@ -2550,13 +2483,13 @@ export default function App() {
   /// 辞退の連絡を済ませたことを記録する
   const markDeclineContacted = async (item: Schedule) => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    const updated = schedules.map(s => s.id !== item.id ? s : { ...s, declineContacted: true });
+    const updated = schedulesRef.current.map(s => s.id !== item.id ? s : { ...s, declineContacted: true });
     await saveSchedules(updated);
   };
 
   // やること一覧から直接片付ける。種類ごとに「済んだ」の意味が違うので分岐する。
   const completeTodo = async (t: TodoItem) => {
-    const item = schedules.find(s => s.id === t.scheduleId);
+    const item = schedulesRef.current.find(s => s.id === t.scheduleId);
     if (!item) return;
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     switch (t.kind) {
@@ -2565,7 +2498,7 @@ export default function App() {
         await applyStatus(item, 'ES提出済', true);
         break;
       case 'webtest':
-        await saveSchedules(schedules.map(s => s.id !== item.id ? s : { ...s, webTestDone: true }));
+        await saveSchedules(schedulesRef.current.map(s => s.id !== item.id ? s : { ...s, webTestDone: true }));
         break;
       case 'offer':
         // 承諾は後戻りしづらいので確認を挟む advanceStatus を通す
@@ -2576,7 +2509,7 @@ export default function App() {
         break;
       case 'custom':
         if (!t.customId) return;
-        await saveSchedules(schedules.map(s => s.id !== item.id ? s : {
+        await saveSchedules(schedulesRef.current.map(s => s.id !== item.id ? s : {
           ...s,
           customChecklist: (s.customChecklist ?? []).map(c =>
             c.id === t.customId ? { ...c, checked: true } : c),
@@ -2586,14 +2519,14 @@ export default function App() {
   };
 
   const deleteCustomCheck = async (item: Schedule, id: string) => {
-    const updated = schedules.map(s => s.id !== item.id ? s : { ...s, customChecklist: (s.customChecklist ?? []).filter(c => c.id !== id) });
+    const updated = schedulesRef.current.map(s => s.id !== item.id ? s : { ...s, customChecklist: (s.customChecklist ?? []).filter(c => c.id !== id) });
     await saveSchedules(updated);
     setCheckModalItem(updated.find(s => s.id === item.id) ?? null);
   };
 
   // 次のステータスを返す（最終は変更なし）
   const completeStatus = async (item: Schedule) => {
-    const updated = schedules.map(s => s.id !== item.id ? s : {
+    const updated = schedulesRef.current.map(s => s.id !== item.id ? s : {
       ...s, status: '完了',
       calendarColor: statusColors['完了'] ?? '#95A5A6',
       statusHistory: [...(s.statusHistory ?? []), { status: '完了', changedAt: new Date().toISOString() }],
@@ -2622,7 +2555,7 @@ export default function App() {
   );
 
   const chooseGdRoute = async (item: Schedule, gd: Presence) => {
-    const updated = schedules.map(s => s.id !== item.id ? s : { ...s, gdPresence: gd });
+    const updated = schedulesRef.current.map(s => s.id !== item.id ? s : { ...s, gdPresence: gd });
     await saveSchedules(updated);
     setGdChoiceItem(null);
     // 覚えさせたうえで、そのまま次へ進める
@@ -2632,17 +2565,21 @@ export default function App() {
 
   const saveNextDate = async () => {
     if (!nextDateItem || !nextDate) { setNextDateItem(null); return; }
-    await saveSchedules(schedulesRef.current.map(s => s.id !== nextDateItem.id ? s : {
-      ...s, date: nextDate, hour: nextHour, minute: nextMinute,
+    const moved: Schedule = {
+      ...nextDateItem, date: nextDate, hour: nextHour, minute: nextMinute,
       // 前の段階の終了日が残っていると期間がおかしくなる
       endDate: undefined,
-    }));
+    };
+    await saveSchedules(schedulesRef.current.map(s => s.id !== moved.id ? s : moved));
+    // 日付が変わったので通知を貼り直す。これをしないと前の段階の日付で鳴る
+    await cancelNotification(moved.id, nextDateItem);
+    await scheduleNotification(moved);
     setNextDateItem(null);
   };
 
   const togglePinned = async (item: Schedule) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    await saveSchedules(schedules.map(s => s.id !== item.id ? s : { ...s, pinned: !s.pinned }));
+    await saveSchedules(schedulesRef.current.map(s => s.id !== item.id ? s : { ...s, pinned: !s.pinned }));
   };
 
   // target を渡すと次段階ではなくそこへ直接移す。
@@ -2687,7 +2624,7 @@ export default function App() {
     const initCL: Record<string, boolean> = { ...(item.checklist ?? {}) };
     CHECKLIST_STEPS.forEach(step => { if (autoChecks.includes(step)) initCL[step] = true; });
     const before = schedules.find(s => s.id === item.id);
-    const updated = schedules.map(s => s.id !== item.id ? s : {
+    const updated = schedulesRef.current.map(s => s.id !== item.id ? s : {
       ...s, status: ns, checklist: initCL,
       calendarColor: statusColors[ns] ?? '#95A5A6',
       // カードから進めた場合も履歴に残す（ダッシュボードの「今週の前進」に効く）
@@ -2695,6 +2632,9 @@ export default function App() {
     });
     try {
       await saveSchedules(updated);
+      // 通知の文面にステータスが入るので貼り直す
+      const after = updated.find(x => x.id === item.id);
+      if (after) await scheduleNotification(after);
     } finally {
       unlock();
     }
@@ -2759,7 +2699,6 @@ export default function App() {
   const isFilterActive = filterGenreIds.length > 0 || filterStatuses.length > 0;
 
   // ─── ヘルパー ──────────────────────────────────────────────────
-  const rankColor = (r: string) => ({ S: '#e74c3c', A: '#e67e22', B: '#2980b9', C: '#7f8c8d' }[r] ?? '#999');
   // ⑪ カウントダウン計算
   const daysUntil = (dateStr: string): number | null => {
     if (!dateStr) return null;
@@ -3364,6 +3303,7 @@ export default function App() {
                           <TouchableOpacity key={item.id}
                             style={[styles.itemCard, { borderColor: C.border2, backgroundColor: C.bg }]}
                             onPress={() => openDetail(item)}>
+                            <View style={[styles.statusDot, { backgroundColor: sc, marginRight: 8 }]} />
                             <View style={{ flex: 1 }}>
                               <Text style={[styles.itemTitle, { color: C.text }]}>{item.company}</Text>
                               <Text style={[styles.itemStatus, { color: C.text2 }]}>
@@ -3503,8 +3443,6 @@ export default function App() {
                   const sc = statusColorOf(item.status);
                   const isInternal = item.status === '内定';
                   const isInactive = INACTIVE.includes(item.status);
-                  const ns = nextStatus(item.status, item.gdPresence ?? 'unknown');
-                  const askGd = needsGdChoice(item.status, item.gdPresence ?? 'unknown');
                   const cdLabel = countdownLabel(item.date);
                   return (
                     <ScaleDecorator activeScale={1.02}>
@@ -4846,7 +4784,13 @@ export default function App() {
                     <Text style={{ fontSize: 15, color: ACCENT }}>閉じる</Text>
                   </TouchableOpacity>
                   <View style={{ flex: 1 }} />
-                  <TouchableOpacity onPress={() => openEditFromView(v)} style={{ minHeight: 44, justifyContent: 'center' }}>
+                  <TouchableOpacity onPress={() => togglePinned(v)}
+                    accessibilityRole="button"
+                    accessibilityLabel={v.pinned ? 'ピン留めを外す' : '上に固定する'}
+                    style={{ minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' }}>
+                    <Image source={ICONS.pin} style={{ width: 17, height: 17, tintColor: v.pinned ? ACCENT : C.text3 }} />
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={() => openEditFromView(v)} style={{ minHeight: 44, justifyContent: 'center', paddingLeft: 12 }}>
                     <Text style={{ fontSize: 15, color: ACCENT, fontWeight: 'bold' }}>編集</Text>
                   </TouchableOpacity>
                 </View>
