@@ -1186,36 +1186,76 @@ const DARK = {
 };
 
 // カレンダーヘッダー
-function CalendarHeader({ isDark, C, currentDate, weekStart, onOpenDatePicker, calendarMode, onSetMode }: {
-  isDark: boolean; C: typeof LIGHT; currentDate: Date; weekStart: number; onOpenDatePicker: () => void;
+function CalendarHeader({
+  isDark, C, currentDate, selectedDate, weekStart, onOpenDatePicker,
+  calendarMode, onSetMode, onShiftMonth,
+}: {
+  isDark: boolean; C: typeof LIGHT; currentDate: Date; selectedDate: string;
+  weekStart: number; onOpenDatePicker: () => void;
   calendarMode: CalendarMode; onSetMode: (m: CalendarMode) => void;
+  onShiftMonth: (delta: number) => void;
 }) {
+  // 表示形式の選択と「いつを見ているか」は別の情報なので行を分ける。
+  // 同じ行に入れると年月が押しつぶされ、月をめくったときに
+  // 何月を見ているのか分からなくなる。
   const month = currentDate.getMonth() + 1;
   const year = currentDate.getFullYear();
+
+  // 週表示は期間で示す。月をまたぐ週があるため終わりの月も出す。
+  const weekLabel = (() => {
+    const d = parseYmd(selectedDate);
+    const diff = (d.getDay() - weekStart + 7) % 7;
+    const start = new Date(d); start.setDate(d.getDate() - diff);
+    const end = new Date(start); end.setDate(start.getDate() + 6);
+    const same = start.getMonth() === end.getMonth();
+    return `${start.getFullYear()}年${start.getMonth() + 1}月${start.getDate()}日〜`
+      + (same ? `${end.getDate()}日` : `${end.getMonth() + 1}月${end.getDate()}日`);
+  })();
+
   return (
-    <View style={{ paddingHorizontal: 20, paddingTop: 14, paddingBottom: 12, backgroundColor: C.bg, flexDirection: 'row', alignItems: 'center' }}>
-      <TouchableOpacity onPress={onOpenDatePicker} activeOpacity={0.8} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
-        {/* 「08 / 2026 August」は同じ情報を3回言っていた */}
-        <Text style={{ fontSize: 22, fontWeight: '600', color: C.text, letterSpacing: -0.3 }}>
-          {year}年{month}月
-        </Text>
-        <Text style={{ fontSize: 10, color: C.text3, marginLeft: 2 }}>▾</Text>
-      </TouchableOpacity>
-      <View style={[styles.segmented, { marginBottom: 0, borderColor: C.border }]}>
-        {(['today', 'month', 'week'] as CalendarMode[]).map((m, i) => (
-          <TouchableOpacity key={m}
-            accessibilityRole="button"
-            accessibilityState={{ selected: calendarMode === m }}
-            style={[styles.segment, { minWidth: 40, minHeight: 30 },
-              i > 0 && { borderLeftWidth: 1, borderLeftColor: C.border },
-              calendarMode === m && { backgroundColor: ACCENT }]}
-            onPress={() => onSetMode(m)}>
-            <Text style={{ fontSize: 12, fontWeight: 'bold', color: calendarMode === m ? '#fff' : C.text2 }}>
-              {m === 'today' ? '今日' : m === 'month' ? '月' : '週'}
-            </Text>
-          </TouchableOpacity>
-        ))}
+    <View style={{ backgroundColor: C.appBg, paddingTop: 10, paddingBottom: 8 }}>
+      <View style={{ flexDirection: 'row', justifyContent: 'center', paddingHorizontal: 20 }}>
+        <View style={[styles.segmented, { marginBottom: 0, borderColor: C.border, backgroundColor: C.card }]}>
+          {(['today', 'month', 'week'] as CalendarMode[]).map((m, i) => (
+            <TouchableOpacity key={m}
+              accessibilityRole="button"
+              accessibilityState={{ selected: calendarMode === m }}
+              style={[styles.segment, { minWidth: 72, minHeight: 32 },
+                i > 0 && { borderLeftWidth: 1, borderLeftColor: C.border },
+                calendarMode === m && { backgroundColor: ACCENT }]}
+              onPress={() => onSetMode(m)}>
+              <Text style={{ fontSize: 13, fontWeight: 'bold', color: calendarMode === m ? '#fff' : C.text2 }}>
+                {m === 'today' ? '今日' : m === 'month' ? '月' : '週'}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
       </View>
+
+      {/* 今日は画面内に日付が出ているので期間ヘッダーは要らない */}
+      {calendarMode !== 'today' ? (
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 10 }}>
+          {calendarMode === 'month' ? (
+            <TouchableOpacity onPress={() => onShiftMonth(-1)} accessibilityLabel="前の月"
+              style={{ width: 44, height: 36, alignItems: 'center', justifyContent: 'center' }}>
+              <Text style={{ fontSize: 18, color: ACCENT }}>‹</Text>
+            </TouchableOpacity>
+          ) : null}
+          <TouchableOpacity onPress={onOpenDatePicker} activeOpacity={0.8}
+            style={{ flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 36 }}>
+            <Text style={{ fontSize: calendarMode === 'week' ? 15 : 18, fontWeight: '700', color: C.text, letterSpacing: -0.2 }}>
+              {calendarMode === 'week' ? weekLabel : `${year}年${month}月`}
+            </Text>
+            <Text style={{ fontSize: 10, color: C.text3 }}>▾</Text>
+          </TouchableOpacity>
+          {calendarMode === 'month' ? (
+            <TouchableOpacity onPress={() => onShiftMonth(1)} accessibilityLabel="次の月"
+              style={{ width: 44, height: 36, alignItems: 'center', justifyContent: 'center' }}>
+              <Text style={{ fontSize: 18, color: ACCENT }}>›</Text>
+            </TouchableOpacity>
+          ) : null}
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -1232,7 +1272,7 @@ function WeekdayHeader({ C, weekStart }: { C: typeof LIGHT; weekStart: number })
       flexDirection: 'row', justifyContent: 'space-around',
       paddingHorizontal: 2, paddingVertical: 6,
       borderBottomWidth: 0.5, borderBottomColor: C.border,
-      backgroundColor: C.bg
+      backgroundColor: C.calBg
     }}>
       {weekDays.map((d, i) => (
         <Text key={i} style={{
@@ -2801,7 +2841,11 @@ export default function App() {
         {activeTab === 'calendar' && (
           <View style={{ flex: 1, backgroundColor: C.appBg, position: 'relative' }}
             onLayout={(e) => setScreenWidth(e.nativeEvent.layout.width)}>
-            <CalendarHeader isDark={isDark} C={C} currentDate={currentCalDate} weekStart={weekStart} onOpenDatePicker={() => setDatePickerVisible(true)} calendarMode={calendarMode} onSetMode={setCalendarMode} />
+            <CalendarHeader
+              isDark={isDark} C={C} currentDate={currentCalDate} selectedDate={selectedDate}
+              weekStart={weekStart} onOpenDatePicker={() => setDatePickerVisible(true)}
+              calendarMode={calendarMode} onSetMode={setCalendarMode}
+              onShiftMonth={(d) => setCurrentCalDate(prev => new Date(prev.getFullYear(), prev.getMonth() + d, 1))} />
             {calendarMode !== 'today' ? <WeekdayHeader C={C} weekStart={weekStart} /> : null}
             {calendarMode === 'today' ? (
               // 今日は「カレンダーの表示切替」ではなく行動用のダッシュボード。
