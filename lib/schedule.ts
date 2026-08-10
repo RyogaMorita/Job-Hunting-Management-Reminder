@@ -382,6 +382,34 @@ export const weeklyTrend = (
   return out;
 };
 
+/// 各段階に「到達したことがある」社数。statusHistory を見るので、
+/// いま先に進んでいる企業も過去に通った段階として数える。
+/// 分母が読めない「通過率」ではなく、実数の積み上げで出す。
+export const reachCounts = (
+  items: StageSource[], flow: string[],
+): { status: string; count: number }[] =>
+  flow.map(st => ({
+    status: st,
+    count: items.filter(s =>
+      s.status === st || (s.statusHistory ?? []).some(h => h.status === st)).length,
+  }));
+
+/// しばらく動いていない企業。放置に気づけるようにする。
+/// 履歴が無いものは判断できないので対象外。
+export const stalledCompanies = <T extends StageSource & { company: string }>(
+  items: T[], todayYmd: string, days = 14,
+): { item: T; sinceDays: number }[] => {
+  const out: { item: T; sinceDays: number }[] = [];
+  for (const s of items) {
+    const h = s.statusHistory ?? [];
+    if (h.length === 0) continue;
+    const last = h[h.length - 1].changedAt.slice(0, 10);
+    const d = daysBetween(last, todayYmd);
+    if (d >= days) out.push({ item: s, sinceDays: d });
+  }
+  return out.sort((a, b) => b.sinceDays - a.sinceDays);
+};
+
 // ─── ステータス別の準備テンプレート ────────────────────────────
 //
 // 選んだ段階に応じて「やっておくこと」の雛形を出し、

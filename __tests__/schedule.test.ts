@@ -4,7 +4,7 @@ import {
   eventsConflict, findConflicts, collectTodos, daysBetween,
   EVENT_DURATION_MIN, TRAVEL_BUFFER_MIN, PREP_TEMPLATES, PROGRESS_FLOW,
   stageDistribution, startOfWeekYmd, weeklyActivity, weeklyTrend, STAGE_BUCKETS, layoutDayEvents,
-  needsGdChoice, entryKind,
+  needsGdChoice, entryKind, reachCounts, stalledCompanies,
 } from '../lib/schedule';
 
 describe('日付ユーティリティ', () => {
@@ -577,5 +577,44 @@ describe('予定の種別', () => {
     for (const st of PROGRESS_FLOW) {
       expect(['event', 'deadline', 'state']).toContain(entryKind(st));
     }
+  });
+});
+
+describe('段階ごとの到達数', () => {
+  const h = (...st: string[]) => st.map(x => ({ status: x, changedAt: '2026-08-01T00:00:00.000Z' }));
+
+  test('先に進んでいても過去に通った段階として数える', () => {
+    const r = reachCounts([
+      { status: '最終面接', statusHistory: h('ES締切', 'ES提出済', '1次面接', '最終面接') },
+      { status: 'ES提出済', statusHistory: h('ES締切', 'ES提出済') },
+    ], ['ES締切', 'ES提出済', '1次面接', '最終面接']);
+    const by = Object.fromEntries(r.map(x => [x.status, x.count]));
+    expect(by['ES締切']).toBe(2);
+    expect(by['ES提出済']).toBe(2);
+    expect(by['1次面接']).toBe(1);
+    expect(by['最終面接']).toBe(1);
+  });
+
+  test('履歴が無くても現在のステータスは数える', () => {
+    const r = reachCounts([{ status: 'GD' }], ['GD']);
+    expect(r[0].count).toBe(1);
+  });
+});
+
+describe('止まっている企業', () => {
+  const at = (ymd: string) => [{ status: 'x', changedAt: `${ymd}T00:00:00.000Z` }];
+
+  test('指定日数より動いていないものを、古い順に返す', () => {
+    const r = stalledCompanies([
+      { id: '1', company: 'A社', status: 'x', statusHistory: at('2026-07-01') },
+      { id: '2', company: 'B社', status: 'x', statusHistory: at('2026-08-05') },
+      { id: '3', company: 'C社', status: 'x', statusHistory: at('2026-07-20') },
+    ], '2026-08-09', 14);
+    expect(r.map(x => x.item.company)).toEqual(['A社', 'C社']);
+    expect(r[0].sinceDays).toBe(39);
+  });
+
+  test('履歴が無いものは判断できないので対象外', () => {
+    expect(stalledCompanies([{ id: '1', company: 'A社', status: 'x' }], '2026-08-09')).toEqual([]);
   });
 });

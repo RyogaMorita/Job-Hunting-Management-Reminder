@@ -41,7 +41,7 @@ import { LISTED_COMPANIES, CompanyEntry } from './companies_v2';
 import {
   addDaysYmd, collectTodos, daysBetween, formatYmd, parseYmd, coversDate, dateRangeStr, expandDateRange,
   findConflicts, nextStatus, needsGdChoice, entryKind, PREP_TEMPLATES,
-  stageDistribution, weeklyActivity, weeklyTrend,
+  stageDistribution, weeklyActivity, weeklyTrend, reachCounts, stalledCompanies,
 } from './lib/schedule';
 import type { TodoItem, VenueType, Presence } from './lib/schedule';
 
@@ -2130,6 +2130,18 @@ export default function App() {
     () => weeklyActivity(schedules, todayYmd, weekStart),
     [schedules, todayYmd, weekStart],
   );
+  // 各段階に到達した社数。分母が読めない「通過率」ではなく実数で積む。
+  const reach = useMemo(
+    () => reachCounts(schedules, ['ES締切', 'ES提出済', 'Webテスト', 'GD', '1次面接', '2次面接', '最終面接', '内定'])
+      .filter(r => r.count > 0),
+    [schedules],
+  );
+  // しばらく動いていない企業。分析を「見て終わり」にしないための行動材料。
+  const stalled = useMemo(
+    () => stalledCompanies(schedules.filter(s => !INACTIVE.includes(s.status)), todayYmd, 14),
+    [schedules, todayYmd],
+  );
+
   const trend = useMemo(
     () => weeklyTrend(schedules, todayYmd, weekStart, 6),
     [schedules, todayYmd, weekStart],
@@ -5111,6 +5123,56 @@ export default function App() {
                     })}
                   </View>
                 )}
+
+                {/* どこまで到達したか。分母が読めない「通過率」ではなく実数の積み上げで示す */}
+                {reach.length > 0 ? (
+                  <>
+                    <Text style={[styles.formSection, { color: C.text3 }]}>どこまで進んだか</Text>
+                    {reach.map(r => {
+                      const max = reach[0]?.count || 1;
+                      return (
+                        <View key={r.status} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                          <Text style={{ width: 64, fontSize: 11, color: C.text2 }} numberOfLines={1}>{r.status}</Text>
+                          <View style={{ flex: 1, height: 10, borderRadius: 5, backgroundColor: C.bg3, overflow: 'hidden' }}>
+                            <View style={{
+                              width: `${(r.count / max) * 100}%`, height: '100%',
+                              backgroundColor: CHART_PALETTE.interview,
+                            }} />
+                          </View>
+                          <Text style={{ width: 26, textAlign: 'right', fontSize: 12, color: C.text, fontWeight: 'bold' }}>{r.count}</Text>
+                        </View>
+                      );
+                    })}
+                    <Text style={{ fontSize: 11, color: C.text3, marginTop: 2 }}>
+                      過去に通った段階も含めた社数です。
+                    </Text>
+                  </>
+                ) : null}
+
+                {/* 止まっている企業。分析を見て終わりにしないための行動材料 */}
+                {stalled.length > 0 ? (
+                  <>
+                    <View style={{ flexDirection: 'row', alignItems: 'flex-end' }}>
+                      <Text style={[styles.formSection, { color: C.text3, flex: 1 }]}>2週間以上動きがない</Text>
+                      <Text style={{ fontSize: 12, color: C.text3, paddingBottom: 8 }}>{stalled.length}社</Text>
+                    </View>
+                    {stalled.slice(0, 5).map(({ item, sinceDays }) => (
+                      <TouchableOpacity key={item.id}
+                        style={{ flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 44, borderBottomWidth: 1, borderColor: C.border2 }}
+                        onPress={() => { setAnalyticsVisible(false); setTimeout(() => openDetail(item), 300); }}>
+                        <View style={[styles.statusDot, { backgroundColor: statusColorOf(item.status) }]} />
+                        <Text style={{ fontSize: 14, color: C.text, flex: 1 }} numberOfLines={1}>{item.company}</Text>
+                        <Text style={{ fontSize: 12, color: C.text2 }}>{item.status}</Text>
+                        <Text style={{ fontSize: 12, color: WARNING, fontWeight: 'bold' }}>{sinceDays}日</Text>
+                      </TouchableOpacity>
+                    ))}
+                    {stalled.length > 5 ? (
+                      <Text style={{ fontSize: 11, color: C.text3, marginTop: 6 }}>
+                        ほか{stalled.length - 5}社
+                      </Text>
+                    ) : null}
+                  </>
+                ) : null}
 
                 {/* 志望度の内訳 */}
                 <Text style={[styles.formSection, { color: C.text3 }]}>志望度の内訳</Text>
