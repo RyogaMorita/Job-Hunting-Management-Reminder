@@ -14,9 +14,16 @@ App Store Connect は寸法とアルファチャンネルを厳しく見る。
 import sys, os
 from PIL import Image
 
-W, H = 1290, 2796
+# App Store Connect はスロットごとに寸法が違う。
+#   6.9インチ  1290x2796
+#   6.5インチ  1284x2778
+# 6.9だけ登録すれば他サイズは自動で縮小されるが、
+# 6.5の枠に入れたい場合もあるので切り替えられるようにする。
+SIZES = {'6.9': (1290, 2796), '6.5': (1284, 2778)}
 SRC = sys.argv[1] if len(sys.argv) > 1 else 'screenshots'
-OUT = os.path.join(SRC, 'out')
+KEY = sys.argv[2] if len(sys.argv) > 2 else '6.9'
+W, H = SIZES[KEY]
+OUT = os.path.join(SRC, 'out' if KEY == '6.9' else f'out_{KEY}')
 
 
 def edge_color(im: Image.Image) -> tuple:
