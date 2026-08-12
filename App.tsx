@@ -203,6 +203,13 @@ interface Schedule {
   declineContacted?: boolean;
   // 一覧・カレンダーで常に上に出す
   pinned?: boolean;
+  // 済んだ予定。1行に status と date を同居させているため、
+  // 進めると過去の日付が新しいステータスの名前を着てしまう。
+  // 終わった時点の内容をここへ切り離し、カレンダーは実際にあったことを出す。
+  pastEvents?: {
+    status: string; date: string; endDate?: string;
+    hour: string; minute: string; venueType?: VenueType;
+  }[];
   notifyEnabled?: boolean;
   notifySettings?: NotifySetting;
   statusHistory?: { status: string; changedAt: string }[];
@@ -1473,8 +1480,17 @@ export default function App() {
       const autoChecks = STATUS_TO_CHECKS[ns] ?? [];
       const cl: Record<string, boolean> = { ...(s.checklist ?? {}) };
       CHECKLIST_STEPS.forEach(step => { if (autoChecks.includes(step)) cl[step] = true; });
+      // 済んだ予定を履歴へ切り離す（アプリ側で進めたときと同じ扱い）
+      const archived = s.date ? {
+        ...s,
+        pastEvents: [...(s.pastEvents ?? []), {
+          status: s.status, date: s.date, endDate: s.endDate,
+          hour: s.hour, minute: s.minute, venueType: s.venueType,
+        }],
+        date: '', endDate: undefined, hour: '', minute: '',
+      } : s;
       return {
-        ...s, status: ns, checklist: cl, calendarColor: colors[ns] ?? '#95A5A6',
+        ...archived, status: ns, checklist: cl, calendarColor: colors[ns] ?? '#95A5A6',
         statusHistory: [...(s.statusHistory ?? []), { status: ns, changedAt: new Date().toISOString() }],
       };
     });
@@ -1789,9 +1805,31 @@ export default function App() {
   }, [schedules]);
 
   // ─── カレンダーマーキング ──────────────────────────────────────
+  // カレンダーに出すもの＝いまの予定＋済んだ予定。
+  // 済んだぶんは当時のステータスで出すので、
+  // 「10/2に一次面接があった」という事実がそのまま残る。
+  const calendarEntries = useMemo(() => {
+    const out: Schedule[] = [];
+    for (const s of schedules) {
+      if (s.date) out.push(s);
+      (s.pastEvents ?? []).forEach((p, i) => {
+        if (!p.date) return;
+        out.push({
+          ...s,
+          id: `${s.id}#p${i}`,
+          status: p.status, date: p.date, endDate: p.endDate,
+          hour: p.hour, minute: p.minute, venueType: p.venueType,
+          calendarColor: statusColors[p.status] ?? undefined,
+          pinned: false,
+        });
+      });
+    }
+    return out;
+  }, [schedules, statusColors]);
+
   const markedDates = useMemo(() => {
     const marks: Record<string, any> = {};
-    schedules.forEach(s => {
+    calendarEntries.forEach(s => {
       if (!s.date) return;
       const col = s.calendarColor ?? statusColors[s.status] ?? TDU_BLUE;
       expandDateRange(s).forEach(cur => {
@@ -1802,7 +1840,7 @@ export default function App() {
     });
     marks[selectedDate] = { ...(marks[selectedDate] || {}), selected: true, selectedColor: TDU_BLUE };
     return marks;
-  }, [schedules, selectedDate, statusColors]);
+  }, [calendarEntries, selectedDate, statusColors]);
 
   // インターン期間マップ（日付→スパン情報）
   const internshipPeriodsMap = useMemo(() => {
@@ -1826,7 +1864,7 @@ export default function App() {
   const spanLanes = useMemo(() => {
     const lanes: Record<string, number> = {};
     const used: Record<string, Set<number>> = {};
-    schedules
+    calendarEntries
       .filter(s => s.date && s.endDate && s.endDate > s.date)
       // ピン留めを最上段に。あとは開始が早い順・期間が長い順で詰める
       .sort((a, b) =>
@@ -1841,11 +1879,11 @@ export default function App() {
         days.forEach(d => { (used[d] ??= new Set()).add(lane); });
       });
     return lanes;
-  }, [schedules]);
+  }, [calendarEntries]);
 
   const dateCompanyMap = useMemo(() => {
     const map: Record<string, Schedule[]> = {};
-    schedules.forEach(s => {
+    calendarEntries.forEach(s => {
       if (!s.date) return;
       expandDateRange(s).forEach(cur => {
         if (!map[cur]) map[cur] = [];
@@ -1858,7 +1896,7 @@ export default function App() {
         (STATUS_PRIORITY[b.status] ?? 0) - (STATUS_PRIORITY[a.status] ?? 0));
     });
     return map;
-  }, [schedules]);
+  }, [calendarEntries]);
 
   // ─── フィルタ・ソート ──────────────────────────────────────────
   // 持ち駒: 説明会/GD/インターンは本選考と別トラックで同時表示
@@ -1928,8 +1966,8 @@ export default function App() {
   }, [deduplicatedSchedules, searchQuery, filterGenreIds, filterStatuses, sortType, sortAsc, manualOrder]); // ② 正しい依存配列
 
   const filteredByDate = useMemo(
-    () => schedules.filter(s => coversDate(s, selectedDate)),
-    [schedules, selectedDate]
+    () => calendarEntries.filter(s => coversDate(s, selectedDate)),
+    [calendarEntries, selectedDate]
   );
 
   // 同日に物理的に両立しない予定がないか。対面が絡む場合は移動時間ぶん広く見る。
@@ -2324,7 +2362,11 @@ export default function App() {
   // 以前はいきなり全画面の編集フォームが開き、日程を確認するだけでも
   // 設定画面のような見た目に飛ばされていた。
   const [viewItem, setViewItem] = useState<Schedule | null>(null);
-  const openDetail = (item: Schedule) => setViewItem(item);
+  const openDetail = (item: Schedule) => {
+    // カレンダーの済んだ予定は id に #p0 が付く。企業本体を開く。
+    const baseId = item.id.split('#')[0];
+    setViewItem(schedulesRef.current.find(s => s.id === baseId) ?? item);
+  };
   const openEditFromView = (item: Schedule) => {
     setViewItem(null);
     // 閉じ切る前に次を出すと表示されないことがある
@@ -2527,7 +2569,7 @@ export default function App() {
   // 次のステータスを返す（最終は変更なし）
   const completeStatus = async (item: Schedule) => {
     const updated = schedulesRef.current.map(s => s.id !== item.id ? s : {
-      ...s, status: '完了',
+      ...archiveCurrentEvent(s), status: '完了',
       calendarColor: statusColors['完了'] ?? '#95A5A6',
       statusHistory: [...(s.statusHistory ?? []), { status: '完了', changedAt: new Date().toISOString() }],
     });
@@ -2615,6 +2657,20 @@ export default function App() {
   // AsyncStorage が遅れたときに二重実行を許してしまう）。
   const advancingRef = useRef<Set<string>>(new Set());
 
+  // 済んだ予定を履歴へ移し、現在の行から日程を外す。
+  // これをしないと 10/2 の一次面接が、進めた瞬間に「2次面接」と表示される。
+  const archiveCurrentEvent = (s: Schedule): Schedule => {
+    if (!s.date) return s;
+    return {
+      ...s,
+      pastEvents: [...(s.pastEvents ?? []), {
+        status: s.status, date: s.date, endDate: s.endDate,
+        hour: s.hour, minute: s.minute, venueType: s.venueType,
+      }],
+      date: '', endDate: undefined, hour: '', minute: '',
+    };
+  };
+
   const applyStatus = async (item: Schedule, ns: string, undoable: boolean) => {
     if (advancingRef.current.has(item.id)) return;
     advancingRef.current.add(item.id);
@@ -2623,12 +2679,17 @@ export default function App() {
     const autoChecks = STATUS_TO_CHECKS[ns] ?? [];
     const initCL: Record<string, boolean> = { ...(item.checklist ?? {}) };
     CHECKLIST_STEPS.forEach(step => { if (autoChecks.includes(step)) initCL[step] = true; });
-    const before = schedules.find(s => s.id === item.id);
-    const updated = schedulesRef.current.map(s => s.id !== item.id ? s : {
-      ...s, status: ns, checklist: initCL,
-      calendarColor: statusColors[ns] ?? '#95A5A6',
-      // カードから進めた場合も履歴に残す（ダッシュボードの「今週の前進」に効く）
-      statusHistory: [...(s.statusHistory ?? []), { status: ns, changedAt: new Date().toISOString() }],
+    const before = schedulesRef.current.find(s => s.id === item.id);
+    const updated = schedulesRef.current.map(s => {
+      if (s.id !== item.id) return s;
+      // 済んだ予定を履歴へ切り離してから進める
+      const archived = archiveCurrentEvent(s);
+      return {
+        ...archived, status: ns, checklist: initCL,
+        calendarColor: statusColors[ns] ?? '#95A5A6',
+        // カードから進めた場合も履歴に残す（ダッシュボードの「今週の前進」に効く）
+        statusHistory: [...(s.statusHistory ?? []), { status: ns, changedAt: new Date().toISOString() }],
+      };
     });
     try {
       await saveSchedules(updated);
@@ -4771,10 +4832,14 @@ export default function App() {
                 return v.gdPresence === 'no' ? b.filter(x => x !== 'GD') : b;
               })();
             const curIdx = flow.indexOf(v.status);
+            // まず操作した日で埋め、実際に予定があった日が分かるものは上書きする
             const doneAt: Record<string, string> = {};
             for (const h of v.statusHistory ?? []) {
               const dd = new Date(h.changedAt);
               doneAt[h.status] = `${String(dd.getMonth() + 1).padStart(2, '0')}/${String(dd.getDate()).padStart(2, '0')}`;
+            }
+            for (const pe of v.pastEvents ?? []) {
+              if (pe.date) doneAt[pe.status] = pe.date.slice(5).replace('-', '/');
             }
             const cl = v.customChecklist ?? [];
             return (
