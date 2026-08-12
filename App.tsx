@@ -3841,7 +3841,7 @@ export default function App() {
                 <Text style={{ fontSize: 15, color: C.text3, marginLeft: 6 }}>›</Text>
               </TouchableOpacity>
                 <View style={{ alignItems: 'center', marginTop: 24 }}>
-                  <Text style={{ fontSize: 12, color: C.text3 }}>就活管理リマインダー v1.3.0</Text>
+                  <Text style={{ fontSize: 12, color: C.text3 }}>就活管理リマインダー v1.3.1</Text>
                 </View>
               </ReAnimated.View>
             ) : (
@@ -4132,7 +4132,7 @@ export default function App() {
             </View>
 
             <View style={[styles.aboutBox, { backgroundColor: C.bg2, marginTop: 24 }]}>
-              <Text style={[styles.aboutText, { color: C.text2 }]}>就活管理リマインダー v1.3.0</Text>
+              <Text style={[styles.aboutText, { color: C.text2 }]}>就活管理リマインダー v1.3.1</Text>
             </View>
               </>
             )}
