@@ -2732,10 +2732,30 @@ export default function App() {
             どの画面を見ているのか分からず、設定を開いても本題が下に押し出されていた。
             画面名だけを出し、数字はダッシュボードへ移した。 */}
         <View style={[styles.topNav, { borderBottomColor: C.border }]}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingTop: 8, paddingBottom: 8, gap: 8 }}>
+          {/* 画面名とやることを同じ行に置く。
+              縦に積むとカレンダーが下へ押し出され、
+              「◯月◯日の予定」が画面外に出ていた。 */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingTop: 6, paddingBottom: 6, gap: 10 }}>
             <Text style={[styles.screenTitle, { color: C.text }]}>
               {activeTab === 'calendar' ? 'カレンダー' : activeTab === 'list' ? '持ち駒' : '設定'}
             </Text>
+            <View style={{ flex: 1 }} />
+            {todos.length > 0 && activeTab !== 'settings' ? (
+              <TouchableOpacity
+                style={{ flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 44 }}
+                onPress={() => setTodoModalVisible(true)}>
+                <PulseView active={overdueTodoCount > 0}>
+                  <Image source={ICONS.checklist} style={{ width: 13, height: 13, tintColor: overdueTodoCount > 0 ? DANGER : C.text3 }} resizeMode="contain" />
+                </PulseView>
+                <Text style={{ fontSize: 12, color: C.text2 }} numberOfLines={1}>
+                  やること {todos.length}
+                  {overdueTodoCount > 0 ? (
+                    <Text style={{ color: DANGER, fontWeight: 'bold' }}>・期限切れ {overdueTodoCount}</Text>
+                  ) : null}
+                </Text>
+                <Text style={{ fontSize: 14, color: C.text3 }}>›</Text>
+              </TouchableOpacity>
+            ) : null}
           </View>
 
           {/* 分析への入口。小さな青リンクだと見落とされるので、
@@ -2768,26 +2788,6 @@ export default function App() {
               <Text style={{ fontSize: 15, color: C.text3 }}>›</Text>
             </TouchableOpacity>
           ) : null}
-
-          {/* やること。設定画面では出さない（設定は挙動を変える場所に寄せる） */}
-          {todos.length > 0 && activeTab !== 'settings' && (
-            <ReAnimated.View entering={FadeInDown.duration(260)} style={{ paddingHorizontal: 16, paddingBottom: 8 }}>
-              <TouchableOpacity
-                style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}
-                onPress={() => setTodoModalVisible(true)}>
-                <PulseView active={overdueTodoCount > 0}>
-                  <Image source={ICONS.checklist} style={{ width: 14, height: 14, tintColor: overdueTodoCount > 0 ? DANGER : C.text3 }} resizeMode="contain" />
-                </PulseView>
-                <Text style={{ fontSize: 13, color: C.text2, flex: 1 }} numberOfLines={1}>
-                  やること {todos.length}件
-                  {overdueTodoCount > 0 ? (
-                    <Text style={{ color: DANGER, fontWeight: 'bold' }}>・期限切れ {overdueTodoCount}</Text>
-                  ) : null}
-                </Text>
-                <Text style={{ fontSize: 15, color: C.text3 }}>›</Text>
-              </TouchableOpacity>
-            </ReAnimated.View>
-          )}
 
           {/* 広告（課金済みなら非表示） */}
           {!adFree && (
@@ -5558,7 +5558,8 @@ const styles = StyleSheet.create({
 
   upcomingCard: { flexDirection: 'row', alignItems: 'center', padding: 12, borderRadius: 10, marginBottom: 8 },
   todoArea: { flex: 1, paddingHorizontal: 16, paddingTop: 4, overflow: 'hidden' },
-  sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+  // 右下のFAB（52pt + 余白20pt）と重ならないよう右を空けておく
+  sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, paddingRight: 76 },
   subTitle: { fontSize: 15, fontWeight: 'bold', marginBottom: 10 },
   addButton: { backgroundColor: TDU_BLUE, paddingVertical: 6, paddingHorizontal: 12, borderRadius: 20 },
   addButtonText: { color: '#fff', fontSize: 11, fontWeight: 'bold' },
